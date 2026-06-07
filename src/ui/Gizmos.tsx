@@ -6,7 +6,7 @@ import { numParam } from "../field/registry";
 import { toLocal } from "../field/transform";
 import type { ShapeInstance } from "../field/types";
 import { v2, Vec2 } from "../field/vec";
-import { axisScaleFromDrag, rotationFromDrag } from "./picking";
+import { axisScaleFromDrag } from "./picking";
 import type { ToolMode } from "./tools";
 import { canvasToScreen, screenToCanvas, Viewport } from "./viewport";
 
@@ -42,7 +42,6 @@ function localToCanvas(s: ShapeInstance, cp: Vec2): Vec2 {
 }
 
 const PAD = 6; // local-px breathing room around the footprint
-const ROTATE_OFFSET = 16; // screen-px outward from each corner to the rotate dot
 
 export function Gizmos(props: {
   doc: FlatlandDoc;
@@ -67,10 +66,6 @@ export function Gizmos(props: {
     v2(bounds.min.x - pad, bounds.max.y + pad),
   ];
   const corners = cornersLocal.map((c) => canvasToScreen(viewport, localToCanvas(shape, c)));
-  const boxCenter = v2(
-    corners.reduce((a, c) => a + c.x, 0) / 4,
-    corners.reduce((a, c) => a + c.y, 0) / 4,
-  );
 
   const eventCanvasPoint = (e: React.PointerEvent): Vec2 => {
     const svg = (e.currentTarget as SVGGraphicsElement).ownerSVGElement!;
@@ -99,14 +94,6 @@ export function Gizmos(props: {
       dragState.current = null;
       store.endGesture();
     },
-  });
-
-  const rotate = handleProps((p) => {
-    const ds = dragState.current!;
-    const rot = rotationFromDrag(shape.transform.pos, ds.start, p, ds.rotation);
-    store.update((d) => updateShape(d, shape.id, (s) => ({ ...s, transform: { ...s.transform, rotation: rot } })), {
-      coalesce: `rot:${shape.id}`,
-    });
   });
 
   const scale = handleProps((p, e) => {
@@ -148,35 +135,20 @@ export function Gizmos(props: {
         strokeDasharray="4 3"
       />
       {handles
-        ? corners.map((c, i) => {
-            const dir = v2(c.x - boxCenter.x, c.y - boxCenter.y);
-            const len = Math.hypot(dir.x, dir.y) || 1;
-            const out = v2(c.x + (dir.x / len) * ROTATE_OFFSET, c.y + (dir.y / len) * ROTATE_OFFSET);
-            return (
-              <g key={i}>
-                {/* rotate: just outside the corner (photoshop-style) */}
-                <circle
-                  cx={out.x}
-                  cy={out.y}
-                  r={6}
-                  fill="transparent"
-                  stroke="var(--color-accent)"
-                  className="pointer-events-auto cursor-grab"
-                  {...rotate}
-                />
-                {/* scale: on the corner; per-axis, shift locks uniform */}
-                <rect
-                  x={c.x - 5}
-                  y={c.y - 5}
-                  width={10}
-                  height={10}
-                  fill="var(--color-accent)"
-                  className="pointer-events-auto cursor-nwse-resize"
-                  {...scale}
-                />
-              </g>
-            );
-          })
+        ? corners.map((c, i) => (
+            /* scale: on the corner; per-axis, shift locks uniform. No rotate handles —
+               godot select mode rotates via Ctrl-drag or the E tool, not corner widgets. */
+            <rect
+              key={i}
+              x={c.x - 5}
+              y={c.y - 5}
+              width={10}
+              height={10}
+              fill="var(--color-accent)"
+              className="pointer-events-auto cursor-nwse-resize"
+              {...scale}
+            />
+          ))
         : null}
       {handles && shape.controlPoints.map((cp, i) => {
         const sp = canvasToScreen(viewport, localToCanvas(shape, cp));
