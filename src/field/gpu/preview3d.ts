@@ -93,12 +93,11 @@ export interface Orbit {
   pitch: number;
   /** Distance as a multiple of the doc's larger dimension. */
   dist: number;
-  /** Target offset in the camera's screen plane, as a fraction of the doc's larger dim. */
-  panX: number;
-  panY: number;
+  /** Look-at point in world space (doc center is the origin). Panning moves this. */
+  target: { x: number; y: number; z: number };
 }
 
-export const DEFAULT_ORBIT: Orbit = { yaw: 0.65, pitch: 0.65, dist: 1.3, panX: 0, panY: 0 };
+export const DEFAULT_ORBIT: Orbit = { yaw: 0.65, pitch: 0.65, dist: 1.3, target: { x: 0, y: 0, z: 0 } };
 
 // -- minimal column-major mat4 (WebGPU clip space, depth 0..1) --
 
@@ -178,12 +177,20 @@ function orbitBasis(orbit: Orbit): { off: V3; right: V3; up: V3 } {
 }
 
 /** World position of the orbit/pan focal point (look-at target). */
-export function orbitTarget(orbit: Orbit, docW: number, docH: number): V3 {
-  const span = Math.max(docW, docH);
-  const { right, up } = orbitBasis(orbit);
-  const px = orbit.panX * span;
-  const py = orbit.panY * span;
-  return [right[0] * px + up[0] * py, right[1] * px + up[1] * py, right[2] * px + up[2] * py];
+export function orbitTarget(orbit: Orbit): V3 {
+  return [orbit.target.x, orbit.target.y, orbit.target.z];
+}
+
+/**
+ * Pan axes in world space for a drag. screen = camera right/up (slides in the view plane);
+ * ground = camera heading projected onto the floor (forward/back) + the same right (sideways).
+ */
+export function panAxes(orbit: Orbit): { right: V3; up: V3; groundFwd: V3 } {
+  const { off, right, up } = orbitBasis(orbit);
+  // camera forward projected to the ground plane (xz), normalized
+  const fwd: V3 = [-off[0], 0, -off[2]];
+  const fl = Math.hypot(fwd[0], fwd[2]) || 1;
+  return { right, up, groundFwd: [fwd[0] / fl, 0, fwd[2] / fl] };
 }
 
 /** MVP for an orbit camera; pan slides the look-at target in the camera's screen plane. */
@@ -191,7 +198,7 @@ export function orbitMvp(orbit: Orbit, docW: number, docH: number, aspect: numbe
   const span = Math.max(docW, docH);
   const radius = span * orbit.dist;
   const { off } = orbitBasis(orbit);
-  const target = orbitTarget(orbit, docW, docH);
+  const target = orbitTarget(orbit);
   const eye: V3 = [target[0] + off[0] * radius, target[1] + off[1] * radius, target[2] + off[2] * radius];
   const proj = perspective(Math.PI / 4, aspect, 1, radius * 10 + span);
   return mat4Mul(proj, lookAt(eye, target));

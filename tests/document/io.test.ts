@@ -37,6 +37,15 @@ function fakeHost(files: Record<string, Uint8Array>): Host {
     guardClose: () => {},
     onConfirmClose: () => {},
     respondClose: () => {},
+    openView3d: () => {},
+    closeView3d: () => {},
+    sendView3dState: () => {},
+    onView3dChildReady: () => () => {},
+    onView3dClosed: () => () => {},
+    onView3dRedocked: () => () => {},
+    view3dReady: () => {},
+    redockView3d: () => {},
+    onView3dState: () => () => {},
   };
 }
 

@@ -4,20 +4,19 @@ import type { DocumentStore, EditorState } from "../document/store";
 import { addShape, updateShape } from "../document/docOps";
 import { getShapeType } from "../field/registry";
 import { normalSigns } from "../document/schema";
-import { DEFAULT_ORBIT, Orbit, orbitMvp, orbitTarget, projectToScreen } from "../field/gpu/preview3d";
 import { v2, Vec2 } from "../field/vec";
 import { Gizmos } from "./Gizmos";
+import { getHost } from "./host";
 import { LightPad } from "./LightPad";
 import { usePersistentState } from "./persist";
 import { axisScaleFromDrag, constrainAxis, pickShape, rotationFromDrag, snapAngle } from "./picking";
 import { PreviewRenderer } from "./preview";
-import { Dock3D, DOCKED_SIZE, FloatGeom, HEADER_H, Preview3DPanel } from "./Preview3DPanel";
+import { Dock3D, DOCKED_SIZE, Preview3DPanel } from "./Preview3DPanel";
+import { build3DState } from "./view3d";
+import { use3DCamera } from "./use3DCamera";
 import { fitViewport, screenToCanvas, Viewport, zoomAt } from "./viewport";
 import type { ToolMode } from "./tools";
 import type { ViewState } from "./App";
-
-const ZOOM_MIN = 0.15;
-const ZOOM_MAX = 8;
 
 const ROTATE_SNAP = Math.PI / 12; // 15 deg, godot default rotation snap step
 
@@ -54,48 +53,11 @@ export function CanvasView(props: {
   const spaceRef = useRef(false);
   const [show3d, setShow3d] = usePersistentState("panel:3d", false);
   const [dock3d, setDock3d] = usePersistentState<Dock3D>("panel:3d:dock", "docked");
-  const [geom3d, setGeom3d] = usePersistentState<FloatGeom>("panel:3d:geom", { x: 80, y: 80, w: 420, h: 420 });
-  const [orbit, setOrbit] = useState<Orbit>({ ...DEFAULT_ORBIT });
   const canvas3dRef = useRef<HTMLCanvasElement>(null);
-
-  // 3D camera gestures. Document-level CAPTURE listeners for the gesture lifetime: element
-  // pointer-capture proved unreliable on the presenting WebGPU canvas, and bubble-phase
-  // listeners die at the panel's stopPropagation (react dispatches from #root, killing the
-  // native bubble before it reaches document) — capture fires first, immune to both.
-  const begin3dGesture = (e: React.PointerEvent, step: (dx: number, dy: number) => void): void => {
-    e.stopPropagation();
-    e.preventDefault();
-    const onMove = (ev: PointerEvent): void => step(ev.movementX, ev.movementY);
-    const onUp = (): void => {
-      document.removeEventListener("pointermove", onMove, true);
-      document.removeEventListener("pointerup", onUp, true);
-    };
-    document.addEventListener("pointermove", onMove, true);
-    document.addEventListener("pointerup", onUp, true);
-  };
-
-  // left = orbit; middle or shift+left = pan the look-at target across the screen plane
-  const on3dCanvasDown = (e: React.PointerEvent): void => {
-    const cssW = dock3d === "float" ? geom3d.w : DOCKED_SIZE;
-    if (e.button === 1 || e.shiftKey) {
-      begin3dGesture(e, (dx, dy) =>
-        setOrbit((o) => ({ ...o, panX: o.panX + (dx / cssW) * o.dist, panY: o.panY - (dy / cssW) * o.dist })),
-      );
-    } else if (e.button === 0) {
-      begin3dGesture(e, (dx, dy) =>
-        setOrbit((o) => ({
-          ...o,
-          yaw: o.yaw - dx * 0.01,
-          pitch: Math.min(1.45, Math.max(0.08, o.pitch + dy * 0.01)),
-        })),
-      );
-    }
-  };
-
-  const zoom3dBy = (factor: number): void =>
-    setOrbit((o) => ({ ...o, dist: Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, o.dist * factor)) }));
+  const cam3d = use3DCamera();
 
   const doc = state.doc;
+  const windowed = show3d && dock3d === "window";
 
   // init renderer + canvas sizing
   useEffect(() => {
@@ -154,34 +116,56 @@ export function CanvasView(props: {
     return () => window.removeEventListener("flatland-zoom", onZoom);
   }, [doc.source.width, doc.source.height]);
 
-  // demo/capture hook: ?p3d=1 opens the 3D panel
+  // demo/capture hook: ?p3d opens the 3D view (docked, or windowed with &win3d)
   useEffect(() => {
-    if (new URLSearchParams(location.search).has("p3d")) setShow3d(true);
+    const q = new URLSearchParams(location.search);
+    if (q.has("p3d")) {
+      setShow3d(true);
+      setDock3d(q.has("win3d") ? "window" : "docked");
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 3D panel canvas CSS size depends on dock mode / float geometry
-  const canvas3dW = dock3d === "float" ? geom3d.w : DOCKED_SIZE;
-  const canvas3dH = dock3d === "float" ? geom3d.h - HEADER_H : DOCKED_SIZE;
+  // focal crosshair for the docked mini-view (the pop-out window draws its own)
+  const focal3d = cam3d.focal(doc.source.width, doc.source.height, DOCKED_SIZE, DOCKED_SIZE);
 
-  // project the orbit/pan focal point to the 3D canvas for the crosshair overlay
-  const focal3d = projectToScreen(
-    orbitMvp(orbit, doc.source.width, doc.source.height, canvas3dW / Math.max(1, canvas3dH)),
-    orbitTarget(orbit, doc.source.width, doc.source.height),
-    canvas3dW,
-    canvas3dH,
-  );
-
-  // attach the 3D inspection canvas while the panel is open; resize backing store to match
+  // attach the embedded 3D canvas only while DOCKED (windowed = separate process renders it)
+  const docked = show3d && dock3d === "docked";
   useEffect(() => {
     const r = rendererRef.current;
     const canvas = canvas3dRef.current;
-    if (!ready || !r || !show3d || !canvas) return;
-    canvas.width = Math.max(1, Math.floor(canvas3dW * devicePixelRatio));
-    canvas.height = Math.max(1, Math.floor(canvas3dH * devicePixelRatio));
+    if (!ready || !r || !docked || !canvas) return;
+    canvas.width = Math.max(1, Math.floor(DOCKED_SIZE * devicePixelRatio));
+    canvas.height = Math.max(1, Math.floor(DOCKED_SIZE * devicePixelRatio));
     r.attach3D(canvas);
     return () => r.attach3D(null);
-  }, [ready, show3d, diffuseBytes, canvas3dW, canvas3dH]);
+  }, [ready, docked, diffuseBytes]);
+
+  // pop-out window lifecycle: open it while windowed, push state on every change, and
+  // listen for its close/dock so this window's toggle stays in sync
+  useEffect(() => {
+    if (!windowed) return;
+    getHost().openView3d();
+    return () => getHost().closeView3d();
+  }, [windowed]);
+
+  useEffect(() => {
+    if (!windowed) return;
+    const push = (): void => getHost().sendView3dState(build3DState(doc, diffuseBytes, view.lightDir));
+    push(); // initial + on any dep change
+    const offReady = getHost().onView3dChildReady(push); // re-push once the child mounts
+    return offReady;
+  }, [windowed, doc, diffuseBytes, view.lightDir]);
+
+  useEffect(() => {
+    const offClosed = getHost().onView3dClosed(() => setShow3d(false));
+    const offRedock = getHost().onView3dRedocked(() => setDock3d("docked"));
+    return () => {
+      offClosed();
+      offRedock();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // upload diffuse when it changes; refit the view to the (possibly new) doc dims
   useEffect(() => {
@@ -211,7 +195,7 @@ export function CanvasView(props: {
       lightDir: view.lightDir,
       heightRange: [-maxH, maxH],
       normalSigns: normalSigns(doc.normalDirs),
-      orbit3d: show3d ? orbit : null,
+      orbit3d: docked ? cam3d.orbit : null,
     });
   });
 
@@ -372,19 +356,16 @@ export function CanvasView(props: {
           <span className="text-sm uppercase tracking-[var(--tracking-tight)] text-fg-mid">light</span>
         </div>
       ) : null}
-      {diffuseBytes && show3d ? (
+      {diffuseBytes && docked ? (
         <Preview3DPanel
           canvasRef={canvas3dRef}
-          canvasW={canvas3dW}
-          canvasH={canvas3dH}
-          mode={dock3d}
-          geom={geom3d}
-          setGeom={setGeom3d}
-          setMode={setDock3d}
+          canvasW={DOCKED_SIZE}
+          canvasH={DOCKED_SIZE}
+          onPopOut={() => setDock3d("window")}
           onClose={() => setShow3d(false)}
-          onCanvasDown={on3dCanvasDown}
-          onWheel={(e) => zoom3dBy(e.deltaY < 0 ? 0.9 : 1.1)}
-          zoomBy={zoom3dBy}
+          onCanvasDown={cam3d.onCanvasDown(doc.source.width, doc.source.height, DOCKED_SIZE)}
+          onWheel={cam3d.onWheel}
+          zoomBy={cam3d.zoomBy}
           focal={focal3d}
         />
       ) : null}
