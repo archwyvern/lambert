@@ -31,6 +31,8 @@ export class PreviewRenderer {
   private compositePipeline!: GPURenderPipeline;
   private uniforms!: GPUBuffer;
   private sizeKey = "";
+  /** Last folded shape list (immutable from the store): reference equality = no re-fold. */
+  private lastShapes: ShapeInstance[] | null = null;
   private fieldTex: GPUTexture | null = null;
   private normalTex: GPUTexture | null = null;
   private diffuseTex: GPUTexture | null = null;
@@ -189,13 +191,20 @@ export class PreviewRenderer {
       this.normalTex?.destroy();
       this.fieldTex = null;
       this.normalTex = null;
+      this.lastShapes = null;
       this.sizeKey = key;
     }
-    const existing =
-      this.fieldTex && this.normalTex ? { fieldTex: this.fieldTex, normalTex: this.normalTex } : undefined;
-    const tex = this.gpu.renderToTextures(p.shapes, docW, docH, existing);
-    this.fieldTex = tex.fieldTex;
-    this.normalTex = tex.normalTex;
+    // orbit/light/zoom/mode changes must not re-fold the whole field — only re-run the
+    // cheap composite + 3D passes. The store's doc is immutable, so reference equality
+    // on the shape list is an exact dirty check.
+    if (!this.fieldTex || !this.normalTex || p.shapes !== this.lastShapes) {
+      const existing =
+        this.fieldTex && this.normalTex ? { fieldTex: this.fieldTex, normalTex: this.normalTex } : undefined;
+      const tex = this.gpu.renderToTextures(p.shapes, docW, docH, existing);
+      this.fieldTex = tex.fieldTex;
+      this.normalTex = tex.normalTex;
+      this.lastShapes = p.shapes;
+    }
     if (!this.diffuseTex) return;
 
     const dpr = this.canvas.width / (this.canvas.getBoundingClientRect().width || this.canvas.width) || 1;
