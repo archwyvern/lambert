@@ -1,31 +1,38 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { DEFAULT_ORBIT, Orbit, orbitMvp, orbitTarget, panAxes, projectToScreen } from "../field/gpu/preview3d";
 
 const ZOOM_MIN = 0.15;
 const ZOOM_MAX = 8;
 type V3 = [number, number, number];
 
-// document-level CAPTURE listeners for the gesture lifetime — see CanvasView's note: react
-// dispatch from #root + the panel's stopPropagation kills bubble-phase document listeners
-const beginGesture = (e: React.PointerEvent, step: (dx: number, dy: number) => void): void => {
-  e.stopPropagation();
-  e.preventDefault();
-  const onMove = (ev: PointerEvent): void => step(ev.movementX, ev.movementY);
-  const onUp = (): void => {
-    document.removeEventListener("pointermove", onMove, true);
-    document.removeEventListener("pointerup", onUp, true);
-  };
-  document.addEventListener("pointermove", onMove, true);
-  document.addEventListener("pointerup", onUp, true);
-};
-
 /**
- * Orbit camera state + gestures, shared by the docked mini-view and the pop-out window.
- * left = orbit; middle/shift+left = pan in the view plane; right (or L+R chord) = pan the
- * focal point across the ground (up/down = forward/back, sideways = sideways); wheel = dolly.
+ * Orbit camera state + gestures, shared by the docked mini-view and the full editor view.
+ * Buttons: right = rotate; left = pan in the view plane (left/right + up/down); left+right
+ * = pan across the ground (left/right + forward/back along the camera); middle = nothing;
+ * wheel = dolly.
  */
 export function use3DCamera() {
   const [orbit, setOrbit] = useState<Orbit>({ ...DEFAULT_ORBIT });
+  // cleanup of the in-flight gesture, so adding/removing a button cleanly upgrades it
+  // (e.g. left-drag pan -> press right -> becomes a ground pan) rather than stacking two
+  const activeUp = useRef<(() => void) | null>(null);
+
+  // document-level CAPTURE listeners for the gesture lifetime — see CanvasView's note: react
+  // dispatch from #root + the panel's stopPropagation kills bubble-phase document listeners
+  const beginGesture = (e: React.PointerEvent, step: (dx: number, dy: number) => void): void => {
+    e.stopPropagation();
+    e.preventDefault();
+    activeUp.current?.();
+    const onMove = (ev: PointerEvent): void => step(ev.movementX, ev.movementY);
+    const onUp = (): void => {
+      document.removeEventListener("pointermove", onMove, true);
+      document.removeEventListener("pointerup", onUp, true);
+      activeUp.current = null;
+    };
+    document.addEventListener("pointermove", onMove, true);
+    document.addEventListener("pointerup", onUp, true);
+    activeUp.current = onUp;
+  };
 
   const panTarget = (docW: number, docH: number, cssW: number, ax: V3, ay: V3, dx: number, dy: number): void => {
     const span = Math.max(docW, docH);
@@ -45,23 +52,23 @@ export function use3DCamera() {
   };
 
   const onCanvasDown = (docW: number, docH: number, cssW: number) => (e: React.PointerEvent): void => {
-    const ground = e.button === 2 || e.buttons === 3;
-    const screen = e.button === 1 || (e.button === 0 && e.shiftKey);
-    if (ground) {
-      const { right, groundFwd } = panAxes(orbit);
+    const b = e.buttons; // mask of buttons currently down: 1 = left, 2 = right, 4 = middle
+    if (b & 1 && b & 2) {
+      const { right, groundFwd } = panAxes(orbit); // left+right = ground pan (left/right + fwd/back)
       beginGesture(e, (dx, dy) => panTarget(docW, docH, cssW, right, groundFwd, dx, dy));
-    } else if (screen) {
-      const { right, up } = panAxes(orbit);
-      beginGesture(e, (dx, dy) => panTarget(docW, docH, cssW, right, up, dx, dy));
-    } else if (e.button === 0) {
+    } else if (b & 2) {
       beginGesture(e, (dx, dy) =>
         setOrbit((o) => ({
           ...o,
           yaw: o.yaw - dx * 0.01,
           pitch: Math.min(1.45, Math.max(0.08, o.pitch + dy * 0.01)),
         })),
-      );
+      ); // right = rotate
+    } else if (b & 1) {
+      const { right, up } = panAxes(orbit); // left = screen pan (left/right + up/down)
+      beginGesture(e, (dx, dy) => panTarget(docW, docH, cssW, right, up, dx, dy));
     }
+    // middle (b & 4 only) = nothing
   };
 
   const zoomBy = (factor: number): void =>
