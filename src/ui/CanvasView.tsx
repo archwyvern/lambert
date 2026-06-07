@@ -214,6 +214,30 @@ export function CanvasView(props: {
         : null;
     const effective: ToolMode = override ?? tool;
 
+    const beginMarquee = (): void => {
+      dragRef.current = {
+        kind: "marquee",
+        startCanvas: p,
+        current: p,
+        additive: e.shiftKey,
+        base: e.shiftKey ? selVerts : [],
+        moved: false,
+      };
+    };
+
+    if (tool === "vertex") {
+      // vertex tool: the body never grabs drags. Clicking a different shape picks it for
+      // editing; otherwise any drag is a marquee (works over the body too — solves interior
+      // verts). Clicking a vertex dot is handled by the gizmo (it stops propagation).
+      const hit = pickShape(doc.shapes, p);
+      if (hit && hit.id !== state.selectedId) {
+        store.select(hit.id);
+        return;
+      }
+      beginMarquee();
+      return;
+    }
+
     if (effective === "select") {
       // only the pointer picks by clicking; other tools select via the layer panel
       const hit = pickShape(doc.shapes, p);
@@ -225,14 +249,7 @@ export function CanvasView(props: {
       // empty space: begin a vertex marquee (a plain click with no drag still deselects on
       // up). Dragging from here box-selects the selected shape's vertices — never conflicts
       // with shape-move (that starts on the body) or vertex drag (that starts on a dot).
-      dragRef.current = {
-        kind: "marquee",
-        startCanvas: p,
-        current: p,
-        additive: e.shiftKey,
-        base: e.shiftKey ? selVerts : [],
-        moved: false,
-      };
+      beginMarquee();
       return;
     }
 
@@ -317,9 +334,10 @@ export function CanvasView(props: {
   const endDrag = (): void => {
     const drag = dragRef.current;
     if (drag?.kind === "marquee" && !drag.moved && !drag.additive) {
-      // a plain empty click (no box drawn) deselects the shape and its vertices
-      store.select(null);
+      // plain click (no box): vertex tool just clears the vertex selection (keeps the shape);
+      // select tool deselects the shape entirely
       setSelVerts([]);
+      if (tool !== "vertex") store.select(null);
     }
     setMarquee(null);
     dragRef.current = null;

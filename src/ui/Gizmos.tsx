@@ -45,7 +45,9 @@ export function Gizmos(props: {
   setSelVerts: (v: number[] | ((p: number[]) => number[])) => void;
 }): React.JSX.Element | null {
   const { doc, selectedId, viewport, store, tool, selVerts, setSelVerts } = props;
-  const handles = tool === "select" && !doc.shapes.find((s) => s.id === selectedId)?.locked;
+  const unlocked = !doc.shapes.find((s) => s.id === selectedId)?.locked;
+  const handles = tool === "select" && unlocked; // shape transform handles (corners/edges)
+  const vertHandles = (tool === "select" || tool === "vertex") && unlocked; // vertex dots + group
   const dragState = useRef<{
     start: Vec2;
     rotation: number;
@@ -278,7 +280,7 @@ export function Gizmos(props: {
           })
         : null}
       {/* group-scale frame: bbox of the selected vertices with corner handles (>=2 selected) */}
-      {handles && selVerts.length >= 2
+      {vertHandles && selVerts.length >= 2
         ? (() => {
             const sel = selVerts.map((i) => shape.controlPoints[i]!);
             const b = pointsBounds(sel);
@@ -310,7 +312,7 @@ export function Gizmos(props: {
             );
           })()
         : null}
-      {handles &&
+      {vertHandles &&
         shape.controlPoints.map((cp, i) => {
           const sp = canvasToScreen(viewport, localToCanvas(shape, cp));
           const selected = selVerts.includes(i);
