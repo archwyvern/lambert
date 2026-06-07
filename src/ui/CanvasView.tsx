@@ -416,7 +416,10 @@ export function CanvasView(props: {
         })()
       ) : null}
       {diffuseBytes && view.mode === "lit" ? (
-        <div className="absolute top-3 right-3 flex flex-col items-center gap-1 border border-border bg-surface2/90 p-2">
+        <div
+          className="absolute top-3 right-3 flex flex-col items-center gap-1 border border-border bg-surface2/90 p-2"
+          onPointerDown={(e) => e.stopPropagation()}
+        >
           <LightPad lightDir={view.lightDir} onChange={onLightChange} radius={34} />
           <span className="text-sm uppercase tracking-[var(--tracking-tight)] text-fg-mid">light</span>
         </div>
