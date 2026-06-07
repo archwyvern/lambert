@@ -186,6 +186,81 @@ export class GpuFieldRenderer {
     return { width, height, heightMap, mask, normals };
   }
 
+  /** Live-preview path: fold + normals at full resolution into GPU textures, no readback. */
+  renderToTextures(
+    shapes: ShapeInstance[],
+    width: number,
+    height: number,
+    existing?: { fieldTex: GPUTexture; normalTex: GPUTexture },
+  ): { fieldTex: GPUTexture; normalTex: GPUTexture } {
+    const d = this.device;
+    const fieldTex =
+      existing?.fieldTex ??
+      d.createTexture({
+        size: [width, height],
+        format: "rg32float",
+        usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING,
+      });
+    const normalTex =
+      existing?.normalTex ??
+      d.createTexture({
+        size: [width, height],
+        format: "rgba32float",
+        usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING,
+      });
+    const packed = packShapes(shapes);
+
+    const uniforms = d.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    const ub = new ArrayBuffer(32);
+    new Uint32Array(ub).set([width, height, packed.count], 0);
+    d.queue.writeBuffer(uniforms, 0, ub);
+    const recordsBuf = d.createBuffer({
+      size: packed.records.byteLength,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+    d.queue.writeBuffer(recordsBuf, 0, packed.records);
+    const pointsBuf = d.createBuffer({
+      size: packed.points.byteLength,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+    d.queue.writeBuffer(pointsBuf, 0, packed.points);
+    const normalUniforms = d.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    const nb = new ArrayBuffer(16);
+    new Uint32Array(nb).set([width, height], 0);
+    new Float32Array(nb)[2] = 1;
+    d.queue.writeBuffer(normalUniforms, 0, nb);
+
+    const foldBind = d.createBindGroup({
+      layout: this.foldPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: uniforms } },
+        { binding: 1, resource: { buffer: recordsBuf } },
+        { binding: 2, resource: { buffer: pointsBuf } },
+        { binding: 3, resource: fieldTex.createView() },
+      ],
+    });
+    const normalBind = d.createBindGroup({
+      layout: this.normalPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: normalUniforms } },
+        { binding: 1, resource: fieldTex.createView() },
+        { binding: 2, resource: normalTex.createView() },
+      ],
+    });
+    const enc = d.createCommandEncoder();
+    const pass = enc.beginComputePass();
+    pass.setPipeline(this.foldPipeline);
+    pass.setBindGroup(0, foldBind);
+    pass.dispatchWorkgroups(Math.ceil(width / 8), Math.ceil(height / 8));
+    pass.setPipeline(this.normalPipeline);
+    pass.setBindGroup(0, normalBind);
+    pass.dispatchWorkgroups(Math.ceil(width / 8), Math.ceil(height / 8));
+    pass.end();
+    d.queue.submit([enc.finish()]);
+    for (const b of [uniforms, recordsBuf, pointsBuf, normalUniforms]) b.destroy();
+    return { fieldTex, normalTex };
+  }
+
   /**
    * Full evaluate matching renderField() semantics: optional 2x supersample (shapes scaled,
    * slopeScale-corrected normals, shared CPU downsample), tiled so 8K x ss2 fits in VRAM.
