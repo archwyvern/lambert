@@ -183,14 +183,12 @@ export function orbitTarget(orbit: Orbit): V3 {
 
 /**
  * Pan axes in world space for a drag. screen = camera right/up (slides in the view plane);
- * ground = camera heading projected onto the floor (forward/back) + the same right (sideways).
+ * fwd = the true 3D view direction (where the lens points) — looking straight down, fwd is
+ * straight down, so a forward drag pushes the focal point downward.
  */
-export function panAxes(orbit: Orbit): { right: V3; up: V3; groundFwd: V3 } {
-  const { off, right, up } = orbitBasis(orbit);
-  // camera forward projected to the ground plane (xz), normalized
-  const fwd: V3 = [-off[0], 0, -off[2]];
-  const fl = Math.hypot(fwd[0], fwd[2]) || 1;
-  return { right, up, groundFwd: [fwd[0] / fl, 0, fwd[2] / fl] };
+export function panAxes(orbit: Orbit): { right: V3; up: V3; fwd: V3 } {
+  const { off, right, up } = orbitBasis(orbit); // off is a unit vector (eye = target + off*radius)
+  return { right, up, fwd: [-off[0], -off[1], -off[2]] };
 }
 
 /** MVP for an orbit camera; pan slides the look-at target in the camera's screen plane. */

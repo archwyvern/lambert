@@ -47,8 +47,8 @@ export function use3DCamera() {
       const dx = ev.movementX;
       const dy = ev.movementY;
       if (b & 1 && b & 2) {
-        const { right, groundFwd } = panAxes(orbitRef.current); // ground pan: sideways + fwd/back
-        panBy(docW, docH, cssW, right, groundFwd, dx, dy);
+        const { right, fwd } = panAxes(orbitRef.current); // dolly pan: sideways + along view dir
+        panBy(docW, docH, cssW, right, fwd, dx, dy);
       } else if (b & 2 || b & 4) {
         setOrbit((o) => ({
           ...o,
