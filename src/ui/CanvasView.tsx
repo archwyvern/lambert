@@ -52,8 +52,10 @@ export function CanvasView(props: {
   const [orbit, setOrbit] = useState<Orbit>({ yaw: 0.65, pitch: 0.65, dist: 1.3 });
   const canvas3dRef = useRef<HTMLCanvasElement>(null);
 
-  // document-level listeners for the gesture lifetime (the skyrat SpinSlider pattern):
-  // element pointer-capture proved unreliable on the presenting WebGPU canvas
+  // document-level CAPTURE listeners for the gesture lifetime: element pointer-capture
+  // proved unreliable on the presenting WebGPU canvas, and bubble-phase listeners die at
+  // the panel's stopPropagation (react dispatches from #root, killing the native bubble
+  // before it reaches document) — capture fires first, immune to both
   const beginOrbit = (e: React.PointerEvent): void => {
     if (e.button !== 0) return;
     e.stopPropagation();
@@ -66,11 +68,11 @@ export function CanvasView(props: {
       }));
     };
     const onUp = (): void => {
-      document.removeEventListener("pointermove", onMove);
-      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointermove", onMove, true);
+      document.removeEventListener("pointerup", onUp, true);
     };
-    document.addEventListener("pointermove", onMove);
-    document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointermove", onMove, true);
+    document.addEventListener("pointerup", onUp, true);
   };
 
   const doc = state.doc;
