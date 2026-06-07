@@ -49,14 +49,14 @@ test("axisScaleFromDrag: axes follow the shape's rotation", () => {
   expect(s.y).toBeCloseTo(1);
 });
 
-test("axisScaleFromDrag: near-zero start axis is left unchanged, flips allowed", () => {
+test("axisScaleFromDrag: near-zero start axis is left unchanged, never goes negative", () => {
   const onAxis = axisScaleFromDrag(v2(0, 0), 0, v2(10, 0), v2(20, 7), { x: 1, y: 1, z: 1 }, false);
   expect(onAxis.x).toBeCloseTo(2);
   expect(onAxis.y).toBe(1); // start y component ~0: leave alone, no explosion
-  const flipped = axisScaleFromDrag(v2(0, 0), 0, v2(10, 10), v2(-20, 10), { x: 1, y: 1, z: 1 }, false);
-  expect(flipped.x).toBeCloseTo(-2); // dragging across the pivot mirrors (photoshop-like)
+  const acrossPivot = axisScaleFromDrag(v2(0, 0), 0, v2(10, 10), v2(-20, 10), { x: 1, y: 1, z: 1 }, false);
+  expect(acrossPivot.x).toBeCloseTo(2); // dragging across the pivot clamps magnitude, no mirror
   const tiny = axisScaleFromDrag(v2(0, 0), 0, v2(10, 10), v2(0.01, 10), { x: 1, y: 1, z: 1 }, false);
-  expect(Math.abs(tiny.x)).toBeGreaterThanOrEqual(0.05);
+  expect(tiny.x).toBeGreaterThanOrEqual(0.05);
 });
 
 test("snapAngle snaps to step increments", () => {

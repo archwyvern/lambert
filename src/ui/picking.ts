@@ -33,13 +33,15 @@ export function constrainAxis(dx: number, dy: number): { dx: number; dy: number 
   return Math.abs(dx) >= Math.abs(dy) ? { dx, dy: 0 } : { dx: 0, dy };
 }
 
-const clampMag = (v: number): number => Math.sign(v || 1) * Math.max(0.05, Math.abs(v));
+// scale floors at a small positive value — negative scale would mirror the footprint and
+// invert normals (a footgun, not a feature); dragging across the pivot just clamps to ~0
+const clampMag = (v: number): number => Math.max(0.05, Math.abs(v));
 
 /**
  * Photoshop-like corner scaling around the shape's pivot. Unlocked (default): each local
- * footprint axis scales by the drag ratio along that axis — dragging across the pivot
- * mirrors; z (tallness) is untouched. uniform (shift held): the pivot-distance ratio
- * applies to all three axes, so a shape grown 2x also gets 2x taller.
+ * footprint axis scales by the drag ratio along that axis (never below ~0 — no mirroring);
+ * z (tallness) is untouched. uniform (shift held): the pivot-distance ratio applies to all
+ * three axes, so a shape grown 2x also gets 2x taller.
  */
 export function axisScaleFromDrag(
   pivot: Vec2,

@@ -7,7 +7,7 @@ import { Button, humanizeLabel, SectionLabel, SelectRow, SpinBox } from "./kit";
 
 const toDeg = (rad: number): number => Number(((rad * 180) / Math.PI).toFixed(1));
 const toRad = (deg: number): number => (deg * Math.PI) / 180;
-const safeScale = (v: number): number => Math.sign(v || 1) * Math.max(0.05, Math.abs(v));
+const safeScale = (v: number): number => Math.max(0.05, v); // no negative/mirrored scale
 
 export function Inspector(props: { store: DocumentStore; state: EditorState }): React.JSX.Element {
   const { store, state } = props;
