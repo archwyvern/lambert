@@ -98,13 +98,26 @@ export function Gizmos(props: {
     },
   });
 
-  const scale = handleProps((p, e) => {
-    const ds = dragState.current!;
-    const sc = axisScaleFromDrag(shape.transform.pos, ds.rotation, ds.start, p, ds.scale, e.shiftKey);
+  const applyScale = (sc: { x: number; y: number; z: number }): void => {
     store.update((d) => updateShape(d, shape.id, (s) => ({ ...s, transform: { ...s.transform, scale: sc } })), {
       coalesce: `scale:${shape.id}`,
     });
+  };
+
+  const scale = handleProps((p, e) => {
+    const ds = dragState.current!;
+    applyScale(axisScaleFromDrag(shape.transform.pos, ds.rotation, ds.start, p, ds.scale, e.shiftKey));
   });
+
+  /** Edge drag scales only the perpendicular axis (shift still goes uniform). */
+  const edgeScale = (axis: "x" | "y") =>
+    handleProps((p, e) => {
+      const ds = dragState.current!;
+      const sc = axisScaleFromDrag(shape.transform.pos, ds.rotation, ds.start, p, ds.scale, e.shiftKey);
+      applyScale(
+        e.shiftKey ? sc : axis === "x" ? { ...ds.scale, x: sc.x } : { ...ds.scale, y: sc.y },
+      );
+    });
 
   const vertexHandle = (i: number) =>
     handleProps((p) => {
@@ -136,6 +149,27 @@ export function Gizmos(props: {
         strokeWidth={1.5}
         strokeDasharray="4 3"
       />
+      {handles
+        ? corners.map((c, i) => {
+            /* invisible fat-stroke hit lines along the box edges: drag scales the
+               perpendicular axis only. Corners render after, so they win hit priority. */
+            const n = corners[(i + 1) % 4]!;
+            const horizontal = Math.abs(n.x - c.x) > Math.abs(n.y - c.y);
+            return (
+              <line
+                key={`edge${i}`}
+                x1={c.x}
+                y1={c.y}
+                x2={n.x}
+                y2={n.y}
+                stroke="transparent"
+                strokeWidth={10}
+                className={`pointer-events-auto ${horizontal ? "cursor-ns-resize" : "cursor-ew-resize"}`}
+                {...edgeScale(i % 2 === 0 ? "y" : "x")}
+              />
+            );
+          })
+        : null}
       {handles
         ? corners.map((c, i) => {
             /* scale: on the corner; per-axis, shift locks uniform. No rotate handles —
