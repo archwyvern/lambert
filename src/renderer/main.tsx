@@ -14,10 +14,6 @@ if (params.has("selftest")) {
     .catch((err: unknown) => {
       status.textContent = `harness FAILED: ${err instanceof Error ? `${err.message}\n${err.stack ?? ""}` : String(err)}`;
     });
-} else if (params.has("view3d")) {
-  void import("../ui/View3DWindow").then(({ View3DWindow }) => {
-    createRoot(document.getElementById("root")!).render(createElement(View3DWindow));
-  });
 } else {
   void import("../ui/App").then(({ App }) => {
     createRoot(document.getElementById("root")!).render(createElement(App));

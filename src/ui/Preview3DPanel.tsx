@@ -1,37 +1,51 @@
-import { AddRegular, DismissRegular, SubtractRegular, WindowRegular } from "@fluentui/react-icons";
+import {
+  AddRegular,
+  ArrowMaximizeRegular,
+  ArrowMinimizeRegular,
+  DismissRegular,
+  SubtractRegular,
+} from "@fluentui/react-icons";
 
-export type Dock3D = "docked" | "window";
+export type Dock3D = "docked" | "full";
 
-export const HEADER_H = 26;
+export const HEADER3D = 26;
 export const DOCKED_SIZE = 300;
 
 /**
- * Docked 3D inspection mini-view, pinned to the viewport corner. "Pop out" hands off to a
- * real second OS window (see View3DWindow); this panel only ever renders the docked state.
+ * 3D inspection view, sharing the editor's WebGPU canvas. "docked" = a fixed mini-view in
+ * the corner; "full" = an overlay filling the whole editor area (Space shrinks it back).
  */
 export function Preview3DPanel(props: {
+  mode: Dock3D;
   canvasRef: React.Ref<HTMLCanvasElement>;
   canvasW: number;
   canvasH: number;
-  onPopOut: () => void;
+  onToggleSize: () => void;
   onClose: () => void;
   onCanvasDown: (e: React.PointerEvent) => void;
   onWheel: (e: React.WheelEvent) => void;
   zoomBy: (factor: number) => void;
   focal: { x: number; y: number } | null;
 }): React.JSX.Element {
-  const { canvasRef, canvasW, canvasH, onPopOut, onClose, onCanvasDown, onWheel, zoomBy, focal } = props;
+  const { mode, canvasRef, canvasW, canvasH, onToggleSize, onClose, onCanvasDown, onWheel, zoomBy, focal } = props;
+  const full = mode === "full";
   const iconBtn = "flex h-[18px] w-[18px] items-center justify-center text-fg-mid hover:text-fg";
+
+  const outer: React.CSSProperties = full
+    ? { position: "absolute", inset: 0 }
+    : { position: "absolute", right: 12, bottom: 32, width: DOCKED_SIZE, height: DOCKED_SIZE + HEADER3D };
 
   return (
     <div
-      className="absolute right-3 bottom-8 flex flex-col border border-border bg-surface2/95 shadow-[var(--shadow-popover)]"
-      style={{ width: DOCKED_SIZE, height: DOCKED_SIZE + HEADER_H }}
+      className="flex flex-col border border-border bg-surface2/95 shadow-[var(--shadow-popover)]"
+      style={outer}
       onPointerDown={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
     >
       <div className="flex h-[26px] shrink-0 items-center justify-between border-b border-border px-2">
-        <span className="text-sm font-semibold uppercase tracking-wide text-fg-mid">3D</span>
+        <span className="text-sm font-semibold uppercase tracking-wide text-fg-mid">
+          3D{full ? <span className="ml-2 normal-case text-fg-mid opacity-70">— Space to shrink</span> : null}
+        </span>
         <div className="flex items-center gap-0.5">
           <button title="Zoom out" className={iconBtn} onClick={() => zoomBy(1.25)}>
             <SubtractRegular style={{ fontSize: 12 }} />
@@ -39,8 +53,8 @@ export function Preview3DPanel(props: {
           <button title="Zoom in" className={iconBtn} onClick={() => zoomBy(0.8)}>
             <AddRegular style={{ fontSize: 12 }} />
           </button>
-          <button title="Pop out to a window" className={iconBtn} onClick={onPopOut}>
-            <WindowRegular style={{ fontSize: 12 }} />
+          <button title={full ? "Shrink (Space)" : "Fill the editor"} className={iconBtn} onClick={onToggleSize}>
+            {full ? <ArrowMinimizeRegular style={{ fontSize: 12 }} /> : <ArrowMaximizeRegular style={{ fontSize: 12 }} />}
           </button>
           <button title="Close" className={iconBtn} onClick={onClose}>
             <DismissRegular style={{ fontSize: 12 }} />

@@ -23,8 +23,6 @@ app.commandLine.appendSwitch("use-angle", "vulkan");
 const selftest = process.argv.includes("--selftest");
 const captureIndex = process.argv.indexOf("--capture");
 const capturePath = captureIndex >= 0 ? process.argv[captureIndex + 1] : undefined;
-const capture3dIndex = process.argv.indexOf("--capture3d");
-const capture3dPath = capture3dIndex >= 0 ? process.argv[capture3dIndex + 1] : undefined;
 const queryIndex = process.argv.indexOf("--query");
 const extraQuery = queryIndex >= 0 ? process.argv[queryIndex + 1] : undefined;
 
@@ -175,77 +173,11 @@ app.whenReady().then(() => {
 
   const devUrl = process.env["ELECTRON_RENDERER_URL"];
   const query = selftest ? "?selftest=1" : extraQuery ? `?${extraQuery}` : "";
-  const loadInto = (w: BrowserWindow, q: string): void => {
-    if (devUrl) void w.loadURL(devUrl + q);
-    else void w.loadFile(path.join(import.meta.dirname, "../renderer/index.html"), { search: q });
-  };
-
-  // 3D pop-out: a child of the main window (always renders above it), its own renderer
-  // process and WebGPU device — it re-folds the field from doc + diffuse pushed over IPC.
-  let view3dWin: BrowserWindow | null = null;
-  let redocking = false;
-  ipcMain.on("view3d:open", () => {
-    if (view3dWin && !view3dWin.isDestroyed()) {
-      view3dWin.focus();
-      return;
-    }
-    redocking = false;
-    view3dWin = new BrowserWindow({
-      width: 520,
-      height: 560,
-      parent: win, // child window: stays in front of the main window, closes with it
-      title: "3D Preview",
-      backgroundColor: "#191a1b",
-      webPreferences: { preload: path.join(import.meta.dirname, "../preload/index.mjs"), sandbox: false },
-    });
-    view3dWin.setMenu(null);
-    const child = view3dWin;
-    child.on("closed", () => {
-      view3dWin = null;
-      // the main window may already be torn down (app quit); only notify if it survives
-      if (!win.isDestroyed()) win.webContents.send(redocking ? "view3d:redocked" : "view3d:closed");
-      redocking = false;
-    });
-    loadInto(child, "?view3d");
-    if (capture3dPath) {
-      child.webContents.once("did-finish-load", () => {
-        const started = Date.now();
-        const tick = async (): Promise<void> => {
-          if (child.isDestroyed()) return;
-          const ready = await child.webContents
-            .executeJavaScript("window.__flatlandFrameReady === true")
-            .catch(() => false);
-          if (!ready && Date.now() - started < 15000) {
-            setTimeout(() => void tick(), 400);
-            return;
-          }
-          setTimeout(async () => {
-            if (child.isDestroyed()) return;
-            const { writeFileSync } = await import("node:fs");
-            writeFileSync(capture3dPath, (await child.webContents.capturePage()).toPNG());
-            console.log(`captured3d ${capture3dPath}`);
-            app.exit(0);
-          }, 1500);
-        };
-        setTimeout(() => void tick(), 400);
-      });
-    }
-  });
-  ipcMain.on("view3d:close", () => {
-    if (view3dWin && !view3dWin.isDestroyed()) view3dWin.close();
-  });
-  ipcMain.on("view3d:redock", () => {
-    redocking = true;
-    if (view3dWin && !view3dWin.isDestroyed()) view3dWin.close();
-  });
-  ipcMain.on("view3d:ready", () => {
-    if (!win.isDestroyed()) win.webContents.send("view3d:child-ready");
-  });
-  ipcMain.on("view3d:state", (_e, state: unknown) => {
-    if (view3dWin && !view3dWin.isDestroyed()) view3dWin.webContents.send("view3d:state", state);
-  });
-
-  loadInto(win, query);
+  if (devUrl) {
+    void win.loadURL(devUrl + query);
+  } else {
+    void win.loadFile(path.join(import.meta.dirname, "../renderer/index.html"), { search: query });
+  }
 });
 
 app.on("window-all-closed", () => app.quit());
