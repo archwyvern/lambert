@@ -24,15 +24,23 @@ instances (type, transform, params, control points, combine op). See
 ## Development
 
 ```bash
-pnpm dev        # Electron harness: golden fixture, normal + lit views, mouse light
+pnpm dev        # the editor (open an image, place shapes, export NX)
 pnpm selftest   # GPU drift test vs the CPU reference (exit 0 = pass)
-pnpm test       # node suite (math, packing, codegen, exporters, golden)
+pnpm test       # node suite (math, packing, codegen, store, exporters, golden)
 ```
 
 The GPU fold is drift-tested against the CPU reference implementation in
 `src/field/evalCpu.ts` — see `src/renderer/selftest.ts`. Tolerances live in
-`src/field/compare.ts`. `electron . --capture out.png` screenshots the harness
-for automated visual checks.
+`src/field/compare.ts`.
+
+Harness routes (after `electron-vite build`):
+`electron . --query harness=1` (fixture normal+lit views),
+`electron . --query "demo=1&mode=lit&select=ridge"` (editor with the golden fixture),
+`--capture out.png` screenshots any route for automated visual checks.
+
+Editor basics: drag a shape from the library onto the canvas; click to select; drag to
+move; handles rotate/scale; white dots drag vertices; wheel zooms, shift/middle-drag pans;
+V cycles view modes; Ctrl+Z/Y undo/redo; Ctrl+D duplicates; Delete removes; arrows nudge.
 
 ## Exporters
 

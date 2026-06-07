@@ -45,6 +45,8 @@ export function App(): React.JSX.Element {
       setDiffuse({ bytes: encode({ width: w, height: h, data }), dir: null });
       const mode = q.get("mode");
       if (mode && (VIEW_MODES as string[]).includes(mode)) setView((v) => ({ ...v, mode: mode as ViewMode }));
+      const select = q.get("select");
+      if (select) store.select(doc.shapes.find((s) => s.id === select)?.id ?? doc.shapes[0]?.id ?? null);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
