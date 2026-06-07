@@ -95,3 +95,9 @@ test("store: reset clears history and selection", () => {
   expect(store.state.docPath).toBe("/p/other.flatland");
   expect(store.state.dirty).toBe(false);
 });
+
+test("store: reset can restore a dirty session", () => {
+  const store = mkStore();
+  store.reset(emptyDoc("other.png", 32, 32), null, { dirty: true });
+  expect(store.state.dirty).toBe(true);
+});

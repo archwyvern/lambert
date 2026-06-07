@@ -89,12 +89,12 @@ export class DocumentStore {
     this.emit({ doc: next, dirty: true, selectedId: this.survivingSelection(next) });
   }
 
-  /** Replace the whole document (open/new). Clears history. */
-  reset(doc: FlatlandDoc, docPath: string | null): void {
+  /** Replace the whole document (open/new/session-restore). Clears history. */
+  reset(doc: FlatlandDoc, docPath: string | null, opts: { dirty?: boolean } = {}): void {
     this.undoStack = [];
     this.redoStack = [];
     this.gestureKey = null;
-    this.emit({ doc, docPath, dirty: false, selectedId: null });
+    this.emit({ doc, docPath, dirty: opts.dirty ?? false, selectedId: null });
   }
 
   markSaved(path: string): void {

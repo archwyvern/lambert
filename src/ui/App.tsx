@@ -3,7 +3,9 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "reac
 import { DocumentStore } from "../document/store";
 import { duplicateShape, removeShape, updateShape } from "../document/docOps";
 import { emptyDoc } from "../document/schema";
-import { exportNx, openImageFlow, openProjectFlow, saveFlow } from "../document/io";
+import { diffusePathByStore, exportNx, openImageFlow, openProjectFlow, saveFlow } from "../document/io";
+import { dirname } from "../document/paths";
+import { buildSessionJson, parseSessionJson } from "../document/session";
 import { v2 } from "../field/vec";
 import { CanvasView } from "./CanvasView";
 import { getHost } from "./host";
@@ -45,15 +47,76 @@ export function App(): React.JSX.Element {
       })
       .catch((err: unknown) => notify(err instanceof Error ? err.message : String(err), "error"));
 
-  // close guard: main intercepts window close once we register; confirm when dirty
+  // latest view state for effects with narrower deps (close guard, session stash)
+  const viewRef = useRef(view);
+  viewRef.current = view;
+
+  const buildStash = (): string | null => {
+    const diffusePath = diffusePathByStore.get(store);
+    if (!diffusePath) return null; // demo or no document: nothing to remember
+    return buildSessionJson({
+      doc: store.state.doc,
+      docPath: store.state.docPath,
+      diffusePath,
+      dirty: store.state.dirty,
+      view: viewRef.current,
+    });
+  };
+
+  // close guard: main intercepts window close once we register; confirm when dirty,
+  // and flush the session stash before letting the window go
   useEffect(() => {
     const host = getHost();
     host.guardClose();
     host.onConfirmClose(() => {
       const ok = !store.state.dirty || confirm("Unsaved changes — close anyway?");
-      host.respondClose(ok);
+      const stash = ok ? buildStash() : null;
+      if (stash) void host.saveSession(stash).finally(() => host.respondClose(true));
+      else host.respondClose(ok);
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store]);
+
+  // session restore: reopen whatever was being worked on when the app last closed
+  useEffect(() => {
+    if (new URLSearchParams(location.search).has("demo")) return;
+    void (async () => {
+      try {
+        const json = await getHost().loadSession();
+        if (!json) return;
+        const session = parseSessionJson(json);
+        const bytes = await getHost().readFile(session.diffusePath);
+        store.reset(session.doc, session.docPath, { dirty: session.dirty });
+        diffusePathByStore.set(store, session.diffusePath);
+        setDiffuse({ bytes, dir: dirname(session.diffusePath) });
+        setView(session.view);
+        notify(`Restored ${session.docPath ?? session.diffusePath}`);
+      } catch {
+        // no session, corrupt session, or the diffuse moved: start fresh
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store]);
+
+  // continuous stash (doubles as crash recovery): debounce a second after any change
+  const stashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!diffuse) return;
+    const schedule = (): void => {
+      if (stashTimer.current) clearTimeout(stashTimer.current);
+      stashTimer.current = setTimeout(() => {
+        const stash = buildStash();
+        if (stash) void getHost().saveSession(stash);
+      }, 1000);
+    };
+    schedule();
+    const unsub = store.subscribe(schedule);
+    return () => {
+      unsub();
+      if (stashTimer.current) clearTimeout(stashTimer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store, diffuse, view]);
 
   // demo bootstrap for automated captures: ?demo=1&mode=<viewmode>&select=<shapeid>
   useEffect(() => {

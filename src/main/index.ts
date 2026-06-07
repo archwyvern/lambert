@@ -2,6 +2,10 @@ import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+// unpackaged dev runs report the app name as "Electron"; pin it so userData
+// (session memory) lands in ~/.config/flatland instead of the shared Electron dir
+app.setName("flatland");
+
 // WebGPU is default-on for Windows/macOS Chromium but flag-gated on Linux; we own the
 // flags, so force it everywhere. Must run before app is ready.
 app.commandLine.appendSwitch("enable-unsafe-webgpu");
@@ -29,6 +33,19 @@ app.whenReady().then(() => {
   ipcMain.handle("fs:read", async (_e, p: string) => new Uint8Array(await readFile(p)));
   ipcMain.handle("fs:write", async (_e, p: string, data: Uint8Array) => {
     await writeFile(p, data);
+  });
+
+  // session memory: last working state, stashed in userData (see src/document/session.ts)
+  const sessionPath = path.join(app.getPath("userData"), "session.json");
+  ipcMain.handle("session:load", async () => {
+    try {
+      return await readFile(sessionPath, "utf8");
+    } catch {
+      return null;
+    }
+  });
+  ipcMain.handle("session:save", async (_e, json: string) => {
+    await writeFile(sessionPath, json, "utf8");
   });
 
   const win = new BrowserWindow({

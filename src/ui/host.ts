@@ -8,6 +8,9 @@ export interface Host {
   saveDialog(opts: { title: string; defaultPath?: string; filters: FileFilter[] }): Promise<string | null>;
   readFile(path: string): Promise<Uint8Array>;
   writeFile(path: string, data: Uint8Array): Promise<void>;
+  /** Session memory in Electron userData; null when no prior session exists. */
+  loadSession(): Promise<string | null>;
+  saveSession(json: string): Promise<void>;
   /** Tell main this window has a close guard; close events then ask before closing. */
   guardClose(): void;
   onConfirmClose(cb: () => void): void;

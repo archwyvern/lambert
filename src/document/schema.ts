@@ -22,7 +22,7 @@ const shapeSchema = z.object({
   locked: z.boolean(),
 });
 
-const docSchema = z.object({
+export const docSchema = z.object({
   schemaVersion: z.literal(1),
   source: z.object({
     path: z.string().min(1),
