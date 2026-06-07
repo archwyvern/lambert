@@ -13,6 +13,12 @@ export const Groove = defineShapeType({
   },
   controlPoints: { kind: "polyline", min: 2, default: [v2(-32, 0), v2(32, 0)] },
   defaultCombine: "carve",
+  // params: 13=depth 14=width 15=profile(enum idx)
+  wgsl: /* wgsl */ `
+fn shape_groove(p: vec2f, base: u32) -> vec2f {
+  return shape_spine(p, base, rec(base, 13u), rec(base, 14u) * 0.5, u32(rec(base, 15u)));
+}
+`,
   eval(p, shape) {
     return spineEval(
       p,

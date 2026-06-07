@@ -56,5 +56,11 @@ export interface ShapeType {
   params: Record<string, ParamSpec>;
   controlPoints: ControlPointSpec;
   defaultCombine?: CombineOp;
+  /**
+   * WGSL mirror of eval: `fn shape_<id>(p: vec2f, base: u32) -> vec2f` returning
+   * (height, sd). Params read at base+13+declarationIndex; enums as option index.
+   * Optional so test-only types can skip it; buildFoldWgsl() skips types without it.
+   */
+  wgsl?: string;
   eval(pLocal: Vec2, shape: ShapeInstance): FieldSample;
 }
