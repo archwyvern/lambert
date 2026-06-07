@@ -23,6 +23,16 @@ export function rotationFromDrag(pivot: Vec2, startPoint: Vec2, currentPoint: Ve
   return startRotation + (a1 - a0);
 }
 
+/** Snap an angle to step increments (godot snap_angle, absolute flavor). */
+export function snapAngle(rad: number, stepRad: number): number {
+  return Math.round(rad / stepRad) * stepRad;
+}
+
+/** Godot move-mode axis constraint: lock the drag delta to its dominant axis. */
+export function constrainAxis(dx: number, dy: number): { dx: number; dy: number } {
+  return Math.abs(dx) >= Math.abs(dy) ? { dx, dy: 0 } : { dx: 0, dy };
+}
+
 const clampMag = (v: number): number => Math.sign(v || 1) * Math.max(0.05, Math.abs(v));
 
 /**

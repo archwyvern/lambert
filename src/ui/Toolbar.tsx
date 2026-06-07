@@ -1,88 +1,88 @@
 import {
-  ArrowExportRegular,
+  ArrowExpandRegular,
+  ArrowMoveRegular,
   ArrowRedoRegular,
+  ArrowRotateClockwiseRegular,
   ArrowUndoRegular,
-  FolderOpenRegular,
-  ImageRegular,
-  SaveEditRegular,
-  SaveRegular,
+  CursorRegular,
 } from "@fluentui/react-icons";
 import type { DocumentStore, EditorState } from "../document/store";
 import type { ViewState } from "./App";
-import { Button } from "./kit";
-import { LightPad } from "./LightPad";
+import { cx } from "./kit";
 import { VIEW_MODES, ViewMode } from "./preview";
-import { exportNx, openImageFlow, openProjectFlow, saveFlow } from "../document/io";
-import { getHost } from "./host";
+import type { ToolMode } from "./tools";
 
-const ICON = { fontSize: 14 } as const;
+const ICON = { fontSize: 16 } as const;
+
+const TOOLS: Array<{ id: ToolMode; key: string; label: string; Icon: typeof CursorRegular }> = [
+  { id: "select", key: "Q", label: "Select", Icon: CursorRegular },
+  { id: "move", key: "W", label: "Move", Icon: ArrowMoveRegular },
+  { id: "rotate", key: "E", label: "Rotate", Icon: ArrowRotateClockwiseRegular },
+  { id: "scale", key: "R", label: "Scale", Icon: ArrowExpandRegular },
+];
 
 export function Toolbar(props: {
   store: DocumentStore;
   state: EditorState;
   view: ViewState;
   setView: (fn: (v: ViewState) => ViewState) => void;
-  diffuse: { bytes: Uint8Array; dir: string | null } | null;
-  setDiffuse: (d: { bytes: Uint8Array; dir: string | null } | null) => void;
-  run: (p: Promise<unknown>) => void;
+  tool: ToolMode;
+  setTool: (t: ToolMode) => void;
 }): React.JSX.Element {
-  const { store, state, view, setView, diffuse, setDiffuse, run } = props;
+  const { store, state, view, setView, tool, setTool } = props;
   const pct = Math.round(view.opacity * 100);
 
   return (
-    <header className="flex h-control shrink-0 items-center gap-2 border-b border-border bg-surface2 px-3">
-      <span className="mr-1 shrink-0 text-md font-semibold uppercase tracking-[var(--tracking-label)] text-accent">
-        Flatland
-      </span>
-      <Button title="Open Image (Ctrl+O)" onClick={() => run(openImageFlow(getHost(), store, setDiffuse))}>
-        <ImageRegular style={ICON} />
-      </Button>
-      <Button title="Open Project (Ctrl+Shift+O)" onClick={() => run(openProjectFlow(getHost(), store, setDiffuse))}>
-        <FolderOpenRegular style={ICON} />
-      </Button>
-      <Button title="Save (Ctrl+S)" disabled={!diffuse} onClick={() => run(saveFlow(getHost(), store, false))}>
-        <SaveRegular style={ICON} />
-      </Button>
-      <Button title="Save As (Ctrl+Shift+S)" disabled={!diffuse} onClick={() => run(saveFlow(getHost(), store, true))}>
-        <SaveEditRegular style={ICON} />
-      </Button>
-      <Button
-        variant="primary"
-        title="Export the .nx.png next to the diffuse (Ctrl+E)"
-        disabled={!diffuse}
-        onClick={() => run(exportNx(getHost(), store))}
-      >
-        <ArrowExportRegular style={ICON} /> Export NX
-      </Button>
-      <span className="mx-2 min-w-0 flex-1 truncate text-sm text-fg-mid" title={state.docPath ?? undefined}>
+    <header className="flex h-control shrink-0 items-center gap-2 border-b border-border bg-bg px-2">
+      <span className="mr-1 shrink-0 px-1 text-base font-semibold text-fg">Flatland</span>
+
+      <div className="flex shrink-0 items-stretch border border-border">
+        {TOOLS.map(({ id, key, label, Icon }) => (
+          <button
+            key={id}
+            title={`${label} (${key})`}
+            onClick={() => setTool(id)}
+            className={cx(
+              "flex h-[26px] w-[30px] items-center justify-center border-r border-border last:border-r-0",
+              tool === id ? "bg-list-active text-fg" : "text-fg-mid hover:bg-hover hover:text-fg",
+            )}
+          >
+            <Icon style={ICON} />
+          </button>
+        ))}
+      </div>
+
+      <div className="flex shrink-0 items-stretch border border-border">
+        <button
+          title="Undo (Ctrl+Z)"
+          disabled={!store.canUndo}
+          onClick={() => store.undo()}
+          className="flex h-[26px] w-[30px] items-center justify-center border-r border-border text-fg-mid hover:bg-hover hover:text-fg disabled:opacity-40"
+        >
+          <ArrowUndoRegular style={ICON} />
+        </button>
+        <button
+          title="Redo (Ctrl+Y)"
+          disabled={!store.canRedo}
+          onClick={() => store.redo()}
+          className="flex h-[26px] w-[30px] items-center justify-center text-fg-mid hover:bg-hover hover:text-fg disabled:opacity-40"
+        >
+          <ArrowRedoRegular style={ICON} />
+        </button>
+      </div>
+
+      <span className="mx-2 min-w-0 flex-1 truncate text-base text-fg-mid" title={state.docPath ?? undefined}>
         {state.docPath ?? "unsaved"}
       </span>
       {state.dirty ? (
-        <span className="shrink-0 border border-accent-dim bg-accent-faint px-1.5 text-sm uppercase tracking-[var(--tracking-tight)] text-accent">
+        <span className="shrink-0 border border-accent/50 bg-accent-dim px-1.5 py-0.5 text-sm text-accent">
           unsaved
         </span>
       ) : null}
+
       <div className="ml-2 flex shrink-0 items-center gap-2">
-        <Button disabled={!store.canUndo} onClick={() => store.undo()} title="Undo (Ctrl+Z)">
-          <ArrowUndoRegular style={ICON} />
-        </Button>
-        <Button disabled={!store.canRedo} onClick={() => store.redo()} title="Redo (Ctrl+Y)">
-          <ArrowRedoRegular style={ICON} />
-        </Button>
-        <select
-          className="h-[22px] shrink-0 cursor-pointer border border-border bg-surface px-1 text-sm uppercase tracking-[var(--tracking-tight)] text-fg outline-none"
-          value={view.mode}
-          onChange={(e) => setView((v) => ({ ...v, mode: e.target.value as ViewMode }))}
-          title="View mode (V cycles)"
-        >
-          {VIEW_MODES.map((m) => (
-            <option key={m} value={m}>
-              {m}
-            </option>
-          ))}
-        </select>
         {view.mode === "height" || view.mode === "normal" ? (
-          <label className="flex shrink-0 items-center gap-2 text-sm uppercase tracking-[var(--tracking-tight)] text-fg-mid">
+          <label className="flex shrink-0 items-center gap-2 text-sm text-fg-mid">
             opacity
             <input
               type="range"
@@ -96,10 +96,26 @@ export function Toolbar(props: {
                 background: `linear-gradient(to right, var(--color-accent) ${pct}%, var(--color-border) ${pct}%)`,
               }}
             />
-            <span className="w-9 text-right tabular-nums text-fg">{pct}%</span>
+            <span className="w-9 text-right font-mono tabular-nums text-fg">{pct}%</span>
           </label>
         ) : null}
-        <LightPad lightDir={view.lightDir} onChange={(d) => setView((v) => ({ ...v, lightDir: d }))} />
+        <div className="flex shrink-0 items-stretch border border-border" role="tablist">
+          {VIEW_MODES.map((m: ViewMode) => (
+            <button
+              key={m}
+              role="tab"
+              aria-selected={view.mode === m}
+              title="View mode (V cycles)"
+              onClick={() => setView((v) => ({ ...v, mode: m }))}
+              className={cx(
+                "h-[26px] border-r border-border px-3 text-base capitalize last:border-r-0",
+                view.mode === m ? "bg-list-active text-fg" : "text-fg-mid hover:bg-hover hover:text-fg",
+              )}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
       </div>
     </header>
   );

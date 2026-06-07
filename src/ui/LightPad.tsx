@@ -2,9 +2,10 @@
 export function LightPad(props: {
   lightDir: [number, number, number];
   onChange: (dir: [number, number, number]) => void;
+  radius?: number;
 }): React.JSX.Element {
-  const { lightDir, onChange } = props;
-  const R = 14;
+  const { lightDir, onChange, radius = 14 } = props;
+  const R = radius;
   const cx = R + 2 + lightDir[0] * R;
   const cy = R + 2 + lightDir[1] * R;
   const fromEvent = (e: React.PointerEvent): void => {
@@ -28,9 +29,9 @@ export function LightPad(props: {
         if (e.buttons) fromEvent(e);
       }}
     >
-      <circle cx={R + 2} cy={R + 2} r={R} fill="var(--color-surface)" stroke="var(--color-border-light)" />
-      <circle cx={R + 2} cy={R + 2} r={1.5} fill="var(--color-border-light)" />
-      <circle cx={cx} cy={cy} r={4} fill="var(--color-accent)" />
+      <circle cx={R + 2} cy={R + 2} r={R} fill="var(--color-surface2)" stroke="var(--color-border-light)" />
+      <circle cx={R + 2} cy={R + 2} r={2} fill="var(--color-border-light)" />
+      <circle cx={cx} cy={cy} r={Math.max(4, R / 6)} fill="var(--color-accent)" />
     </svg>
   );
 }

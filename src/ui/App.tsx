@@ -15,6 +15,7 @@ import { Toast, ToastState } from "./kit";
 import { Toolbar } from "./Toolbar";
 import type { ViewMode } from "./preview";
 import { VIEW_MODES } from "./preview";
+import { TOOL_KEYS, ToolMode } from "./tools";
 
 export interface ViewState {
   mode: ViewMode;
@@ -30,6 +31,7 @@ export function App(): React.JSX.Element {
     () => store.state,
   );
   const [view, setView] = useState<ViewState>({ mode: "lit", opacity: 1, lightDir: [-0.5, -0.5, 0.7] });
+  const [tool, setTool] = useState<ToolMode>("select");
   const [diffuse, setDiffuse] = useState<{ bytes: Uint8Array; dir: string | null } | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -47,9 +49,11 @@ export function App(): React.JSX.Element {
       })
       .catch((err: unknown) => notify(err instanceof Error ? err.message : String(err), "error"));
 
-  // latest view state for effects with narrower deps (close guard, session stash)
+  // latest values for the stable menu/close listeners
   const viewRef = useRef(view);
   viewRef.current = view;
+  const diffuseRef = useRef(diffuse);
+  diffuseRef.current = diffuse;
 
   const buildStash = (): string | null => {
     const diffusePath = diffusePathByStore.get(store);
@@ -62,6 +66,46 @@ export function App(): React.JSX.Element {
       view: viewRef.current,
     });
   };
+
+  // application-menu actions (accelerators live in the menu, not in keydown)
+  useEffect(() => {
+    getHost().onMenuAction((action) => {
+      const id = store.state.selectedId;
+      switch (action) {
+        case "open-image":
+          return run(openImageFlow(getHost(), store, setDiffuse));
+        case "open-project":
+          return run(openProjectFlow(getHost(), store, setDiffuse));
+        case "save":
+          return diffuseRef.current ? run(saveFlow(getHost(), store, false)) : undefined;
+        case "save-as":
+          return diffuseRef.current ? run(saveFlow(getHost(), store, true)) : undefined;
+        case "export-nx":
+          return diffuseRef.current ? run(exportNx(getHost(), store)) : undefined;
+        case "undo":
+          return store.undo();
+        case "redo":
+          return store.redo();
+        case "duplicate":
+          if (id) {
+            store.update((d) => duplicateShape(d, id));
+            store.endGesture();
+          }
+          return;
+        case "delete":
+          if (id) {
+            store.update((d) => removeShape(d, id));
+            store.endGesture();
+          }
+          return;
+        case "zoom-fit":
+        case "zoom-100":
+          window.dispatchEvent(new CustomEvent("flatland-zoom", { detail: action }));
+          return;
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store]);
 
   // close guard: main intercepts window close once we register; confirm when dirty,
   // and flush the session stash before letting the window go
@@ -139,45 +183,25 @@ export function App(): React.JSX.Element {
       if (mode && (VIEW_MODES as string[]).includes(mode)) setView((v) => ({ ...v, mode: mode as ViewMode }));
       const select = q.get("select");
       if (select) store.select(doc.shapes.find((s) => s.id === select)?.id ?? doc.shapes[0]?.id ?? null);
+      const t = q.get("tool");
+      if (t && t in TOOL_KEYS) setTool(TOOL_KEYS[t]!);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // editor keys (file/undo accelerators are owned by the application menu)
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      // file ops fire regardless of focus; editing keys defer to form controls
-      if (e.ctrlKey || e.metaKey) {
-        const k = e.key.toLowerCase();
-        if (k === "s") {
-          e.preventDefault();
-          if (diffuse) run(saveFlow(getHost(), store, e.shiftKey));
-          return;
-        }
-        if (k === "o") {
-          e.preventDefault();
-          run(e.shiftKey ? openProjectFlow(getHost(), store, setDiffuse) : openImageFlow(getHost(), store, setDiffuse));
-          return;
-        }
-        if (k === "e") {
-          e.preventDefault();
-          if (diffuse) run(exportNx(getHost(), store));
-          return;
-        }
-      }
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       const id = store.state.selectedId;
-      if (e.ctrlKey && e.key.toLowerCase() === "z") {
-        if (e.shiftKey) store.redo();
-        else store.undo();
-      } else if (e.ctrlKey && e.key.toLowerCase() === "y") store.redo();
-      else if (e.ctrlKey && e.key.toLowerCase() === "d" && id) {
-        e.preventDefault();
-        store.update((d) => duplicateShape(d, id));
-        store.endGesture();
+      const key = e.key.toLowerCase();
+      if (key in TOOL_KEYS) {
+        setTool(TOOL_KEYS[key]!);
       } else if ((e.key === "Delete" || e.key === "Backspace") && id) {
         store.update((d) => removeShape(d, id));
         store.endGesture();
-      } else if (e.key.toLowerCase() === "v" && !e.ctrlKey) {
+      } else if (key === "v") {
         setView((s) => ({ ...s, mode: VIEW_MODES[(VIEW_MODES.indexOf(s.mode) + 1) % VIEW_MODES.length]! }));
       } else if (e.key.startsWith("Arrow") && id) {
         e.preventDefault();
@@ -196,28 +220,26 @@ export function App(): React.JSX.Element {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [store, diffuse]);
+  }, [store]);
 
   return (
-    <div className="flex h-screen flex-col bg-bg text-sm text-fg">
-      <Toolbar
-        store={store}
-        state={state}
-        view={view}
-        setView={setView}
-        diffuse={diffuse}
-        setDiffuse={setDiffuse}
-        run={run}
-      />
+    <div className="flex h-screen flex-col bg-bg text-base text-fg">
+      <Toolbar store={store} state={state} view={view} setView={setView} tool={tool} setTool={setTool} />
       <div className="flex min-h-0 flex-1">
-        <aside className="w-48 overflow-y-auto border-r border-border bg-surface p-3">
+        <aside className="w-48 overflow-y-auto border-r border-border bg-bg p-3">
           <Library enabled={!!diffuse} />
         </aside>
         <main className="relative min-w-0 flex-1 bg-[var(--color-viewport-bg)]">
-          <CanvasView store={store} state={state} view={view} diffuseBytes={diffuse?.bytes ?? null} />
+          <CanvasView
+            store={store}
+            state={state}
+            view={view}
+            tool={tool}
+            diffuseBytes={diffuse?.bytes ?? null}
+            onLightChange={(d) => setView((v) => ({ ...v, lightDir: d }))}
+          />
         </main>
-        <aside className="w-72 overflow-y-auto border-l border-border bg-surface p-3">
+        <aside className="w-72 overflow-y-auto border-l border-border bg-bg p-3">
           <Inspector store={store} state={state} />
         </aside>
       </div>

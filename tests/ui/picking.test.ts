@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import "../../src/field/shapes";
 import { createShapeInstance } from "../../src/field/registry";
-import { axisScaleFromDrag, pickShape, rotationFromDrag } from "../../src/ui/picking";
+import { axisScaleFromDrag, constrainAxis, pickShape, rotationFromDrag, snapAngle } from "../../src/ui/picking";
 import { toLocal } from "../../src/field/transform";
 import { v2 } from "../../src/field/vec";
 
@@ -55,6 +55,17 @@ test("axisScaleFromDrag: near-zero start axis is left unchanged, flips allowed",
   expect(flipped.x).toBeCloseTo(-2); // dragging across the pivot mirrors (photoshop-like)
   const tiny = axisScaleFromDrag(v2(0, 0), 0, v2(10, 10), v2(0.01, 10), { x: 1, y: 1 }, false);
   expect(Math.abs(tiny.x)).toBeGreaterThanOrEqual(0.05);
+});
+
+test("snapAngle snaps to step increments", () => {
+  const step = Math.PI / 12; // 15 deg
+  expect(snapAngle(0.27, step)).toBeCloseTo(step);
+  expect(snapAngle(-0.4, step)).toBeCloseTo(-2 * step);
+});
+
+test("constrainAxis locks to the dominant axis (godot move-mode shift)", () => {
+  expect(constrainAxis(10, 3)).toEqual({ dx: 10, dy: 0 });
+  expect(constrainAxis(2, -7)).toEqual({ dx: 0, dy: -7 });
 });
 
 test("gizmo forward transform must invert toLocal (scale THEN rotate)", () => {

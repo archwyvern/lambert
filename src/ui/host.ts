@@ -11,6 +11,8 @@ export interface Host {
   /** Session memory in Electron userData; null when no prior session exists. */
   loadSession(): Promise<string | null>;
   saveSession(json: string): Promise<void>;
+  /** Application-menu actions (open-image/save/export-nx/undo/zoom-fit/...). */
+  onMenuAction(cb: (action: string) => void): void;
   /** Tell main this window has a close guard; close events then ask before closing. */
   guardClose(): void;
   onConfirmClose(cb: () => void): void;

@@ -31,9 +31,7 @@ export function Inspector(props: { store: DocumentStore; state: EditorState }): 
 
   return (
     <div>
-      <div className="mb-2 text-md font-semibold uppercase tracking-[var(--tracking-label)] text-accent">
-        {type.name}
-      </div>
+      <div className="mb-2 border-b border-border pb-1.5 text-md font-semibold text-fg">{type.name}</div>
       <SectionLabel>Parameters</SectionLabel>
       {Object.entries(type.params).map(([key, spec]) =>
         spec.type === "enum" ? (

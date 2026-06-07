@@ -7,6 +7,7 @@ import { toLocal } from "../field/transform";
 import type { ShapeInstance } from "../field/types";
 import { v2, Vec2 } from "../field/vec";
 import { axisScaleFromDrag, rotationFromDrag } from "./picking";
+import type { ToolMode } from "./tools";
 import { canvasToScreen, screenToCanvas, Viewport } from "./viewport";
 
 /** Shape-local footprint bounds (control-point extents; dome from its radii). */
@@ -48,8 +49,11 @@ export function Gizmos(props: {
   selectedId: string | null;
   viewport: Viewport;
   store: DocumentStore;
+  /** Full handle set only in select mode; explicit godot tools show the frame alone. */
+  tool: ToolMode;
 }): React.JSX.Element | null {
-  const { doc, selectedId, viewport, store } = props;
+  const { doc, selectedId, viewport, store, tool } = props;
+  const handles = tool === "select";
   const dragState = useRef<{ start: Vec2; rotation: number; scale: { x: number; y: number } } | null>(null);
   const shape = doc.shapes.find((s) => s.id === selectedId);
   if (!shape) return null;
@@ -143,36 +147,38 @@ export function Gizmos(props: {
         strokeWidth={1.5}
         strokeDasharray="4 3"
       />
-      {corners.map((c, i) => {
-        const dir = v2(c.x - boxCenter.x, c.y - boxCenter.y);
-        const len = Math.hypot(dir.x, dir.y) || 1;
-        const out = v2(c.x + (dir.x / len) * ROTATE_OFFSET, c.y + (dir.y / len) * ROTATE_OFFSET);
-        return (
-          <g key={i}>
-            {/* rotate: just outside the corner (photoshop-style) */}
-            <circle
-              cx={out.x}
-              cy={out.y}
-              r={6}
-              fill="transparent"
-              stroke="var(--color-accent)"
-              className="pointer-events-auto cursor-grab"
-              {...rotate}
-            />
-            {/* scale: on the corner; per-axis, shift locks uniform */}
-            <rect
-              x={c.x - 5}
-              y={c.y - 5}
-              width={10}
-              height={10}
-              fill="var(--color-accent)"
-              className="pointer-events-auto cursor-nwse-resize"
-              {...scale}
-            />
-          </g>
-        );
-      })}
-      {shape.controlPoints.map((cp, i) => {
+      {handles
+        ? corners.map((c, i) => {
+            const dir = v2(c.x - boxCenter.x, c.y - boxCenter.y);
+            const len = Math.hypot(dir.x, dir.y) || 1;
+            const out = v2(c.x + (dir.x / len) * ROTATE_OFFSET, c.y + (dir.y / len) * ROTATE_OFFSET);
+            return (
+              <g key={i}>
+                {/* rotate: just outside the corner (photoshop-style) */}
+                <circle
+                  cx={out.x}
+                  cy={out.y}
+                  r={6}
+                  fill="transparent"
+                  stroke="var(--color-accent)"
+                  className="pointer-events-auto cursor-grab"
+                  {...rotate}
+                />
+                {/* scale: on the corner; per-axis, shift locks uniform */}
+                <rect
+                  x={c.x - 5}
+                  y={c.y - 5}
+                  width={10}
+                  height={10}
+                  fill="var(--color-accent)"
+                  className="pointer-events-auto cursor-nwse-resize"
+                  {...scale}
+                />
+              </g>
+            );
+          })
+        : null}
+      {handles && shape.controlPoints.map((cp, i) => {
         const sp = canvasToScreen(viewport, localToCanvas(shape, cp));
         return (
           <circle

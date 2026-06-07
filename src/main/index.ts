@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu } from "electron";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -49,8 +49,8 @@ app.whenReady().then(() => {
   });
 
   const win = new BrowserWindow({
-    width: 1100,
-    height: 640,
+    width: 1280,
+    height: 760,
     show: !selftest,
     webPreferences: {
       preload: path.join(import.meta.dirname, "../preload/index.mjs"),
@@ -59,6 +59,47 @@ app.whenReady().then(() => {
       sandbox: false,
     },
   });
+
+  // application menu: file/edit actions route to the renderer as menu:action events;
+  // accelerators live here so they are real OS-level shortcuts
+  const send = (action: string) => () => win.webContents.send("menu:action", action);
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      {
+        label: "File",
+        submenu: [
+          { label: "Open Image…", accelerator: "CmdOrCtrl+O", click: send("open-image") },
+          { label: "Open Project…", accelerator: "CmdOrCtrl+Shift+O", click: send("open-project") },
+          { type: "separator" },
+          { label: "Save", accelerator: "CmdOrCtrl+S", click: send("save") },
+          { label: "Save As…", accelerator: "CmdOrCtrl+Shift+S", click: send("save-as") },
+          { type: "separator" },
+          { label: "Export NX", accelerator: "CmdOrCtrl+E", click: send("export-nx") },
+          { type: "separator" },
+          { role: "quit" },
+        ],
+      },
+      {
+        label: "Edit",
+        submenu: [
+          { label: "Undo", accelerator: "CmdOrCtrl+Z", click: send("undo") },
+          { label: "Redo", accelerator: "CmdOrCtrl+Y", click: send("redo") },
+          { type: "separator" },
+          { label: "Duplicate", accelerator: "CmdOrCtrl+D", click: send("duplicate") },
+          { label: "Delete", click: send("delete") }, // no accelerator: Del must stay safe in inputs
+        ],
+      },
+      {
+        label: "View",
+        submenu: [
+          { label: "Fit", accelerator: "CmdOrCtrl+0", click: send("zoom-fit") },
+          { label: "100%", accelerator: "CmdOrCtrl+1", click: send("zoom-100") },
+          { type: "separator" },
+          { role: "toggleDevTools" },
+        ],
+      },
+    ]),
+  );
 
   // unsaved-changes guard: only armed once the editor renderer registers, so the
   // harness/selftest/capture routes keep closing freely

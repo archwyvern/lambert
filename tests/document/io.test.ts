@@ -33,6 +33,7 @@ function fakeHost(files: Record<string, Uint8Array>): Host {
     },
     loadSession: () => Promise.resolve(null),
     saveSession: () => Promise.resolve(),
+    onMenuAction: () => {},
     guardClose: () => {},
     onConfirmClose: () => {},
     respondClose: () => {},

@@ -38,9 +38,13 @@ Harness routes (after `electron-vite build`):
 `electron . --query "demo=1&mode=lit&select=ridge"` (editor with the golden fixture),
 `--capture out.png` screenshots any route for automated visual checks.
 
-Editor basics: drag a shape from the library onto the canvas; click to select; drag to
-move; handles rotate/scale; white dots drag vertices; wheel zooms, shift/middle-drag pans;
-V cycles view modes; Ctrl+Z/Y undo/redo; Ctrl+D duplicates; Delete removes; arrows nudge.
+Editor basics (godot-style tools): Q select, W move, E rotate, R scale. Select mode has
+the full gizmo (corner rotate/scale handles, vertex dots) plus godot's drag overrides
+(Alt = move, Ctrl = rotate, Ctrl+Alt = scale); explicit modes drag anywhere on the
+selection. Shift = axis-lock while moving, 15-degree snap while rotating, uniform while
+scaling. Wheel zooms, middle-drag or Space-drag pans, V cycles view modes, arrows nudge,
+Delete removes. File/Edit/View live in the application menu (Ctrl+O/S/E, Ctrl+Z/Y/D,
+Ctrl+0 fit, Ctrl+1 100%). The light pad sits in the viewport corner in lit view.
 
 ## Shape icons
 
