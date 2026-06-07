@@ -142,7 +142,6 @@ export function CanvasView(props: {
     }
     if (e.button !== 0) return;
     const p = toCanvasPoint(e);
-    const hit = pickShape(doc.shapes, p);
 
     // godot select-mode modifier overrides: alt=move, ctrl=rotate, ctrl+alt=scale
     const override =
@@ -158,14 +157,15 @@ export function CanvasView(props: {
     const effective: ToolMode = override ?? tool;
 
     if (effective === "select") {
+      // only the pointer picks by clicking; other tools select via the layer panel
+      const hit = pickShape(doc.shapes, p);
       store.select(hit?.id ?? null);
       if (hit) dragRef.current = { kind: "move", id: hit.id, startCanvas: p, startPos: hit.transform.pos };
       return;
     }
 
-    // explicit tools: clicking a shape re-targets selection; empty space keeps it
-    if (hit) store.select(hit.id);
-    const target = hit ?? doc.shapes.find((s) => s.id === state.selectedId) ?? null;
+    // explicit tools operate on the current selection only, wherever you grab
+    const target = doc.shapes.find((s) => s.id === state.selectedId) ?? null;
     if (!target) return;
     if (effective === "move") {
       dragRef.current = { kind: "move", id: target.id, startCanvas: p, startPos: target.transform.pos };

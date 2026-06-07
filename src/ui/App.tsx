@@ -10,6 +10,7 @@ import { v2 } from "../field/vec";
 import { CanvasView } from "./CanvasView";
 import { getHost } from "./host";
 import { Inspector } from "./Inspector";
+import { Layers } from "./Layers";
 import { Library } from "./Library";
 import { Toast, ToastState } from "./kit";
 import { Toolbar } from "./Toolbar";
@@ -226,8 +227,9 @@ export function App(): React.JSX.Element {
     <div className="flex h-screen flex-col bg-bg text-base text-fg">
       <Toolbar store={store} state={state} view={view} setView={setView} tool={tool} setTool={setTool} />
       <div className="flex min-h-0 flex-1">
-        <aside className="w-48 overflow-y-auto border-r border-border bg-bg p-3">
+        <aside className="flex w-52 flex-col gap-4 border-r border-border bg-bg p-3">
           <Library enabled={!!diffuse} />
+          <Layers store={store} state={state} />
         </aside>
         <main className="relative min-w-0 flex-1 bg-[var(--color-viewport-bg)]">
           <CanvasView
