@@ -5,7 +5,7 @@ import { buildFoldWgsl, buildNormalWgsl } from "../../../src/field/gpu/wgsl";
 
 test("fold module contains common lib, every shape fn, and the dispatch switch", () => {
   const src = buildFoldWgsl();
-  for (const fn of ["fn smax", "fn combine_height", "fn influence", "fn apply_profile", "fn sd_polygon", "fn sd_ellipse", "fn sd_segment", "fn shape_spine", "fn to_local", "fn fold("]) {
+  for (const fn of ["fn combine_height", "fn influence", "fn apply_profile", "fn sd_polygon", "fn sd_ellipse", "fn sd_segment", "fn shape_spine", "fn to_local", "fn fold("]) {
     expect(src, fn).toContain(fn);
   }
   for (const t of allShapeTypes()) {

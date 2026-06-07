@@ -33,10 +33,10 @@ export function evaluateField(shapes: ShapeInstance[], width: number, height: nu
       let M = 0;
       for (const { s, type, ds, op } of resolved) {
         const sample = type.eval(toLocal(s.transform, p), s);
-        const inf = influence(sample.sd * ds, s.combine.blend);
+        const inf = influence(sample.sd * ds);
         if (inf <= 0) continue;
         const h = s.transform.pos.z + sample.height * s.transform.scale.z; // elevation + extrude
-        H = mix(H, combineHeight(op, H, h, s.combine.blend), inf);
+        H = mix(H, combineHeight(op, H, h), inf);
         M = Math.max(M, inf);
       }
       const i = y * width + x;

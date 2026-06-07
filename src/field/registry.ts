@@ -30,7 +30,6 @@ export function createShapeInstance(typeId: string, pos: Vec2): ShapeInstance {
     transform: { pos: { x: pos.x, y: pos.y, z: 0 }, rotation: 0, scale: { x: 1, y: 1, z: 1 } },
     params,
     controlPoints: t.controlPoints.default.map((p) => ({ ...p })),
-    combine: { blend: 0 },
     visible: true,
     locked: false,
   };

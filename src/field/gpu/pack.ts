@@ -29,7 +29,6 @@ export function packShapes(shapes: ShapeInstance[]): PackedShapes {
     const base = si * RECORD_F32;
     records[base] = gpuTypeIndex(s.typeId);
     records[base + 1] = type.defaultCombine === "carve" ? 1 : 0; // op lives on the type
-    records[base + 2] = s.combine.blend;
     records[base + 3] = s.transform.scale.z; // extrude multiplier (tallness scale)
     records[base + 21] = s.transform.pos.z; // base elevation (post-extrude add)
     records[base + 4] = s.transform.pos.x;

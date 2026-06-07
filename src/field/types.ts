@@ -25,11 +25,6 @@ export interface ControlPointSpec {
   default: Vec2[];
 }
 
-export interface CombineSpec {
-  /** Smooth-blend radius in canvas px; 0 = hard. */
-  blend: number;
-}
-
 export interface ShapeInstance {
   id: string;
   typeId: string;
@@ -38,7 +33,6 @@ export interface ShapeInstance {
   transform: Transform2D;
   params: Record<string, number | string | boolean>;
   controlPoints: Vec2[];
-  combine: CombineSpec;
   visible: boolean;
   locked: boolean;
 }

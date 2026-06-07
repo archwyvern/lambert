@@ -73,18 +73,6 @@ test("transform: offset position and 2x scale", () => {
   expect(r.heightMap[px(r, 32 + 100, 32)]!).toBe(0);
 });
 
-test("blend bulges where equal-height shapes overlap (weld fillet)", () => {
-  const a = createShapeInstance("plateau", v2(50, 64));
-  const b = createShapeInstance("plateau", v2(70, 64));
-  b.combine = { blend: 8 };
-  const r = evaluateField([a, b], 128, 128);
-  // overlap interior: both at full height 24, smax bulge = k/4 = 2
-  const overlap = r.heightMap[px(r, 60, 64)]!;
-  expect(overlap).toBeGreaterThan(24);
-  expect(overlap).toBeLessThanOrEqual(26.01);
-  // a-only region outside b's influence stays untouched
-  expect(r.heightMap[px(r, 30, 64)]!).toBeCloseTo(24, 1);
-});
 
 test("unknown typeId throws", () => {
   const ghost = { ...createShapeInstance("dome", v2(0, 0)), typeId: "ghost" };

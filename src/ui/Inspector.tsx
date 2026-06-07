@@ -182,15 +182,6 @@ export function Inspector(props: { store: DocumentStore; state: EditorState }): 
         onCommit={commit}
       />
       <div className="my-3 border-t border-border" />
-      <SectionLabel>Compositing</SectionLabel>
-      <SpinBox
-        label="blend"
-        value={shape.combine.blend}
-        min={0}
-        onChange={(v) => live((s) => ({ ...s, combine: { ...s.combine, blend: v } }), "blend")}
-        onCommit={commit}
-      />
-      <div className="my-3 border-t border-border" />
       <div className="flex gap-1">
         <Button
           className="flex-1"

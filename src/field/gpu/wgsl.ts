@@ -4,7 +4,7 @@ export const RECORD_F32 = 24;
 export const PARAMS_OFFSET = 13;
 export const MAX_PARAMS = 8;
 
-/** Record layout (f32 slots): see pack.ts — typeIndex, op, blend, scaleZ, posXY,
+/** Record layout (f32 slots): see pack.ts — typeIndex, op, (free), scaleZ, posXY,
  *  cos/sin(-rot), invScaleXY, distScale, cpStart, cpCount, params[8], elevation, pad[2]. */
 const COMMON = /* wgsl */ `
 struct Uniforms {
@@ -35,23 +35,14 @@ fn to_local(base: u32, p: vec2f) -> vec2f {
   return r * vec2f(rec(base, 8u), rec(base, 9u));
 }
 
-fn smax(a: f32, b: f32, k: f32) -> f32 {
-  if (k <= 0.0) { return max(a, b); }
-  let h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
-  return mix(a, b, h) + k * h * (1.0 - h);
+fn combine_height(op: u32, bigH: f32, h: f32) -> f32 {
+  if (op == 1u) { return min(bigH, bigH - h); } // carve
+  return max(bigH, h); // max (clip)
 }
 
-fn smin_(a: f32, b: f32, k: f32) -> f32 { return -smax(-a, -b, k); }
-
-fn combine_height(op: u32, bigH: f32, h: f32, k: f32) -> f32 {
-  if (op == 1u) { return smin_(bigH, bigH - h, k); } // carve
-  return smax(bigH, h, k); // max (clip)
-}
-
-fn influence(sd: f32, blend: f32) -> f32 {
+fn influence(sd: f32) -> f32 {
   if (sd <= 0.0) { return 1.0; }
-  let w = max(blend, 1.0);
-  let t = clamp(1.0 - sd / w, 0.0, 1.0);
+  let t = clamp(1.0 - sd, 0.0, 1.0);
   return t * t * (3.0 - 2.0 * t);
 }
 
@@ -143,10 +134,10 @@ fn fold(@builtin(global_invocation_id) gid: vec3u) {
   for (var s = 0u; s < u.shapeCount; s = s + 1u) {
     let base = s * RECORD;
     let smp = eval_shape(u32(rec(base, 0u)), to_local(base, p), base);
-    let inf = influence(smp.y * rec(base, 10u), rec(base, 2u));
+    let inf = influence(smp.y * rec(base, 10u));
     if (inf <= 0.0) { continue; }
     let h = rec(base, 21u) + smp.x * rec(base, 3u); // elevation + extrude
-    bigH = mix(bigH, combine_height(u32(rec(base, 1u)), bigH, h, rec(base, 2u)), inf);
+    bigH = mix(bigH, combine_height(u32(rec(base, 1u)), bigH, h), inf);
     bigM = max(bigM, inf);
   }
   textureStore(outField, vec2u(gid.xy), vec4f(bigH, bigM, 0.0, 0.0));

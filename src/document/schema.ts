@@ -20,11 +20,8 @@ const shapeSchema = z.object({
   }),
   params: z.record(z.string(), z.union([z.number(), z.string(), z.boolean()])),
   controlPoints: z.array(vec2Schema),
-  combine: z.object({
-    blend: z.number().min(0),
-    /** Legacy per-shape op; behavior now derives from the shape type. Ignored. */
-    op: z.string().optional(),
-  }),
+  /** Legacy combine settings (op/blend); behavior now derives from the shape type. */
+  combine: z.unknown().optional(),
   /** Legacy height multiplier; folded into scale.z on load. */
   strength: z.number().optional(),
   visible: z.boolean(),
@@ -89,7 +86,7 @@ const LEGACY_TALLNESS: Record<string, { param: string; nominal: number }> = {
 export function parseDoc(json: string): FlatlandDoc {
   const doc = docSchema.parse(JSON.parse(json));
   for (const s of doc.shapes) {
-    delete s.combine.op; // legacy per-shape op: the shape type owns the behavior now
+    delete s.combine; // legacy combine settings: the shape type owns the behavior now
     if (s.strength !== undefined) {
       s.transform.scale.z *= s.strength; // migrate legacy strength into tallness scale
       delete s.strength;

@@ -43,12 +43,12 @@ test("moveShapeTo: final-index semantics for drag reorder", () => {
   expect(moveShapeTo(doc, "ghost", 0)).toBe(doc);
 });
 
-test("schema: legacy per-shape op fields are stripped on load", () => {
+test("schema: legacy combine settings are stripped on load", () => {
   const doc = addShape(emptyDoc("x.png", 64, 64), "dome", v2(0, 0));
   const raw = JSON.parse(serializeDoc(doc));
-  raw.shapes[0].combine.op = "add"; // pre-simplification document
+  raw.shapes[0].combine = { op: "add", blend: 6 }; // pre-simplification document
   const back = parseDoc(JSON.stringify(raw));
-  expect("op" in back.shapes[0]!.combine).toBe(false);
+  expect("combine" in back.shapes[0]!).toBe(false);
 });
 
 test("schema: legacy single-ring plateau gains a top rim from slopeWidth", () => {

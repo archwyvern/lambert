@@ -30,7 +30,6 @@ export function scaleShapesForSupersample(shapes: ShapeInstance[], f: number): S
       // z (tallness) does NOT scale with the canvas: heights stay put, slopeScale corrects
       scale: { x: s.transform.scale.x * f, y: s.transform.scale.y * f, z: s.transform.scale.z },
     },
-    combine: { ...s.combine, blend: s.combine.blend * f },
   }));
 }
 
