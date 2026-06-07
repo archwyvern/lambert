@@ -44,7 +44,7 @@ export interface ShapeInstance {
 }
 
 export interface FieldSample {
-  /** Height contribution in px (pre scale.z). */
+  /** Height contribution in px at scale.z = 1 (pre elevation/extrude). */
   height: number;
   /** Signed distance to the footprint in shape-local px (negative inside). */
   sd: number;
@@ -57,6 +57,8 @@ export interface ShapeType {
   controlPoints: ControlPointSpec;
   /** carve = subtractive shape (groove); everything else clips via max. */
   defaultCombine?: CombineOp;
+  /** Intrinsic tallness in px at scale.z = 1 (extrude basis). */
+  nominalHeight?: number;
   /**
    * WGSL mirror of eval: `fn shape_<id>(p: vec2f, base: u32) -> vec2f` returning
    * (height, sd). Params read at base+13+declarationIndex; enums as option index.

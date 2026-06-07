@@ -72,7 +72,7 @@ test("constrainAxis locks to the dominant axis (godot move-mode shift)", () => {
 
 test("gizmo forward transform must invert toLocal (scale THEN rotate)", () => {
   // guards the vertex-handle math in Gizmos.tsx
-  const t = { pos: v2(7, -3), rotation: 0.6, scale: { x: 1.5, y: 0.75, z: 1 } };
+  const t = { pos: { x: 7, y: -3, z: 0 }, rotation: 0.6, scale: { x: 1.5, y: 0.75, z: 1 } };
   const cp = v2(12, -8);
   const forward = v2(
     t.pos.x + (cp.x * t.scale.x * Math.cos(t.rotation) - cp.y * t.scale.y * Math.sin(t.rotation)),

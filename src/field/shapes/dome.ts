@@ -8,14 +8,14 @@ export const Dome = defineShapeType({
   params: {
     radiusX: { type: "px", default: 48, min: 1 },
     radiusY: { type: "px", default: 48, min: 1 },
-    height: { type: "px", default: 24, min: -256, max: 256 },
   },
+  nominalHeight: 24,
   controlPoints: { kind: "none", default: [] },
-  // params: 13=radiusX 14=radiusY 15=height (declaration order)
+  // params: 13=radiusX 14=radiusY (declaration order); tallness = 24 * scale.z
   wgsl: /* wgsl */ `
 fn shape_dome(p: vec2f, base: u32) -> vec2f {
   let r = vec2f(rec(base, 13u), rec(base, 14u));
-  let h = rec(base, 15u);
+  let h = 24.0;
   let q = p / r;
   let d2 = dot(q, q);
   var height = 0.0;
@@ -26,7 +26,7 @@ fn shape_dome(p: vec2f, base: u32) -> vec2f {
   eval(p, shape) {
     const rx = numParam(shape, "radiusX");
     const ry = numParam(shape, "radiusY");
-    const h = numParam(shape, "height");
+    const h = 24;
     const qx = p.x / rx;
     const qy = p.y / ry;
     const d2 = qx * qx + qy * qy;

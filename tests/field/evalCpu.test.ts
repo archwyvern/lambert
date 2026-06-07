@@ -26,7 +26,7 @@ test("invisible shapes are skipped", () => {
 test("max: overlapping shapes merge to the taller", () => {
   const low = createShapeInstance("plateau", v2(64, 64));
   const tall = createShapeInstance("plateau", v2(80, 64));
-  tall.params.height = 40;
+  tall.transform.scale.z = 40 / 24; // extrude to 40px
   const r = evaluateField([low, tall], 160, 128);
   expect(r.heightMap[px(r, 80, 64)]!).toBeCloseTo(40, 0); // overlap: taller wins
 });
@@ -45,6 +45,15 @@ test("carve cuts into what is below", () => {
   const r = evaluateField([slab, cut], 128, 128);
   expect(r.heightMap[px(r, 64, 64)]!).toBeCloseTo(24 - 8, 1);
   expect(r.mask[px(r, 64, 64)]!).toBe(1); // carve still authors the mask
+});
+
+test("pos.z is base elevation: lifts the shape, does not scale with extrude", () => {
+  const dome = createShapeInstance("dome", v2(64, 64));
+  dome.transform.pos.z = 10;
+  dome.transform.scale.z = 0.5;
+  const r = evaluateField([dome], 128, 128);
+  expect(r.heightMap[px(r, 64, 64)]!).toBeCloseTo(10 + 12, 1); // elevation + 24*0.5
+  expect(r.heightMap[px(r, 64 + 47, 64)]!).toBeGreaterThan(9.9); // near the rim: cliff at elevation
 });
 
 test("scale.z scales the contribution (tallness)", () => {

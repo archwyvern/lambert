@@ -1,20 +1,21 @@
 import { Vec2, v2 } from "./vec";
 
 /** xy scale the footprint; z scales the height contribution (tallness). */
-export interface Scale3 {
+export interface Vec3 {
   x: number;
   y: number;
   z: number;
 }
 
 export interface Transform2D {
-  pos: Vec2;
+  /** x/y = canvas position; z = base elevation in height px. */
+  pos: Vec3;
   rotation: number; // radians
-  scale: Scale3;
+  scale: Vec3;
 }
 
 export const identityTransform = (): Transform2D => ({
-  pos: v2(0, 0),
+  pos: { x: 0, y: 0, z: 0 },
   rotation: 0,
   scale: { x: 1, y: 1, z: 1 },
 });

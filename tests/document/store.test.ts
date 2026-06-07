@@ -27,7 +27,7 @@ test("removeShape, duplicateShape, reorderShape", () => {
   const dup = duplicateShape(doc, a!);
   expect(dup.shapes.length).toBe(3);
   expect(dup.shapes[2]!.id).not.toBe(a);
-  expect(dup.shapes[2]!.transform.pos).toEqual({ x: srcPos.x + 5, y: srcPos.y + 5 });
+  expect(dup.shapes[2]!.transform.pos).toEqual({ x: srcPos.x + 5, y: srcPos.y + 5, z: srcPos.z });
   expect(removeShape(doc, a!).shapes.map((s) => s.id)).toEqual([b]);
 });
 
@@ -94,7 +94,7 @@ test("store: coalesced gesture is one undo step", () => {
   const id = store.state.doc.shapes[0]!.id;
   for (const x of [1, 2, 3, 4]) {
     store.update(
-      (d) => updateShape(d, id, (s) => ({ ...s, transform: { ...s.transform, pos: v2(x, 0) } })),
+      (d) => updateShape(d, id, (s) => ({ ...s, transform: { ...s.transform, pos: { ...s.transform.pos, x, y: 0 } } })),
       { coalesce: `move:${id}` },
     );
   }

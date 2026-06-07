@@ -4,7 +4,9 @@ import type { ShapeInstance } from "../field/types";
 
 const vec2Schema = z.object({ x: z.number(), y: z.number() });
 
-// z scales tallness; defaults keep pre-z documents loading unchanged
+// pos.z = base elevation (default 0); scale.z = extrude multiplier (default 1).
+// Defaults keep pre-z documents loading unchanged.
+const pos3Schema = z.object({ x: z.number(), y: z.number(), z: z.number().default(0) });
 const scale3Schema = z.object({ x: z.number(), y: z.number(), z: z.number().default(1) });
 
 const shapeSchema = z.object({
@@ -12,7 +14,7 @@ const shapeSchema = z.object({
   typeId: z.string(),
   name: z.string().optional(),
   transform: z.object({
-    pos: vec2Schema,
+    pos: pos3Schema,
     rotation: z.number(),
     scale: scale3Schema,
   }),
@@ -76,6 +78,14 @@ export function emptyDoc(sourcePath: string, width: number, height: number): Fla
   };
 }
 
+/** Pre-elevation documents stored tallness as a px param; nominal = the old default. */
+const LEGACY_TALLNESS: Record<string, { param: string; nominal: number }> = {
+  plateau: { param: "height", nominal: 24 },
+  dome: { param: "height", nominal: 24 },
+  ridge: { param: "height", nominal: 16 },
+  groove: { param: "depth", nominal: 8 },
+};
+
 export function parseDoc(json: string): FlatlandDoc {
   const doc = docSchema.parse(JSON.parse(json));
   for (const s of doc.shapes) {
@@ -83,6 +93,12 @@ export function parseDoc(json: string): FlatlandDoc {
     if (s.strength !== undefined) {
       s.transform.scale.z *= s.strength; // migrate legacy strength into tallness scale
       delete s.strength;
+    }
+    // legacy tallness params (height/depth) fold into the extrude multiplier
+    const legacy = LEGACY_TALLNESS[s.typeId];
+    if (legacy && typeof s.params[legacy.param] === "number") {
+      s.transform.scale.z *= (s.params[legacy.param] as number) / legacy.nominal;
+      delete s.params[legacy.param];
     }
     // legacy single-ring plateau: synthesize the top rim from slopeWidth (the straight-edge
     // inset matches via the apothem; the old SDF inset rounded corners, this miters them)

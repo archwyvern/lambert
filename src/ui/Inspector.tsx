@@ -131,6 +131,14 @@ export function Inspector(props: { store: DocumentStore; state: EditorState }): 
         onCommit={commit}
       />
       <SpinBox
+        label="z"
+        value={Number(shape.transform.pos.z.toFixed(1))}
+        onChange={(v) =>
+          live((s) => ({ ...s, transform: { ...s.transform, pos: { ...s.transform.pos, z: v } } }), "tz")
+        }
+        onCommit={commit}
+      />
+      <SpinBox
         label="rotation"
         value={toDeg(shape.transform.rotation)}
         step={5}

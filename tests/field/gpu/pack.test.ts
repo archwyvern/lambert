@@ -28,7 +28,7 @@ test("dome record: layout offsets", () => {
   expect(records[12]).toBe(0); // cpCount (dome has none)
   expect(records[13]).toBe(48); // radiusX
   expect(records[14]).toBe(48); // radiusY
-  expect(records[15]).toBe(24); // height
+  expect(records[21]).toBe(0); // elevation (pos.z)
   expect(points.length).toBe(2); // padded min one point
 });
 
@@ -37,7 +37,7 @@ test("plateau: control points and enum param index", () => {
   plateau.params.profile = "round";
   const { records, points } = packShapes([plateau]);
   expect(records[12]).toBe(8); // 4 base + 4 top-rim vertices
-  expect(records[14]).toBe(2); // profile "round" -> options index 2
+  expect(records[13]).toBe(2); // profile "round" -> options index 2
   expect(points[0]).toBe(-32); // first base vertex x
   expect(points[1]).toBe(-32); // first base vertex y
   expect(points[8]).toBe(-20); // first top-rim vertex x

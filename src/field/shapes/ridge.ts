@@ -7,15 +7,15 @@ export const Ridge = defineShapeType({
   id: "ridge",
   name: "Ridge",
   params: {
-    height: { type: "px", default: 16, min: -256, max: 256 },
     width: { type: "px", default: 24, min: 1 },
     profile: { type: "enum", options: PROFILE_KINDS, default: "round" },
   },
+  nominalHeight: 16,
   controlPoints: { kind: "polyline", min: 2, default: [v2(-32, 0), v2(32, 0)] },
-  // params: 13=height 14=width 15=profile(enum idx)
+  // params: 13=width 14=profile(enum idx); tallness = 16 * scale.z
   wgsl: /* wgsl */ `
 fn shape_ridge(p: vec2f, base: u32) -> vec2f {
-  return shape_spine(p, base, rec(base, 13u), rec(base, 14u) * 0.5, u32(rec(base, 15u)));
+  return shape_spine(p, base, 16.0, rec(base, 13u) * 0.5, u32(rec(base, 14u)));
 }
 `,
   eval(p, shape) {
@@ -23,7 +23,7 @@ fn shape_ridge(p: vec2f, base: u32) -> vec2f {
       p,
       shape.controlPoints,
       numParam(shape, "width") / 2,
-      numParam(shape, "height"),
+      16,
       enumParam(shape, "profile") as ProfileKind,
     );
   },

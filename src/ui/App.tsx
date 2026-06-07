@@ -222,7 +222,7 @@ export function App(): React.JSX.Element {
           (d) =>
             updateShape(d, id, (s) => ({
               ...s,
-              transform: { ...s.transform, pos: v2(s.transform.pos.x + dx, s.transform.pos.y + dy) },
+              transform: { ...s.transform, pos: { ...s.transform.pos, x: s.transform.pos.x + dx, y: s.transform.pos.y + dy } },
             })),
           { coalesce: `nudge:${id}` },
         );

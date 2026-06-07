@@ -48,6 +48,6 @@ export function duplicateShape(doc: FlatlandDoc, id: string): FlatlandDoc {
   if (!src) return doc;
   const copy: ShapeInstance = structuredClone(src);
   copy.id = crypto.randomUUID();
-  copy.transform.pos = v2(src.transform.pos.x + 5, src.transform.pos.y + 5);
+  copy.transform.pos = { ...src.transform.pos, x: src.transform.pos.x + 5, y: src.transform.pos.y + 5 };
   return { ...doc, shapes: [...doc.shapes, copy] };
 }

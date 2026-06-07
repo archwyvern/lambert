@@ -25,7 +25,7 @@ export function scaleShapesForSupersample(shapes: ShapeInstance[], f: number): S
   return shapes.map((s) => ({
     ...s,
     transform: {
-      pos: { x: s.transform.pos.x * f, y: s.transform.pos.y * f },
+      pos: { x: s.transform.pos.x * f, y: s.transform.pos.y * f, z: s.transform.pos.z },
       rotation: s.transform.rotation,
       // z (tallness) does NOT scale with the canvas: heights stay put, slopeScale corrects
       scale: { x: s.transform.scale.x * f, y: s.transform.scale.y * f, z: s.transform.scale.z },

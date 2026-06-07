@@ -2,6 +2,7 @@ import { CubeRegular, DismissRegular } from "@fluentui/react-icons";
 import { useEffect, useRef, useState } from "react";
 import type { DocumentStore, EditorState } from "../document/store";
 import { addShape, updateShape } from "../document/docOps";
+import { getShapeType } from "../field/registry";
 import { normalSigns } from "../document/schema";
 import type { Orbit } from "../field/gpu/preview3d";
 import { v2, Vec2 } from "../field/vec";
@@ -18,7 +19,7 @@ const ROTATE_SNAP = Math.PI / 12; // 15 deg, godot default rotation snap step
 
 type Drag =
   | { kind: "pan"; lastX: number; lastY: number }
-  | { kind: "move"; id: string; startCanvas: Vec2; startPos: Vec2 }
+  | { kind: "move"; id: string; startCanvas: Vec2; startPos: { x: number; y: number } }
   | { kind: "rotate"; id: string; startCanvas: Vec2; startRotation: number; pivot: Vec2 }
   | {
       kind: "scale";
@@ -161,7 +162,11 @@ export function CanvasView(props: {
     const r = rendererRef.current;
     if (!r || !diffuseBytes || !ready) return;
     const maxH = doc.shapes.reduce(
-      (m, s) => Math.max(m, Math.abs(Number(s.params.height ?? s.params.depth ?? 0))),
+      (m, s) =>
+        Math.max(
+          m,
+          Math.abs(s.transform.pos.z) + (getShapeType(s.typeId).nominalHeight ?? 0) * Math.abs(s.transform.scale.z),
+        ),
       8,
     );
     r.requestRender(doc.source.width, doc.source.height, {
@@ -255,7 +260,7 @@ export function CanvasView(props: {
         (d) =>
           updateShape(d, drag.id, (s) => ({
             ...s,
-            transform: { ...s.transform, pos: v2(drag.startPos.x + dx, drag.startPos.y + dy) },
+            transform: { ...s.transform, pos: { ...s.transform.pos, x: drag.startPos.x + dx, y: drag.startPos.y + dy } },
           })),
         { coalesce: `move:${drag.id}` },
       );

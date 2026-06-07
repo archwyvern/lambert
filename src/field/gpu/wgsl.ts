@@ -5,7 +5,7 @@ export const PARAMS_OFFSET = 13;
 export const MAX_PARAMS = 8;
 
 /** Record layout (f32 slots): see pack.ts — typeIndex, op, blend, scaleZ, posXY,
- *  cos/sin(-rot), invScaleXY, distScale, cpStart, cpCount, params[8], pad[3]. */
+ *  cos/sin(-rot), invScaleXY, distScale, cpStart, cpCount, params[8], elevation, pad[2]. */
 const COMMON = /* wgsl */ `
 struct Uniforms {
   width: u32,
@@ -145,7 +145,7 @@ fn fold(@builtin(global_invocation_id) gid: vec3u) {
     let smp = eval_shape(u32(rec(base, 0u)), to_local(base, p), base);
     let inf = influence(smp.y * rec(base, 10u), rec(base, 2u));
     if (inf <= 0.0) { continue; }
-    let h = smp.x * rec(base, 3u);
+    let h = rec(base, 21u) + smp.x * rec(base, 3u); // elevation + extrude
     bigH = mix(bigH, combine_height(u32(rec(base, 1u)), bigH, h, rec(base, 2u)), inf);
     bigM = max(bigM, inf);
   }

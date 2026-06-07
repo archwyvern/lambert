@@ -29,7 +29,7 @@ test("define + get round-trips, duplicate id throws", () => {
 test("createShapeInstance seeds defaults from the schema", () => {
   const inst = createShapeInstance("test-bump", v2(10, 20));
   expect(inst.typeId).toBe("test-bump");
-  expect(inst.transform.pos).toEqual({ x: 10, y: 20 });
+  expect(inst.transform.pos).toEqual({ x: 10, y: 20, z: 0 });
   expect(inst.params.height).toBe(24);
   expect(inst.params.kind).toBe("a");
   expect(inst.combine).toEqual({ blend: 0 });
