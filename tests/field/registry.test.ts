@@ -32,7 +32,7 @@ test("createShapeInstance seeds defaults from the schema", () => {
   expect(inst.transform.pos).toEqual({ x: 10, y: 20 });
   expect(inst.params.height).toBe(24);
   expect(inst.params.kind).toBe("a");
-  expect(inst.combine).toEqual({ op: "raise", blend: 0 }); // overlaps clip, not stack
+  expect(inst.combine).toEqual({ op: "max", blend: 0 }); // overlaps clip, not stack
   expect(inst.transform.scale).toEqual({ x: 1, y: 1, z: 1 });
   expect(inst.visible).toBe(true);
   expect(numParam(inst, "height")).toBe(24);

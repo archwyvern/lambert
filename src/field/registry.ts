@@ -33,7 +33,7 @@ export function createShapeInstance(typeId: string, pos: Vec2): ShapeInstance {
     // raise (max) = overlapping shapes CLIP into each other like solids; they don't
     // stack heights (user decision — use the add op explicitly for curvature-following
     // detail, and scale.z for tallness)
-    combine: { op: t.defaultCombine ?? "raise", blend: 0 },
+    combine: { op: t.defaultCombine ?? "max", blend: 0 },
     visible: true,
     locked: false,
   };

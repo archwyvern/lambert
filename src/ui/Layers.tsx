@@ -17,8 +17,8 @@ const SHAPE_ICONS: Record<string, string> = {
   groove: grooveIcon,
 };
 
-/** One-glyph compositing marker; the default (raise/clip) stays unmarked. */
-const OP_MARK: Record<string, string> = { raise: "", add: "+", carve: "-" };
+/** One-glyph compositing marker; the default (max) stays unmarked. */
+const OP_MARK: Record<string, string> = { max: "", add: "+", carve: "-" };
 
 interface Menu {
   x: number;

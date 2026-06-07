@@ -18,7 +18,8 @@ const shapeSchema = z.object({
   params: z.record(z.string(), z.union([z.number(), z.string(), z.boolean()])),
   controlPoints: z.array(vec2Schema),
   combine: z.object({
-    op: z.enum(["raise", "add", "carve"]),
+    // "raise" = legacy alias of max, migrated on load
+    op: z.enum(["max", "add", "carve", "raise"]).transform((v) => (v === "raise" ? ("max" as const) : v)),
     blend: z.number().min(0),
   }),
   /** Legacy height multiplier; folded into scale.z on load. */

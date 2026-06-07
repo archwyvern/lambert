@@ -6,7 +6,7 @@ import type { CombineOp } from "../field/combine";
 import type { ShapeInstance } from "../field/types";
 import { Button, humanizeLabel, SectionLabel, SelectRow, SpinBox } from "./kit";
 
-const COMBINE_OPS = ["raise", "add", "carve"] as const;
+const COMBINE_OPS = ["max", "add", "carve"] as const;
 
 const toDeg = (rad: number): number => Number(((rad * 180) / Math.PI).toFixed(1));
 const toRad = (deg: number): number => (deg * Math.PI) / 180;

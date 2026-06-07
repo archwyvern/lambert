@@ -3,7 +3,7 @@ import { distanceScale } from "../transform";
 import type { ShapeInstance } from "../types";
 import { gpuTypeIndex, MAX_PARAMS, PARAMS_OFFSET, RECORD_F32 } from "./wgsl";
 
-const OP_INDEX = { raise: 0, add: 1, carve: 2 } as const;
+const OP_INDEX = { max: 0, add: 1, carve: 2 } as const;
 
 export interface PackedShapes {
   records: Float32Array;

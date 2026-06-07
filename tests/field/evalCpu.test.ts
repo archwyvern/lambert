@@ -23,12 +23,12 @@ test("invisible shapes are skipped", () => {
   expect(r.mask[px(r, 64, 64)]!).toBe(0);
 });
 
-test("raise: overlapping shapes merge to the taller", () => {
+test("max: overlapping shapes merge to the taller", () => {
   const low = createShapeInstance("plateau", v2(64, 64));
-  low.combine = { op: "raise", blend: 0 };
+  low.combine = { op: "max", blend: 0 };
   const tall = createShapeInstance("plateau", v2(80, 64));
   tall.params.height = 40;
-  tall.combine = { op: "raise", blend: 0 };
+  tall.combine = { op: "max", blend: 0 };
   const r = evaluateField([low, tall], 160, 128);
   expect(r.heightMap[px(r, 80, 64)]!).toBeCloseTo(40, 0); // overlap: taller wins
 });
@@ -78,7 +78,7 @@ test("transform: offset position and 2x scale", () => {
 test("blend bulges where equal-height shapes overlap (weld fillet)", () => {
   const a = createShapeInstance("plateau", v2(50, 64));
   const b = createShapeInstance("plateau", v2(70, 64));
-  b.combine = { op: "raise", blend: 8 };
+  b.combine = { op: "max", blend: 8 };
   const r = evaluateField([a, b], 128, 128);
   // overlap interior: both at full height 24, smax bulge = k/4 = 2
   const overlap = r.heightMap[px(r, 60, 64)]!;

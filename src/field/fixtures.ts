@@ -14,7 +14,7 @@ export function goldenShapes(): ShapeInstance[] {
   const ridge = createShapeInstance("ridge", v2(72, 24));
   ridge.id = "ridge";
   ridge.transform.rotation = Math.PI / 6;
-  ridge.combine = { op: "raise", blend: 6 };
+  ridge.combine = { op: "max", blend: 6 };
   const groove = createShapeInstance("groove", v2(40, 72));
   groove.id = "groove";
   return [slab, dome, ridge, groove];
@@ -29,7 +29,7 @@ export function stressShapes(): ShapeInstance[] {
   const ridge = createShapeInstance("ridge", v2(48, 60));
   ridge.id = "stress-ridge";
   ridge.transform.rotation = -0.4;
-  ridge.combine = { op: "raise", blend: 5 };
+  ridge.combine = { op: "max", blend: 5 };
   ridge.transform.scale.z = 0.8;
   const groove = createShapeInstance("groove", v2(48, 40));
   groove.id = "stress-groove";

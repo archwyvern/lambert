@@ -45,7 +45,7 @@ fn smin_(a: f32, b: f32, k: f32) -> f32 { return -smax(-a, -b, k); }
 
 fn combine_height(op: u32, bigH: f32, h: f32, k: f32) -> f32 {
   switch op {
-    case 0u: { return smax(bigH, h, k); }
+    case 0u: { return smax(bigH, h, k); } // max (clip)
     case 1u: { return bigH + h; }
     default: { return smin_(bigH, bigH - h, k); }
   }

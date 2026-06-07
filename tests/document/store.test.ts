@@ -43,6 +43,14 @@ test("moveShapeTo: final-index semantics for drag reorder", () => {
   expect(moveShapeTo(doc, "ghost", 0)).toBe(doc);
 });
 
+test("schema: legacy 'raise' op migrates to 'max' on load", () => {
+  const doc = addShape(emptyDoc("x.png", 64, 64), "dome", v2(0, 0));
+  const raw = JSON.parse(serializeDoc(doc));
+  raw.shapes[0].combine.op = "raise";
+  const back = parseDoc(JSON.stringify(raw));
+  expect(back.shapes[0]!.combine.op).toBe("max");
+});
+
 test("schema: optional shape name round-trips", () => {
   const doc = addShape(emptyDoc("x.png", 64, 64), "dome", v2(0, 0));
   doc.shapes[0]!.name = "boss stud";
