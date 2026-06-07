@@ -30,7 +30,7 @@ export function packShapes(shapes: ShapeInstance[]): PackedShapes {
     records[base] = gpuTypeIndex(s.typeId);
     records[base + 1] = OP_INDEX[s.combine.op];
     records[base + 2] = s.combine.blend;
-    records[base + 3] = s.strength;
+    records[base + 3] = s.transform.scale.z; // height multiplier (tallness scale)
     records[base + 4] = s.transform.pos.x;
     records[base + 5] = s.transform.pos.y;
     records[base + 6] = Math.cos(-s.transform.rotation);

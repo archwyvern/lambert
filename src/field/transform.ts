@@ -1,12 +1,23 @@
 import { Vec2, v2 } from "./vec";
 
+/** xy scale the footprint; z scales the height contribution (tallness). */
+export interface Scale3 {
+  x: number;
+  y: number;
+  z: number;
+}
+
 export interface Transform2D {
   pos: Vec2;
   rotation: number; // radians
-  scale: Vec2;
+  scale: Scale3;
 }
 
-export const identityTransform = (): Transform2D => ({ pos: v2(0, 0), rotation: 0, scale: v2(1, 1) });
+export const identityTransform = (): Transform2D => ({
+  pos: v2(0, 0),
+  rotation: 0,
+  scale: { x: 1, y: 1, z: 1 },
+});
 
 /** Map a canvas-space point into shape-local space (inverse of the instance transform). */
 export function toLocal(t: Transform2D, p: Vec2): Vec2 {

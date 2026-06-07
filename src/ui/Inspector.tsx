@@ -106,6 +106,18 @@ export function Inspector(props: { store: DocumentStore; state: EditorState }): 
         }
         onCommit={commit}
       />
+      <SpinBox
+        label="scale z"
+        value={Number(shape.transform.scale.z.toFixed(2))}
+        step={0.1}
+        onChange={(v) =>
+          live(
+            (s) => ({ ...s, transform: { ...s.transform, scale: { ...s.transform.scale, z: safeScale(v) } } }),
+            "tsz",
+          )
+        }
+        onCommit={commit}
+      />
       <div className="my-3 border-t border-border" />
       <SectionLabel>Compositing</SectionLabel>
       <SelectRow
@@ -122,13 +134,6 @@ export function Inspector(props: { store: DocumentStore; state: EditorState }): 
         value={shape.combine.blend}
         min={0}
         onChange={(v) => live((s) => ({ ...s, combine: { ...s.combine, blend: v } }), "blend")}
-        onCommit={commit}
-      />
-      <SpinBox
-        label="strength"
-        value={shape.strength}
-        step={0.1}
-        onChange={(v) => live((s) => ({ ...s, strength: v }), "strength")}
         onCommit={commit}
       />
       <div className="my-3 border-t border-border" />

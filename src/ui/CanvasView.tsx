@@ -20,7 +20,7 @@ type Drag =
       kind: "scale";
       id: string;
       startCanvas: Vec2;
-      startScale: { x: number; y: number };
+      startScale: { x: number; y: number; z: number };
       pivot: Vec2;
       rotation: number;
     };

@@ -37,22 +37,27 @@ const clampMag = (v: number): number => Math.sign(v || 1) * Math.max(0.05, Math.
 
 /**
  * Photoshop-like corner scaling around the shape's pivot. Unlocked (default): each local
- * axis scales by the drag ratio along that axis — dragging across the pivot mirrors.
- * uniform (shift held): the pivot-distance ratio applies to both axes.
+ * footprint axis scales by the drag ratio along that axis — dragging across the pivot
+ * mirrors; z (tallness) is untouched. uniform (shift held): the pivot-distance ratio
+ * applies to all three axes, so a shape grown 2x also gets 2x taller.
  */
 export function axisScaleFromDrag(
   pivot: Vec2,
   rotation: number,
   startPoint: Vec2,
   currentPoint: Vec2,
-  startScale: { x: number; y: number },
+  startScale: { x: number; y: number; z: number },
   uniform: boolean,
-): { x: number; y: number } {
+): { x: number; y: number; z: number } {
   if (uniform) {
     const d0 = Math.hypot(startPoint.x - pivot.x, startPoint.y - pivot.y) || 1;
     const d1 = Math.hypot(currentPoint.x - pivot.x, currentPoint.y - pivot.y);
     const ratio = d1 / d0;
-    return { x: clampMag(startScale.x * ratio), y: clampMag(startScale.y * ratio) };
+    return {
+      x: clampMag(startScale.x * ratio),
+      y: clampMag(startScale.y * ratio),
+      z: clampMag(startScale.z * ratio),
+    };
   }
   // un-rotate into the shape's local axes (scale still applied — ratios cancel it out)
   const c = Math.cos(-rotation);
@@ -65,5 +70,5 @@ export function axisScaleFromDrag(
   const b = unrot(currentPoint);
   const apply = (v: number, num: number, den: number): number =>
     Math.abs(den) < 1e-3 ? v : clampMag(v * (num / den));
-  return { x: apply(startScale.x, b.x, a.x), y: apply(startScale.y, b.y, a.y) };
+  return { x: apply(startScale.x, b.x, a.x), y: apply(startScale.y, b.y, a.y), z: startScale.z };
 }

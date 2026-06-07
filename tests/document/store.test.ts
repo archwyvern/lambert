@@ -13,9 +13,9 @@ test("addShape appends, updateShape patches immutably", () => {
   expect(d1.shapes.length).toBe(1);
   expect(doc.shapes.length).toBe(0); // original untouched
   const id = d1.shapes[0]!.id;
-  const d2 = updateShape(d1, id, (s) => ({ ...s, strength: 0.5 }));
-  expect(d2.shapes[0]!.strength).toBe(0.5);
-  expect(d1.shapes[0]!.strength).toBe(1);
+  const d2 = updateShape(d1, id, (s) => ({ ...s, transform: { ...s.transform, scale: { ...s.transform.scale, z: 0.5 } } }));
+  expect(d2.shapes[0]!.transform.scale.z).toBe(0.5);
+  expect(d1.shapes[0]!.transform.scale.z).toBe(1);
 });
 
 test("removeShape, duplicateShape, reorderShape", () => {

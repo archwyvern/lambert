@@ -4,7 +4,7 @@ export const RECORD_F32 = 24;
 export const PARAMS_OFFSET = 13;
 export const MAX_PARAMS = 8;
 
-/** Record layout (f32 slots): see pack.ts — typeIndex, op, blend, strength, posXY,
+/** Record layout (f32 slots): see pack.ts — typeIndex, op, blend, scaleZ, posXY,
  *  cos/sin(-rot), invScaleXY, distScale, cpStart, cpCount, params[8], pad[3]. */
 const COMMON = /* wgsl */ `
 struct Uniforms {

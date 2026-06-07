@@ -27,13 +27,12 @@ export function createShapeInstance(typeId: string, pos: Vec2): ShapeInstance {
   return {
     id: crypto.randomUUID(),
     typeId,
-    transform: { pos, rotation: 0, scale: v2(1, 1) },
+    transform: { pos, rotation: 0, scale: { x: 1, y: 1, z: 1 } },
     params,
     controlPoints: t.controlPoints.default.map((p) => ({ ...p })),
     // add = height is how tall the shape is on whatever is beneath it (raise/max would
     // make height an absolute level above zero — wrong mental model for stacked detail)
     combine: { op: t.defaultCombine ?? "add", blend: 0 },
-    strength: 1,
     visible: true,
     locked: false,
   };

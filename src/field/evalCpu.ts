@@ -30,7 +30,7 @@ export function evaluateField(shapes: ShapeInstance[], width: number, height: nu
         const sample = type.eval(toLocal(s.transform, p), s);
         const inf = influence(sample.sd * ds, s.combine.blend);
         if (inf <= 0) continue;
-        const h = sample.height * s.strength;
+        const h = sample.height * s.transform.scale.z; // z scales tallness
         H = mix(H, combineHeight(s.combine.op, H, h, s.combine.blend), inf);
         M = Math.max(M, inf);
       }

@@ -8,16 +8,15 @@ import { v2 } from "../../../src/field/vec";
 test("dome record: layout offsets", () => {
   const dome = createShapeInstance("dome", v2(10, 20));
   dome.transform.rotation = Math.PI / 2;
-  dome.transform.scale = v2(2, 4);
+  dome.transform.scale = { x: 2, y: 4, z: 0.5 };
   dome.combine = { op: "add", blend: 3 };
-  dome.strength = 0.5;
   const { records, points, count } = packShapes([dome]);
   expect(count).toBe(1);
   expect(records.length).toBe(RECORD_F32);
   expect(records[0]).toBe(0); // dome registered first -> typeIndex 0
   expect(records[1]).toBe(1); // op add
   expect(records[2]).toBe(3); // blend
-  expect(records[3]).toBe(0.5); // strength
+  expect(records[3]).toBe(0.5); // scale.z (tallness)
   expect(records[4]).toBe(10); // posX
   expect(records[5]).toBe(20); // posY
   expect(records[6]).toBeCloseTo(Math.cos(-Math.PI / 2));

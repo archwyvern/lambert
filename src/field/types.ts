@@ -39,14 +39,12 @@ export interface ShapeInstance {
   params: Record<string, number | string | boolean>;
   controlPoints: Vec2[];
   combine: CombineSpec;
-  /** Scalar multiplier on the height contribution. */
-  strength: number;
   visible: boolean;
   locked: boolean;
 }
 
 export interface FieldSample {
-  /** Height contribution in px (pre-strength). */
+  /** Height contribution in px (pre scale.z). */
   height: number;
   /** Signed distance to the footprint in shape-local px (negative inside). */
   sd: number;

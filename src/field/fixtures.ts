@@ -25,12 +25,12 @@ export function stressShapes(): ShapeInstance[] {
   const dome = createShapeInstance("dome", v2(48, 40));
   dome.id = "stress-dome";
   dome.transform.rotation = 0.7;
-  dome.transform.scale = v2(1.5, 0.75);
+  dome.transform.scale = { x: 1.5, y: 0.75, z: 1 };
   const ridge = createShapeInstance("ridge", v2(48, 60));
   ridge.id = "stress-ridge";
   ridge.transform.rotation = -0.4;
   ridge.combine = { op: "raise", blend: 5 };
-  ridge.strength = 0.8;
+  ridge.transform.scale.z = 0.8;
   const groove = createShapeInstance("groove", v2(48, 40));
   groove.id = "stress-groove";
   groove.transform.rotation = 0.7;

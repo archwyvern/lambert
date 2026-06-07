@@ -3,6 +3,9 @@ import type { ShapeInstance } from "../field/types";
 
 const vec2Schema = z.object({ x: z.number(), y: z.number() });
 
+// z scales tallness; defaults keep pre-z documents loading unchanged
+const scale3Schema = z.object({ x: z.number(), y: z.number(), z: z.number().default(1) });
+
 const shapeSchema = z.object({
   id: z.string(),
   typeId: z.string(),
@@ -10,7 +13,7 @@ const shapeSchema = z.object({
   transform: z.object({
     pos: vec2Schema,
     rotation: z.number(),
-    scale: vec2Schema,
+    scale: scale3Schema,
   }),
   params: z.record(z.string(), z.union([z.number(), z.string(), z.boolean()])),
   controlPoints: z.array(vec2Schema),
@@ -18,7 +21,8 @@ const shapeSchema = z.object({
     op: z.enum(["raise", "add", "carve"]),
     blend: z.number().min(0),
   }),
-  strength: z.number(),
+  /** Legacy height multiplier; folded into scale.z on load. */
+  strength: z.number().optional(),
   visible: z.boolean(),
   locked: z.boolean(),
 });
@@ -49,7 +53,14 @@ export function emptyDoc(sourcePath: string, width: number, height: number): Fla
 }
 
 export function parseDoc(json: string): FlatlandDoc {
-  return docSchema.parse(JSON.parse(json)) as FlatlandDoc;
+  const doc = docSchema.parse(JSON.parse(json));
+  for (const s of doc.shapes) {
+    if (s.strength !== undefined) {
+      s.transform.scale.z *= s.strength; // migrate legacy strength into tallness scale
+      delete s.strength;
+    }
+  }
+  return doc as unknown as FlatlandDoc;
 }
 
 export function serializeDoc(doc: FlatlandDoc): string {

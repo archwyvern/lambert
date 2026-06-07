@@ -58,16 +58,16 @@ test("carve cuts into what is below", () => {
   expect(r.mask[px(r, 64, 64)]!).toBe(1); // carve still authors the mask
 });
 
-test("strength scales the contribution", () => {
+test("scale.z scales the contribution (tallness)", () => {
   const dome = createShapeInstance("dome", v2(64, 64));
-  dome.strength = 0.5;
+  dome.transform.scale.z = 0.5;
   const r = evaluateField([dome], 128, 128);
   expect(r.heightMap[px(r, 64, 64)]!).toBeCloseTo(12, 1);
 });
 
 test("transform: offset position and 2x scale", () => {
   const dome = createShapeInstance("dome", v2(32, 32));
-  dome.transform.scale = v2(2, 2);
+  dome.transform.scale = { x: 2, y: 2, z: 1 };
   const r = evaluateField([dome], 256, 256);
   // local rim at 48 -> canvas rim at 96 from center
   expect(r.heightMap[px(r, 32, 32)]!).toBeGreaterThan(23.9);
