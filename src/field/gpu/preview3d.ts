@@ -93,7 +93,12 @@ export interface Orbit {
   pitch: number;
   /** Distance as a multiple of the doc's larger dimension. */
   dist: number;
+  /** Target offset in the camera's screen plane, as a fraction of the doc's larger dim. */
+  panX: number;
+  panY: number;
 }
+
+export const DEFAULT_ORBIT: Orbit = { yaw: 0.65, pitch: 0.65, dist: 1.3, panX: 0, panY: 0 };
 
 // -- minimal column-major mat4 (WebGPU clip space, depth 0..1) --
 
@@ -150,14 +155,31 @@ export function mat4Mul(a: Float32Array, b: Float32Array): Float32Array {
   return out;
 }
 
-/** MVP for an orbit camera around the doc's center on the ground plane. */
+/** MVP for an orbit camera; pan slides the look-at target in the camera's screen plane. */
 export function orbitMvp(orbit: Orbit, docW: number, docH: number, aspect: number): Float32Array {
-  const radius = Math.max(docW, docH) * orbit.dist;
-  const eye: [number, number, number] = [
+  const span = Math.max(docW, docH);
+  const radius = span * orbit.dist;
+  const off: [number, number, number] = [
     radius * Math.cos(orbit.pitch) * Math.sin(orbit.yaw),
     radius * Math.sin(orbit.pitch),
     radius * Math.cos(orbit.pitch) * Math.cos(orbit.yaw),
   ];
-  const proj = perspective(Math.PI / 4, aspect, 1, radius * 10);
-  return mat4Mul(proj, lookAt(eye, [0, 0, 0]));
+  // camera basis from the view direction (target -> eye is +off): right & up span the screen
+  const fl = Math.hypot(off[0], off[1], off[2]) || 1;
+  const fwd: [number, number, number] = [-off[0] / fl, -off[1] / fl, -off[2] / fl];
+  const right: [number, number, number] = [fwd[2], 0, -fwd[0]];
+  const rl = Math.hypot(right[0], right[1], right[2]) || 1;
+  right[0] /= rl;
+  right[2] /= rl;
+  const up: [number, number, number] = [
+    right[1] * fwd[2] - right[2] * fwd[1],
+    right[2] * fwd[0] - right[0] * fwd[2],
+    right[0] * fwd[1] - right[1] * fwd[0],
+  ];
+  const px = orbit.panX * span;
+  const py = orbit.panY * span;
+  const target: [number, number, number] = [right[0] * px + up[0] * py, right[1] * px + up[1] * py, right[2] * px + up[2] * py];
+  const eye: [number, number, number] = [target[0] + off[0], target[1] + off[1], target[2] + off[2]];
+  const proj = perspective(Math.PI / 4, aspect, 1, radius * 10 + span);
+  return mat4Mul(proj, lookAt(eye, target));
 }

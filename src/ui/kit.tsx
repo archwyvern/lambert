@@ -66,8 +66,9 @@ export function SpinBox(props: {
 
   const hasRange = min !== undefined && max !== undefined && max > min;
   const ratio = hasRange ? Math.min(1, Math.max(0, (value - min) / (max - min))) : 0;
-  // ~300px traverses a known range; capped so wide ranges aren't twitchy
-  const perPx = hasRange ? Math.min((max - min) / 300, 25 * step) : step * 0.5;
+  // ~600px traverses a known range; capped so wide ranges aren't twitchy (tuned for a
+  // calm scrub — roughly half the old sensitivity)
+  const perPx = hasRange ? Math.min((max - min) / 600, 12 * step) : step * 0.25;
 
   const clampRound = (v: number): number => {
     let x = v;

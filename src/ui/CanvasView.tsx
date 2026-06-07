@@ -1,19 +1,23 @@
-import { CubeRegular, DismissRegular } from "@fluentui/react-icons";
+import { CubeRegular } from "@fluentui/react-icons";
 import { useEffect, useRef, useState } from "react";
 import type { DocumentStore, EditorState } from "../document/store";
 import { addShape, updateShape } from "../document/docOps";
 import { getShapeType } from "../field/registry";
 import { normalSigns } from "../document/schema";
-import type { Orbit } from "../field/gpu/preview3d";
+import { DEFAULT_ORBIT, Orbit } from "../field/gpu/preview3d";
 import { v2, Vec2 } from "../field/vec";
 import { Gizmos } from "./Gizmos";
 import { LightPad } from "./LightPad";
 import { usePersistentState } from "./persist";
 import { axisScaleFromDrag, constrainAxis, pickShape, rotationFromDrag, snapAngle } from "./picking";
 import { PreviewRenderer } from "./preview";
+import { Dock3D, DOCKED_SIZE, FloatGeom, HEADER_H, Preview3DPanel } from "./Preview3DPanel";
 import { fitViewport, screenToCanvas, Viewport, zoomAt } from "./viewport";
 import type { ToolMode } from "./tools";
 import type { ViewState } from "./App";
+
+const ZOOM_MIN = 0.15;
+const ZOOM_MAX = 8;
 
 const ROTATE_SNAP = Math.PI / 12; // 15 deg, godot default rotation snap step
 
@@ -49,24 +53,19 @@ export function CanvasView(props: {
   const dragRef = useRef<Drag | null>(null);
   const spaceRef = useRef(false);
   const [show3d, setShow3d] = usePersistentState("panel:3d", false);
-  const [orbit, setOrbit] = useState<Orbit>({ yaw: 0.65, pitch: 0.65, dist: 1.3 });
+  const [dock3d, setDock3d] = usePersistentState<Dock3D>("panel:3d:dock", "docked");
+  const [geom3d, setGeom3d] = usePersistentState<FloatGeom>("panel:3d:geom", { x: 80, y: 80, w: 420, h: 420 });
+  const [orbit, setOrbit] = useState<Orbit>({ ...DEFAULT_ORBIT });
   const canvas3dRef = useRef<HTMLCanvasElement>(null);
 
-  // document-level CAPTURE listeners for the gesture lifetime: element pointer-capture
-  // proved unreliable on the presenting WebGPU canvas, and bubble-phase listeners die at
-  // the panel's stopPropagation (react dispatches from #root, killing the native bubble
-  // before it reaches document) — capture fires first, immune to both
-  const beginOrbit = (e: React.PointerEvent): void => {
-    if (e.button !== 0) return;
+  // 3D camera gestures. Document-level CAPTURE listeners for the gesture lifetime: element
+  // pointer-capture proved unreliable on the presenting WebGPU canvas, and bubble-phase
+  // listeners die at the panel's stopPropagation (react dispatches from #root, killing the
+  // native bubble before it reaches document) — capture fires first, immune to both.
+  const begin3dGesture = (e: React.PointerEvent, step: (dx: number, dy: number) => void): void => {
     e.stopPropagation();
     e.preventDefault();
-    const onMove = (ev: PointerEvent): void => {
-      setOrbit((o) => ({
-        yaw: o.yaw - ev.movementX * 0.01,
-        pitch: Math.min(1.45, Math.max(0.08, o.pitch + ev.movementY * 0.01)),
-        dist: o.dist,
-      }));
-    };
+    const onMove = (ev: PointerEvent): void => step(ev.movementX, ev.movementY);
     const onUp = (): void => {
       document.removeEventListener("pointermove", onMove, true);
       document.removeEventListener("pointerup", onUp, true);
@@ -74,6 +73,27 @@ export function CanvasView(props: {
     document.addEventListener("pointermove", onMove, true);
     document.addEventListener("pointerup", onUp, true);
   };
+
+  // left = orbit; middle or shift+left = pan the look-at target across the screen plane
+  const on3dCanvasDown = (e: React.PointerEvent): void => {
+    const cssW = dock3d === "float" ? geom3d.w : DOCKED_SIZE;
+    if (e.button === 1 || e.shiftKey) {
+      begin3dGesture(e, (dx, dy) =>
+        setOrbit((o) => ({ ...o, panX: o.panX + (dx / cssW) * o.dist, panY: o.panY - (dy / cssW) * o.dist })),
+      );
+    } else if (e.button === 0) {
+      begin3dGesture(e, (dx, dy) =>
+        setOrbit((o) => ({
+          ...o,
+          yaw: o.yaw - dx * 0.01,
+          pitch: Math.min(1.45, Math.max(0.08, o.pitch + dy * 0.01)),
+        })),
+      );
+    }
+  };
+
+  const zoom3dBy = (factor: number): void =>
+    setOrbit((o) => ({ ...o, dist: Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, o.dist * factor)) }));
 
   const doc = state.doc;
 
@@ -140,16 +160,20 @@ export function CanvasView(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // attach the 3D inspection canvas while the panel is open
+  // 3D panel canvas CSS size depends on dock mode / float geometry
+  const canvas3dW = dock3d === "float" ? geom3d.w : DOCKED_SIZE;
+  const canvas3dH = dock3d === "float" ? geom3d.h - HEADER_H : DOCKED_SIZE;
+
+  // attach the 3D inspection canvas while the panel is open; resize backing store to match
   useEffect(() => {
     const r = rendererRef.current;
     const canvas = canvas3dRef.current;
     if (!ready || !r || !show3d || !canvas) return;
-    canvas.width = Math.floor(300 * devicePixelRatio);
-    canvas.height = Math.floor(300 * devicePixelRatio);
+    canvas.width = Math.max(1, Math.floor(canvas3dW * devicePixelRatio));
+    canvas.height = Math.max(1, Math.floor(canvas3dH * devicePixelRatio));
     r.attach3D(canvas);
     return () => r.attach3D(null);
-  }, [ready, show3d, diffuseBytes]);
+  }, [ready, show3d, diffuseBytes, canvas3dW, canvas3dH]);
 
   // upload diffuse when it changes; refit the view to the (possibly new) doc dims
   useEffect(() => {
@@ -341,34 +365,19 @@ export function CanvasView(props: {
         </div>
       ) : null}
       {diffuseBytes && show3d ? (
-        <div
-          className="absolute right-3 bottom-8 border border-border bg-surface2/95"
-          onPointerDown={(e) => e.stopPropagation()}
-          onPointerMove={(e) => e.stopPropagation()}
-          onPointerUp={(e) => e.stopPropagation()}
-          onWheel={(e) => e.stopPropagation()}
-        >
-          <div className="flex h-[24px] items-center justify-between border-b border-border px-2">
-            <span className="text-sm font-semibold uppercase tracking-wide text-fg-mid">3D</span>
-            <button
-              title="Close"
-              className="flex h-[18px] w-[18px] items-center justify-center text-fg-mid hover:text-fg"
-              onClick={() => setShow3d(false)}
-            >
-              <DismissRegular style={{ fontSize: 12 }} />
-            </button>
-          </div>
-          <canvas
-            ref={canvas3dRef}
-            style={{ width: 300, height: 300 }}
-            className="cursor-grab active:cursor-grabbing"
-            onPointerDown={beginOrbit}
-            onWheel={(e) => {
-              const f = e.deltaY < 0 ? 1 / 1.1 : 1.1;
-              setOrbit((o) => ({ ...o, dist: Math.min(4, Math.max(0.4, o.dist * f)) }));
-            }}
-          />
-        </div>
+        <Preview3DPanel
+          canvasRef={canvas3dRef}
+          canvasW={canvas3dW}
+          canvasH={canvas3dH}
+          mode={dock3d}
+          geom={geom3d}
+          setGeom={setGeom3d}
+          setMode={setDock3d}
+          onClose={() => setShow3d(false)}
+          onCanvasDown={on3dCanvasDown}
+          onWheel={(e) => zoom3dBy(e.deltaY < 0 ? 0.9 : 1.1)}
+          zoomBy={zoom3dBy}
+        />
       ) : null}
       {diffuseBytes && !show3d ? (
         <button
