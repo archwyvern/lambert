@@ -18,10 +18,10 @@ export function use3DCamera() {
   orbitRef.current = orbit;
   const activeCleanup = useRef<(() => void) | null>(null);
 
-  const panBy = (docW: number, docH: number, cssW: number, ax: V3, ay: V3, dx: number, dy: number): void => {
+  const panBy = (docW: number, docH: number, cssW: number, ax: V3, ay: V3, dx: number, dy: number, gain = 1): void => {
     const span = Math.max(docW, docH);
     setOrbit((o) => {
-      const f = (o.dist * span) / cssW;
+      const f = ((o.dist * span) / cssW) * gain;
       const sx = dx * f;
       const sy = -dy * f; // drag up (negative dy) -> move "into" the scene
       return {
@@ -47,8 +47,8 @@ export function use3DCamera() {
       const dx = ev.movementX;
       const dy = ev.movementY;
       if (b & 1 && b & 2) {
-        const { right, fwd } = panAxes(orbitRef.current); // dolly pan: sideways + along view dir
-        panBy(docW, docH, cssW, right, fwd, dx, dy);
+        const { fwd } = panAxes(orbitRef.current); // dolly: forward/back along view dir ONLY
+        panBy(docW, docH, cssW, [0, 0, 0], fwd, 0, dy, 1.8);
       } else if (b & 2 || b & 4) {
         setOrbit((o) => ({
           ...o,
