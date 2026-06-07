@@ -19,19 +19,24 @@ export function evaluateField(shapes: ShapeInstance[], width: number, height: nu
   const mask = new Float32Array(width * height);
   const resolved = shapes
     .filter((s) => s.visible)
-    .map((s) => ({ s, type: getShapeType(s.typeId), ds: distanceScale(s.transform) }));
+    .map((s) => ({
+      s,
+      type: getShapeType(s.typeId),
+      ds: distanceScale(s.transform),
+      op: getShapeType(s.typeId).defaultCombine ?? ("max" as const),
+    }));
 
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const p = v2(x + 0.5, y + 0.5);
       let H = 0;
       let M = 0;
-      for (const { s, type, ds } of resolved) {
+      for (const { s, type, ds, op } of resolved) {
         const sample = type.eval(toLocal(s.transform, p), s);
         const inf = influence(sample.sd * ds, s.combine.blend);
         if (inf <= 0) continue;
         const h = sample.height * s.transform.scale.z; // z scales tallness
-        H = mix(H, combineHeight(s.combine.op, H, h, s.combine.blend), inf);
+        H = mix(H, combineHeight(op, H, h, s.combine.blend), inf);
         M = Math.max(M, inf);
       }
       const i = y * width + x;

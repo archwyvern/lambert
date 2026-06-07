@@ -25,29 +25,18 @@ test("invisible shapes are skipped", () => {
 
 test("max: overlapping shapes merge to the taller", () => {
   const low = createShapeInstance("plateau", v2(64, 64));
-  low.combine = { op: "max", blend: 0 };
   const tall = createShapeInstance("plateau", v2(80, 64));
   tall.params.height = 40;
-  tall.combine = { op: "max", blend: 0 };
   const r = evaluateField([low, tall], 160, 128);
   expect(r.heightMap[px(r, 80, 64)]!).toBeCloseTo(40, 0); // overlap: taller wins
 });
 
-test("default combine clips: overlapping shapes do not stack heights", () => {
+test("shapes clip: overlapping shapes do not stack heights", () => {
   const slab = createShapeInstance("plateau", v2(64, 64));
   const stud = createShapeInstance("dome", v2(64, 64));
   stud.params = { ...stud.params, radiusX: 8, radiusY: 8, height: 10 };
   const r = evaluateField([slab, stud], 128, 128);
   expect(r.heightMap[px(r, 64, 64)]!).toBeCloseTo(24, 0); // max(24, ~10), not 34
-});
-
-test("add follows underlying curvature", () => {
-  const base = createShapeInstance("dome", v2(64, 64));
-  const stud = createShapeInstance("dome", v2(64, 64));
-  stud.params = { ...stud.params, radiusX: 8, radiusY: 8, height: 4 };
-  stud.combine = { op: "add", blend: 0 };
-  const r = evaluateField([base, stud], 128, 128);
-  expect(r.heightMap[px(r, 64, 64)]!).toBeGreaterThan(27.9); // 24 + 4 minus pixel-center epsilon
 });
 
 test("carve cuts into what is below", () => {
@@ -78,7 +67,7 @@ test("transform: offset position and 2x scale", () => {
 test("blend bulges where equal-height shapes overlap (weld fillet)", () => {
   const a = createShapeInstance("plateau", v2(50, 64));
   const b = createShapeInstance("plateau", v2(70, 64));
-  b.combine = { op: "max", blend: 8 };
+  b.combine = { blend: 8 };
   const r = evaluateField([a, b], 128, 128);
   // overlap interior: both at full height 24, smax bulge = k/4 = 2
   const overlap = r.heightMap[px(r, 60, 64)]!;

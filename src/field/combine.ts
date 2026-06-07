@@ -1,6 +1,6 @@
 import { clamp, mix } from "./vec";
 
-export type CombineOp = "max" | "add" | "carve";
+export type CombineOp = "max" | "carve";
 
 /** Polynomial smooth max (iq). Deviates from max only where |a-b| < k; bulge k/4 at a=b. */
 export function smax(a: number, b: number, k: number): number {
@@ -14,18 +14,12 @@ export function smin(a: number, b: number, k: number): number {
 }
 
 /**
- * Fold step. max = smooth-union (clip), add = stack on whatever is below (detail follows
- * curvature), carve = smooth-subtract (the smin fillets the groove rim).
+ * Fold step. max = smooth-union (shapes clip into each other like solids);
+ * carve = smooth-subtract (the smin fillets the groove rim). The op is a property
+ * of the shape TYPE, not a per-shape setting.
  */
 export function combineHeight(op: CombineOp, H: number, h: number, k: number): number {
-  switch (op) {
-    case "max":
-      return smax(H, h, k);
-    case "add":
-      return H + h;
-    case "carve":
-      return smin(H, H - h, k);
-  }
+  return op === "carve" ? smin(H, H - h, k) : smax(H, h, k);
 }
 
 /**

@@ -2,11 +2,8 @@ import type { DocumentStore, EditorState } from "../document/store";
 import { removeShape, reorderShape, updateShape } from "../document/docOps";
 import { polygonStats, regularPolygon, resamplePolyline } from "../field/controlPoints";
 import { getShapeType } from "../field/registry";
-import type { CombineOp } from "../field/combine";
 import type { ShapeInstance } from "../field/types";
 import { Button, humanizeLabel, SectionLabel, SelectRow, SpinBox } from "./kit";
-
-const COMBINE_OPS = ["max", "add", "carve"] as const;
 
 const toDeg = (rad: number): number => Number(((rad * 180) / Math.PI).toFixed(1));
 const toRad = (deg: number): number => (deg * Math.PI) / 180;
@@ -162,15 +159,6 @@ export function Inspector(props: { store: DocumentStore; state: EditorState }): 
       />
       <div className="my-3 border-t border-border" />
       <SectionLabel>Compositing</SectionLabel>
-      <SelectRow
-        label="combine"
-        value={shape.combine.op}
-        options={COMBINE_OPS}
-        onChange={(v) => {
-          live((s) => ({ ...s, combine: { ...s.combine, op: v as CombineOp } }), "combine");
-          commit();
-        }}
-      />
       <SpinBox
         label="blend"
         value={shape.combine.blend}

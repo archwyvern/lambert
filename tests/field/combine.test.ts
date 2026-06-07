@@ -15,7 +15,7 @@ test("smax bulges by k/4 at equality (the fillet)", () => {
 
 test("combineHeight ops", () => {
   expect(combineHeight("max", 0, 10, 0)).toBe(10);
-  expect(combineHeight("add", 3, 4, 0)).toBe(7);
+  expect(combineHeight("max", 24, 10, 0)).toBe(24); // clip: no stacking
   expect(combineHeight("carve", 10, 4, 0)).toBe(6);
 });
 

@@ -18,9 +18,9 @@ const shapeSchema = z.object({
   params: z.record(z.string(), z.union([z.number(), z.string(), z.boolean()])),
   controlPoints: z.array(vec2Schema),
   combine: z.object({
-    // "raise" = legacy alias of max, migrated on load
-    op: z.enum(["max", "add", "carve", "raise"]).transform((v) => (v === "raise" ? ("max" as const) : v)),
     blend: z.number().min(0),
+    /** Legacy per-shape op; behavior now derives from the shape type. Ignored. */
+    op: z.string().optional(),
   }),
   /** Legacy height multiplier; folded into scale.z on load. */
   strength: z.number().optional(),
@@ -78,6 +78,7 @@ export function emptyDoc(sourcePath: string, width: number, height: number): Fla
 export function parseDoc(json: string): FlatlandDoc {
   const doc = docSchema.parse(JSON.parse(json));
   for (const s of doc.shapes) {
+    delete s.combine.op; // legacy per-shape op: the shape type owns the behavior now
     if (s.strength !== undefined) {
       s.transform.scale.z *= s.strength; // migrate legacy strength into tallness scale
       delete s.strength;

@@ -26,7 +26,7 @@ test("ridge: multi-segment polyline measures nearest segment", () => {
 test("groove: same geometry, defaults to carve", () => {
   const groove = getShapeType("groove");
   const ginst = createShapeInstance("groove", v2(0, 0)); // depth 8, width 12
-  expect(ginst.combine.op).toBe("carve");
+  expect(getShapeType("groove").defaultCombine).toBe("carve");
   expect(groove.eval(v2(0, 0), ginst).height).toBeCloseTo(8);
   expect(groove.eval(v2(0, 6), ginst).height).toBeCloseTo(0);
 });

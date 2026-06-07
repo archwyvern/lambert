@@ -25,7 +25,6 @@ export interface ControlPointSpec {
 }
 
 export interface CombineSpec {
-  op: CombineOp;
   /** Smooth-blend radius in canvas px; 0 = hard. */
   blend: number;
 }
@@ -55,6 +54,7 @@ export interface ShapeType {
   name: string;
   params: Record<string, ParamSpec>;
   controlPoints: ControlPointSpec;
+  /** carve = subtractive shape (groove); everything else clips via max. */
   defaultCombine?: CombineOp;
   /**
    * WGSL mirror of eval: `fn shape_<id>(p: vec2f, base: u32) -> vec2f` returning

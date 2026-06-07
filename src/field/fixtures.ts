@@ -3,18 +3,17 @@ import { createShapeInstance } from "./registry";
 import type { ShapeInstance } from "./types";
 import { v2 } from "./vec";
 
-/** Deterministic fixture exercising all four v1 shapes, every combine op, and blending. */
+/** Deterministic fixture exercising all four v1 shapes and blending. */
 export function goldenShapes(): ShapeInstance[] {
   const slab = createShapeInstance("plateau", v2(40, 48));
   slab.id = "slab";
   const dome = createShapeInstance("dome", v2(40, 48));
   dome.id = "dome";
-  dome.params = { ...dome.params, radiusX: 16, radiusY: 16, height: 8 };
-  dome.combine = { op: "add", blend: 0 };
+  dome.params = { ...dome.params, radiusX: 16, radiusY: 16, height: 36 }; // out-talls the slab
   const ridge = createShapeInstance("ridge", v2(72, 24));
   ridge.id = "ridge";
   ridge.transform.rotation = Math.PI / 6;
-  ridge.combine = { op: "max", blend: 6 };
+  ridge.combine = { blend: 6 };
   const groove = createShapeInstance("groove", v2(40, 72));
   groove.id = "groove";
   return [slab, dome, ridge, groove];
@@ -29,12 +28,12 @@ export function stressShapes(): ShapeInstance[] {
   const ridge = createShapeInstance("ridge", v2(48, 60));
   ridge.id = "stress-ridge";
   ridge.transform.rotation = -0.4;
-  ridge.combine = { op: "max", blend: 5 };
+  ridge.combine = { blend: 5 };
   ridge.transform.scale.z = 0.8;
   const groove = createShapeInstance("groove", v2(48, 40));
   groove.id = "stress-groove";
   groove.transform.rotation = 0.7;
-  groove.combine = { op: "carve", blend: 3 };
+  groove.combine = { blend: 3 };
   return [dome, ridge, groove];
 }
 

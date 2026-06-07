@@ -3,7 +3,7 @@ import { distanceScale } from "../transform";
 import type { ShapeInstance } from "../types";
 import { gpuTypeIndex, MAX_PARAMS, PARAMS_OFFSET, RECORD_F32 } from "./wgsl";
 
-const OP_INDEX = { max: 0, add: 1, carve: 2 } as const;
+
 
 export interface PackedShapes {
   records: Float32Array;
@@ -28,7 +28,7 @@ export function packShapes(shapes: ShapeInstance[]): PackedShapes {
     const type = getShapeType(s.typeId);
     const base = si * RECORD_F32;
     records[base] = gpuTypeIndex(s.typeId);
-    records[base + 1] = OP_INDEX[s.combine.op];
+    records[base + 1] = type.defaultCombine === "carve" ? 1 : 0; // op lives on the type
     records[base + 2] = s.combine.blend;
     records[base + 3] = s.transform.scale.z; // height multiplier (tallness scale)
     records[base + 4] = s.transform.pos.x;

@@ -17,8 +17,8 @@ const SHAPE_ICONS: Record<string, string> = {
   groove: grooveIcon,
 };
 
-/** One-glyph compositing marker; the default (max) stays unmarked. */
-const OP_MARK: Record<string, string> = { max: "", add: "+", carve: "-" };
+/** Subtractive shapes (carve types) get a "-" marker; clipping shapes stay unmarked. */
+const isCarve = (typeId: string): boolean => getShapeType(typeId).defaultCombine === "carve";
 
 interface Menu {
   x: number;
@@ -166,9 +166,9 @@ export function Layers(props: { store: DocumentStore; state: EditorState }): Rea
                   ) : (
                     <span className="min-w-0 flex-1 truncate">{labels[i]}</span>
                   )}
-                  {OP_MARK[s.combine.op] ? (
-                    <span className="w-2 shrink-0 text-center font-mono text-sm text-fg-mid" title={s.combine.op}>
-                      {OP_MARK[s.combine.op]}
+                  {isCarve(s.typeId) ? (
+                    <span className="w-2 shrink-0 text-center font-mono text-sm text-fg-mid" title="carves">
+                      -
                     </span>
                   ) : null}
                   <button
