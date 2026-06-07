@@ -1,0 +1,24 @@
+import { defineShapeType, numParam } from "../registry";
+import { sdEllipse } from "../sdf";
+import { v2 } from "../vec";
+
+export const Dome = defineShapeType({
+  id: "dome",
+  name: "Dome",
+  params: {
+    radiusX: { type: "px", default: 48, min: 1 },
+    radiusY: { type: "px", default: 48, min: 1 },
+    height: { type: "px", default: 24, min: -256, max: 256 },
+  },
+  controlPoints: { kind: "none", default: [] },
+  eval(p, shape) {
+    const rx = numParam(shape, "radiusX");
+    const ry = numParam(shape, "radiusY");
+    const h = numParam(shape, "height");
+    const qx = p.x / rx;
+    const qy = p.y / ry;
+    const d2 = qx * qx + qy * qy;
+    const height = d2 >= 1 ? 0 : h * Math.sqrt(1 - d2);
+    return { height, sd: sdEllipse(p, v2(rx, ry)) };
+  },
+});
