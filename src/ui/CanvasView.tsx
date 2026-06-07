@@ -49,7 +49,27 @@ export function CanvasView(props: {
   const [show3d, setShow3d] = usePersistentState("panel:3d", false);
   const [orbit, setOrbit] = useState<Orbit>({ yaw: 0.65, pitch: 0.65, dist: 1.3 });
   const canvas3dRef = useRef<HTMLCanvasElement>(null);
-  const orbitDrag = useRef<{ x: number; y: number } | null>(null);
+
+  // document-level listeners for the gesture lifetime (the skyrat SpinSlider pattern):
+  // element pointer-capture proved unreliable on the presenting WebGPU canvas
+  const beginOrbit = (e: React.PointerEvent): void => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const onMove = (ev: PointerEvent): void => {
+      setOrbit((o) => ({
+        yaw: o.yaw - ev.movementX * 0.01,
+        pitch: Math.min(1.45, Math.max(0.08, o.pitch + ev.movementY * 0.01)),
+        dist: o.dist,
+      }));
+    };
+    const onUp = (): void => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+  };
 
   const doc = state.doc;
 
@@ -333,25 +353,7 @@ export function CanvasView(props: {
             ref={canvas3dRef}
             style={{ width: 300, height: 300 }}
             className="cursor-grab active:cursor-grabbing"
-            onPointerDown={(e) => {
-              (e.target as Element).setPointerCapture(e.pointerId);
-              orbitDrag.current = { x: e.clientX, y: e.clientY };
-            }}
-            onPointerMove={(e) => {
-              const d = orbitDrag.current;
-              if (!d) return;
-              const dx = e.clientX - d.x;
-              const dy = e.clientY - d.y;
-              orbitDrag.current = { x: e.clientX, y: e.clientY };
-              setOrbit((o) => ({
-                yaw: o.yaw - dx * 0.01,
-                pitch: Math.min(1.45, Math.max(0.08, o.pitch + dy * 0.01)),
-                dist: o.dist,
-              }));
-            }}
-            onPointerUp={() => {
-              orbitDrag.current = null;
-            }}
+            onPointerDown={beginOrbit}
             onWheel={(e) => {
               const f = e.deltaY < 0 ? 1 / 1.1 : 1.1;
               setOrbit((o) => ({ ...o, dist: Math.min(4, Math.max(0.4, o.dist * f)) }));
