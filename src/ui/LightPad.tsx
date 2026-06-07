@@ -10,8 +10,13 @@ export function LightPad(props: {
   const cy = R + 2 + lightDir[1] * R;
   const fromEvent = (e: React.PointerEvent): void => {
     const rect = (e.currentTarget as SVGElement).getBoundingClientRect();
-    const x = Math.max(-1, Math.min(1, (e.clientX - rect.left - R - 2) / R));
-    const y = Math.max(-1, Math.min(1, (e.clientY - rect.top - R - 2) / R));
+    let x = (e.clientX - rect.left - R - 2) / R;
+    let y = (e.clientY - rect.top - R - 2) / R;
+    const len = Math.hypot(x, y);
+    if (len > 1) {
+      x /= len; // clamp the handle to the circle, not the bounding square
+      y /= len;
+    }
     onChange([x, y, Math.max(0.3, Math.sqrt(Math.max(0, 1 - x * x - y * y)))]);
   };
   return (
