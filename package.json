@@ -4,7 +4,10 @@
   "description": "Shape-based height field authoring for normal maps. 3D but not 3D, done the hard way.",
   "type": "module",
   "license": "MIT",
+  "main": "./out/main/index.js",
   "scripts": {
+    "dev": "electron-vite dev",
+    "selftest": "electron-vite build && electron . --selftest",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
@@ -12,8 +15,14 @@
     "gen-goldens": "tsx tests/golden/gen.ts"
   },
   "packageManager": "pnpm@10.33.4",
+  "pnpm": {
+    "onlyBuiltDependencies": ["electron", "esbuild"]
+  },
   "devDependencies": {
     "@types/node": "^25.9.2",
+    "@webgpu/types": "^0.1.70",
+    "electron": "^42.3.3",
+    "electron-vite": "^5.0.0",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",
     "vitest": "^4.1.8"
