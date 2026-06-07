@@ -149,11 +149,16 @@ export function CanvasView(props: {
     >
       <canvas ref={canvasRef} className="h-full w-full" />
       {gpuError ? (
-        <div className="absolute inset-0 grid place-items-center bg-canvasbg">GPU unavailable: {gpuError}</div>
+        <div className="absolute inset-0 grid place-items-center bg-bg">GPU unavailable: {gpuError}</div>
       ) : null}
       {!diffuseBytes && !gpuError ? (
-        <div className="absolute inset-0 grid place-items-center text-fg-mid">
-          Open an image (or a project) to start
+        <div className="absolute inset-0 grid place-items-center">
+          <div className="border border-border bg-surface px-6 py-4 text-center">
+            <div className="text-md font-semibold text-accent">No document</div>
+            <p className="mt-1 text-sm text-fg-mid">
+              Open a diffuse image (or an existing project) from the toolbar to start.
+            </p>
+          </div>
         </div>
       ) : null}
       <Gizmos doc={doc} selectedId={state.selectedId} viewport={viewport} store={store} />

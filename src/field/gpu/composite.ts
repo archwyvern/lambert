@@ -37,7 +37,7 @@ fn vs(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4f {
 fn fs(@builtin(position) fragPos: vec4f) -> @location(0) vec4f {
   let c = (fragPos.xy - vec2f(cu.panX, cu.panY)) / cu.zoom;
   if (c.x < 0.0 || c.y < 0.0 || c.x >= cu.canvasW || c.y >= cu.canvasH) {
-    return vec4f(0.063, 0.063, 0.075, 1.0); // outside doc: editor background
+    return vec4f(0.024, 0.024, 0.047, 1.0); // outside doc: viewport background (#06060c)
   }
   let px = vec2i(c);
   let diffuse = textureLoad(diffuseTex, px, 0);

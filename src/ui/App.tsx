@@ -89,16 +89,16 @@ export function App(): React.JSX.Element {
   }, [store]);
 
   return (
-    <div className="flex h-screen flex-col bg-canvasbg text-sm text-fg">
+    <div className="flex h-screen flex-col bg-bg text-sm text-fg">
       <Toolbar store={store} state={state} view={view} setView={setView} diffuse={diffuse} setDiffuse={setDiffuse} />
       <div className="flex min-h-0 flex-1">
-        <aside className="w-48 overflow-y-auto border-r border-panel-edge bg-panel p-2">
+        <aside className="w-48 overflow-y-auto border-r border-border bg-surface p-3">
           <Library />
         </aside>
-        <main className="relative min-w-0 flex-1">
+        <main className="relative min-w-0 flex-1 bg-[var(--color-viewport-bg)]">
           <CanvasView store={store} state={state} view={view} diffuseBytes={diffuse?.bytes ?? null} />
         </main>
-        <aside className="w-72 overflow-y-auto border-l border-panel-edge bg-panel p-2">
+        <aside className="w-72 overflow-y-auto border-l border-border bg-surface p-3">
           <Inspector store={store} state={state} />
         </aside>
       </div>

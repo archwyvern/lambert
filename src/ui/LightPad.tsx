@@ -4,7 +4,7 @@ export function LightPad(props: {
   onChange: (dir: [number, number, number]) => void;
 }): React.JSX.Element {
   const { lightDir, onChange } = props;
-  const R = 22;
+  const R = 14;
   const cx = R + 2 + lightDir[0] * R;
   const cy = R + 2 + lightDir[1] * R;
   const fromEvent = (e: React.PointerEvent): void => {
@@ -18,6 +18,8 @@ export function LightPad(props: {
       width={R * 2 + 4}
       height={R * 2 + 4}
       className="cursor-crosshair"
+      role="slider"
+      aria-label="Light direction"
       onPointerDown={(e) => {
         (e.target as Element).setPointerCapture(e.pointerId);
         fromEvent(e);
@@ -26,7 +28,8 @@ export function LightPad(props: {
         if (e.buttons) fromEvent(e);
       }}
     >
-      <circle cx={R + 2} cy={R + 2} r={R} fill="#101013" stroke="var(--color-panel-edge)" />
+      <circle cx={R + 2} cy={R + 2} r={R} fill="var(--color-surface)" stroke="var(--color-border-light)" />
+      <circle cx={R + 2} cy={R + 2} r={1.5} fill="var(--color-border-light)" />
       <circle cx={cx} cy={cy} r={4} fill="var(--color-accent)" />
     </svg>
   );

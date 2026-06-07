@@ -3,11 +3,71 @@
    src/ui without an explicit source (path is relative to this file) */
 @source "./";
 
+/* Skyrat-derived theme (gold HUD accent, layered dark surfaces, tracked labels).
+   Deviations by design: 12px is the readable floor (no 10/11px body text) and labels
+   never go grayer than fg-mid. */
 @theme {
-  --color-panel: #1b1b1f;
-  --color-panel-edge: #2a2a30;
-  --color-canvasbg: #101013;
-  --color-accent: #6ea8fe;
-  --color-fg: #f2f2f4;
-  --color-fg-mid: #c8c8cd;
+  --color-bg: #1a1a1c;
+  --color-surface: #222226;
+  --color-surface2: #2a2a2e;
+  --color-surface3: #33333a;
+  --color-border: #303036;
+  --color-border-light: #404049;
+  --color-accent: #c8a84e;
+  --color-accent-dim: color-mix(in srgb, var(--color-accent) 40%, transparent);
+  --color-accent-faint: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  --color-fg: #ffffff;
+  --color-fg-mid: #d8d8da;
+  --color-success: #6aaa4e;
+  --color-error: #c85050;
+  --color-error-faint: color-mix(in srgb, var(--color-error) 12%, transparent);
+  --color-viewport-bg: #06060c;
+  --text-sm: 0.75rem;
+  --text-base: 0.75rem;
+  --text-md: 0.875rem;
+  --text-lg: 1rem;
+  --spacing-control: 34px;
+  --tracking-tight: 0.08rem;
+  --tracking-label: 0.1rem;
+  --tracking-section: 0.18rem;
+  --shadow-popover: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-light);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+/* hide native number-input spinners; the SpinBox provides its own steppers */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.animate-fade-in {
+  animation: fadeIn 0.12s ease-out;
 }

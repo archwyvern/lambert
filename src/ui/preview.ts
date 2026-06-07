@@ -147,7 +147,7 @@ export class PreviewRenderer {
           view: this.ctx.getCurrentTexture().createView(),
           loadOp: "clear",
           storeOp: "store",
-          clearValue: { r: 0.063, g: 0.063, b: 0.075, a: 1 },
+          clearValue: { r: 0.024, g: 0.024, b: 0.047, a: 1 },
         },
       ],
     });

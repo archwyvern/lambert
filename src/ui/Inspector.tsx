@@ -2,134 +2,111 @@ import type { DocumentStore, EditorState } from "../document/store";
 import { removeShape, reorderShape, updateShape } from "../document/docOps";
 import { getShapeType } from "../field/registry";
 import type { CombineOp } from "../field/combine";
-import type { ParamSpec, ShapeInstance } from "../field/types";
+import type { ShapeInstance } from "../field/types";
+import { Button, SectionLabel, SelectRow, SpinBox } from "./kit";
 
-function ParamControl(props: {
-  name: string;
-  spec: ParamSpec;
-  value: number | string | boolean;
-  onChange: (v: number | string) => void;
-}): React.JSX.Element {
-  const { name, spec, value, onChange } = props;
-  if (spec.type === "enum") {
-    return (
-      <label className="flex items-center justify-between gap-2 py-1">
-        <span className="text-fg-mid">{name}</span>
-        <select
-          className="rounded border border-panel-edge bg-canvasbg px-1 py-0.5"
-          value={String(value)}
-          onChange={(e) => onChange(e.target.value)}
-        >
-          {spec.options.map((o) => (
-            <option key={o} value={o}>
-              {o}
-            </option>
-          ))}
-        </select>
-      </label>
-    );
-  }
-  return (
-    <label className="flex items-center justify-between gap-2 py-1">
-      <span className="text-fg-mid">{name}</span>
-      <input
-        type="number"
-        className="w-24 rounded border border-panel-edge bg-canvasbg px-1 py-0.5 text-right"
-        value={Number(value)}
-        min={spec.min}
-        max={spec.max}
-        onChange={(e) => onChange(Number(e.target.value))}
-      />
-    </label>
-  );
-}
+const COMBINE_OPS = ["raise", "add", "carve"] as const;
 
 export function Inspector(props: { store: DocumentStore; state: EditorState }): React.JSX.Element {
   const { store, state } = props;
   const shape = state.doc.shapes.find((s) => s.id === state.selectedId);
-  if (!shape) return <div className="text-fg-mid">No selection</div>;
+  if (!shape) {
+    return (
+      <div>
+        <SectionLabel>Inspector</SectionLabel>
+        <p className="text-sm leading-snug text-fg-mid">
+          Nothing selected. Click a shape on the canvas to edit its parameters.
+        </p>
+      </div>
+    );
+  }
   const type = getShapeType(shape.typeId);
-  const patch = (fn: (s: ShapeInstance) => ShapeInstance): void => {
-    store.update((d) => updateShape(d, shape.id, fn));
-    store.endGesture();
-  };
-  const btn = "flex-1 rounded border border-panel-edge px-2 py-1 hover:border-accent";
+  const live = (fn: (s: ShapeInstance) => ShapeInstance, key: string): void =>
+    store.update((d) => updateShape(d, shape.id, fn), { coalesce: `${key}:${shape.id}` });
+  const commit = (): void => store.endGesture();
+
   return (
     <div>
-      <div className="mb-1 font-semibold">{type.name}</div>
-      {Object.entries(type.params).map(([key, spec]) => (
-        <ParamControl
-          key={key}
-          name={key}
-          spec={spec}
-          value={shape.params[key]!}
-          onChange={(v) => patch((s) => ({ ...s, params: { ...s.params, [key]: v } }))}
-        />
-      ))}
-      <div className="mt-2 border-t border-panel-edge pt-2">
-        <label className="flex items-center justify-between gap-2 py-1">
-          <span className="text-fg-mid">combine</span>
-          <select
-            className="rounded border border-panel-edge bg-canvasbg px-1 py-0.5"
-            value={shape.combine.op}
-            onChange={(e) => patch((s) => ({ ...s, combine: { ...s.combine, op: e.target.value as CombineOp } }))}
-          >
-            <option value="raise">raise</option>
-            <option value="add">add</option>
-            <option value="carve">carve</option>
-          </select>
-        </label>
-        <label className="flex items-center justify-between gap-2 py-1">
-          <span className="text-fg-mid">blend</span>
-          <input
-            type="number"
-            min={0}
-            className="w-24 rounded border border-panel-edge bg-canvasbg px-1 py-0.5 text-right"
-            value={shape.combine.blend}
-            onChange={(e) =>
-              patch((s) => ({ ...s, combine: { ...s.combine, blend: Math.max(0, Number(e.target.value)) } }))
-            }
+      <div className="mb-2 text-md font-semibold text-accent">{type.name}</div>
+      {Object.entries(type.params).map(([key, spec]) =>
+        spec.type === "enum" ? (
+          <SelectRow
+            key={key}
+            label={key}
+            value={String(shape.params[key])}
+            options={spec.options}
+            onChange={(v) => {
+              live((s) => ({ ...s, params: { ...s.params, [key]: v } }), `param-${key}`);
+              commit();
+            }}
           />
-        </label>
-        <label className="flex items-center justify-between gap-2 py-1">
-          <span className="text-fg-mid">strength</span>
-          <input
-            type="number"
-            step={0.1}
-            className="w-24 rounded border border-panel-edge bg-canvasbg px-1 py-0.5 text-right"
-            value={shape.strength}
-            onChange={(e) => patch((s) => ({ ...s, strength: Number(e.target.value) }))}
+        ) : (
+          <SpinBox
+            key={key}
+            label={key}
+            value={Number(shape.params[key])}
+            min={spec.min}
+            max={spec.max}
+            onChange={(v) => live((s) => ({ ...s, params: { ...s.params, [key]: v } }), `param-${key}`)}
+            onCommit={commit}
           />
-        </label>
-        <div className="mt-2 flex gap-1">
-          <button
-            className={btn}
-            onClick={() => {
-              store.update((d) => reorderShape(d, shape.id, -1));
-              store.endGesture();
-            }}
-          >
-            Back
-          </button>
-          <button
-            className={btn}
-            onClick={() => {
-              store.update((d) => reorderShape(d, shape.id, +1));
-              store.endGesture();
-            }}
-          >
-            Front
-          </button>
-          <button
-            className="flex-1 rounded border border-panel-edge px-2 py-1 text-red-300 hover:border-red-400"
-            onClick={() => {
-              store.update((d) => removeShape(d, shape.id));
-              store.endGesture();
-            }}
-          >
-            Delete
-          </button>
-        </div>
+        ),
+      )}
+      <div className="my-3 border-t border-border" />
+      <SectionLabel>Compositing</SectionLabel>
+      <SelectRow
+        label="combine"
+        value={shape.combine.op}
+        options={COMBINE_OPS}
+        onChange={(v) => {
+          live((s) => ({ ...s, combine: { ...s.combine, op: v as CombineOp } }), "combine");
+          commit();
+        }}
+      />
+      <SpinBox
+        label="blend"
+        value={shape.combine.blend}
+        min={0}
+        onChange={(v) => live((s) => ({ ...s, combine: { ...s.combine, blend: v } }), "blend")}
+        onCommit={commit}
+      />
+      <SpinBox
+        label="strength"
+        value={shape.strength}
+        step={0.1}
+        onChange={(v) => live((s) => ({ ...s, strength: v }), "strength")}
+        onCommit={commit}
+      />
+      <div className="my-3 border-t border-border" />
+      <div className="flex gap-1">
+        <Button
+          className="flex-1"
+          onClick={() => {
+            store.update((d) => reorderShape(d, shape.id, -1));
+            commit();
+          }}
+        >
+          Back
+        </Button>
+        <Button
+          className="flex-1"
+          onClick={() => {
+            store.update((d) => reorderShape(d, shape.id, +1));
+            commit();
+          }}
+        >
+          Front
+        </Button>
+        <Button
+          variant="danger"
+          className="flex-1"
+          onClick={() => {
+            store.update((d) => removeShape(d, shape.id));
+            commit();
+          }}
+        >
+          Delete
+        </Button>
       </div>
     </div>
   );
