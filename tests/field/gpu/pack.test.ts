@@ -24,8 +24,6 @@ test("dome record: layout offsets", () => {
   expect(records[10]).toBeCloseTo(3); // distScale = (2+4)/2
   expect(records[11]).toBe(0); // cpStart
   expect(records[12]).toBe(0); // cpCount (dome has none)
-  expect(records[13]).toBe(48); // radiusX
-  expect(records[14]).toBe(48); // radiusY
   expect(records[21]).toBe(0); // elevation (pos.z)
   expect(points.length).toBe(2); // padded min one point
 });

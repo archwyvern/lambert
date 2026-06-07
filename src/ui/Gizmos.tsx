@@ -2,7 +2,7 @@ import { useRef } from "react";
 import type { DocumentStore } from "../document/store";
 import { updateShape } from "../document/docOps";
 import type { FlatlandDoc } from "../document/schema";
-import { numParam } from "../field/registry";
+
 import { toLocal } from "../field/transform";
 import type { ShapeInstance } from "../field/types";
 import { v2, Vec2 } from "../field/vec";
@@ -25,9 +25,7 @@ function localBounds(s: ShapeInstance): { min: Vec2; max: Vec2 } {
     }
     return { min: v2(minX, minY), max: v2(maxX, maxY) };
   }
-  const rx = numParam(s, "radiusX");
-  const ry = numParam(s, "radiusY");
-  return { min: v2(-rx, -ry), max: v2(rx, ry) };
+  return { min: v2(-48, -48), max: v2(48, 48) }; // dome: nominal radius, ellipse via scale
 }
 
 /** Forward of toLocal: scale THEN rotate, then translate (pinned by picking.test.ts). */

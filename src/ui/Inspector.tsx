@@ -51,7 +51,9 @@ export function Inspector(props: { store: DocumentStore; state: EditorState }): 
   return (
     <div>
       <div className="mb-2 border-b border-border pb-1.5 text-md font-semibold text-fg">{type.name}</div>
-      <SectionLabel>Parameters</SectionLabel>
+      {type.controlPoints.kind !== "none" || Object.keys(type.params).length > 0 ? (
+        <SectionLabel>Parameters</SectionLabel>
+      ) : null}
       {type.controlPoints.kind !== "none" ? (
         <SpinBox
           label={type.controlPoints.kind === "rings" ? "vertices / ring" : "vertices"}
@@ -131,7 +133,7 @@ export function Inspector(props: { store: DocumentStore; state: EditorState }): 
         onCommit={commit}
       />
       <SpinBox
-        label="z"
+        label="elevation"
         value={Number(shape.transform.pos.z.toFixed(1))}
         onChange={(v) =>
           live((s) => ({ ...s, transform: { ...s.transform, pos: { ...s.transform.pos, z: v } } }), "tz")

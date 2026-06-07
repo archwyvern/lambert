@@ -97,6 +97,17 @@ export function parseDoc(json: string): FlatlandDoc {
       s.transform.scale.z *= (s.params[legacy.param] as number) / legacy.nominal;
       delete s.params[legacy.param];
     }
+    // legacy dome radii fold into the footprint scale (nominal radius 48)
+    if (s.typeId === "dome") {
+      if (typeof s.params.radiusX === "number") {
+        s.transform.scale.x *= s.params.radiusX / 48;
+        delete s.params.radiusX;
+      }
+      if (typeof s.params.radiusY === "number") {
+        s.transform.scale.y *= s.params.radiusY / 48;
+        delete s.params.radiusY;
+      }
+    }
     // legacy single-ring plateau: synthesize the top rim from slopeWidth (the straight-edge
     // inset matches via the apothem; the old SDF inset rounded corners, this miters them)
     if (s.typeId === "plateau" && typeof s.params.slopeWidth === "number") {
