@@ -32,10 +32,10 @@ if (r.mask.every((m) => m === 0)) console.warn("warning: authored mask is empty 
 const outDir = outDirArg ? path.resolve(outDirArg) : docDir;
 const stem = path.basename(sourcePath);
 const nxPath = path.join(outDir, nxFileName(stem));
-writeFileSync(nxPath, encodeNxPng(r.normals, r.mask, r.width, r.height));
+writeFileSync(nxPath, encodeNxPng(r.normals, r.mask, r.width, r.height, doc.normalDirs));
 writeFileSync(path.join(outDir, `${stem}.height.png`), encodeHeightmapPng(r));
 writeFileSync(
   path.join(outDir, `${stem}.normal.png`),
-  encodeNormalPng(r.normals, r.width, r.height, { yUp: false }),
+  encodeNormalPng(r.normals, r.width, r.height, doc.normalDirs),
 );
 console.log(`wrote ${nxPath} (+ height/normal debug maps)`);

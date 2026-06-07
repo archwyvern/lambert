@@ -6,5 +6,5 @@ import { GOLDEN_H, GOLDEN_W, goldenShapes } from "./fixture";
 
 const r = renderField(goldenShapes(), GOLDEN_W, GOLDEN_H, { supersample: 2 });
 const out = path.join(import.meta.dirname, "sample.nx.golden.png");
-writeFileSync(out, encodeNxPng(r.normals, r.mask, r.width, r.height));
+writeFileSync(out, encodeNxPng(r.normals, r.mask, r.width, r.height, { red: "right", green: "up" }));
 console.log(`wrote ${out}`);

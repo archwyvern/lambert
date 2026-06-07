@@ -18,6 +18,8 @@ export interface PreviewParams {
   lightDir: [number, number, number];
   /** Height-view normalization range; pass the doc's plausible height span. */
   heightRange: [number, number];
+  /** Project channel signs for the normal-view encode (normalSigns(doc.normalDirs)). */
+  normalSigns: { red: number; green: number };
   /** Orbit camera for the attached 3D inspection canvas; null/undefined skips the pass. */
   orbit3d?: Orbit | null;
 }
@@ -62,7 +64,7 @@ export class PreviewRenderer {
       vertex: { module, entryPoint: "vs" },
       fragment: { module, entryPoint: "fs", targets: [{ format }] },
     });
-    p.uniforms = device.createBuffer({ size: 48, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    p.uniforms = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     const module3d = device.createShaderModule({ code: PREVIEW3D_WGSL });
     p.pipeline3d = await device.createRenderPipelineAsync({
       layout: "auto",
@@ -197,7 +199,7 @@ export class PreviewRenderer {
     if (!this.diffuseTex) return;
 
     const dpr = this.canvas.width / (this.canvas.getBoundingClientRect().width || this.canvas.width) || 1;
-    const ub = new ArrayBuffer(48);
+    const ub = new ArrayBuffer(64);
     const f = new Float32Array(ub);
     const u = new Uint32Array(ub);
     f[0] = p.viewport.zoom * dpr;
@@ -212,6 +214,8 @@ export class PreviewRenderer {
     f[9] = p.lightDir[0];
     f[10] = p.lightDir[1];
     f[11] = p.lightDir[2];
+    f[12] = p.normalSigns.red;
+    f[13] = p.normalSigns.green;
     this.device.queue.writeBuffer(this.uniforms, 0, ub);
 
     const bind = this.device.createBindGroup({

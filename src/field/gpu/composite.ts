@@ -20,6 +20,10 @@ struct CompositeUniforms {
   lightX: f32,
   lightY: f32,
   lightZ: f32,
+  redSign: f32,       // project normal-direction signs for the normal view encode
+  greenSign: f32,
+  _pad0: f32,
+  _pad1: f32,
 }
 
 @group(0) @binding(0) var<uniform> cu: CompositeUniforms;
@@ -49,7 +53,7 @@ fn fs(@builtin(position) fragPos: vec4f) -> @location(0) vec4f {
   }
   let n = textureLoad(normalTex, px, 0);
   if (cu.mode == 2u) {
-    let enc = vec3f(0.5 + n.x * 0.5, 0.5 + n.y * 0.5, 0.5 + n.z * 0.5);
+    let enc = vec3f(0.5 + n.x * cu.redSign * 0.5, 0.5 + n.y * cu.greenSign * 0.5, 0.5 + n.z * 0.5);
     return vec4f(mix(diffuse.rgb, enc, n.w * cu.opacity), 1.0);
   }
   // lit: flat normals where unauthored give uniform shade, so the diffuse stays readable

@@ -15,11 +15,32 @@ export function Inspector(props: { store: DocumentStore; state: EditorState }): 
   const { store, state } = props;
   const shape = state.doc.shapes.find((s) => s.id === state.selectedId);
   if (!shape) {
+    const doc = state.doc;
+    const setDirs = (patch: Partial<typeof doc.normalDirs>): void => {
+      store.update((d) => ({ ...d, normalDirs: { ...d.normalDirs, ...patch } }));
+      store.endGesture();
+    };
     return (
       <div>
-        <SectionLabel>Inspector</SectionLabel>
-        <p className="text-sm leading-snug text-fg-mid">
-          Nothing selected. Click a shape on the canvas to edit its parameters.
+        <SectionLabel>Document</SectionLabel>
+        <p className="mb-2 text-sm text-fg-mid">
+          {doc.source.path} · {doc.source.width}×{doc.source.height}
+        </p>
+        <SectionLabel>Normal Directions</SectionLabel>
+        <SelectRow
+          label="red"
+          value={doc.normalDirs.red}
+          options={["right", "left"]}
+          onChange={(v) => setDirs({ red: v as "right" | "left" })}
+        />
+        <SelectRow
+          label="green"
+          value={doc.normalDirs.green}
+          options={["up", "down"]}
+          onChange={(v) => setDirs({ green: v as "up" | "down" })}
+        />
+        <p className="mt-2 text-sm leading-snug text-fg-mid">
+          Applies to exports and the normal view. Select a shape to edit its parameters.
         </p>
       </div>
     );

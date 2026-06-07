@@ -2,6 +2,7 @@ import { CubeRegular, DismissRegular } from "@fluentui/react-icons";
 import { useEffect, useRef, useState } from "react";
 import type { DocumentStore, EditorState } from "../document/store";
 import { addShape, updateShape } from "../document/docOps";
+import { normalSigns } from "../document/schema";
 import type { Orbit } from "../field/gpu/preview3d";
 import { v2, Vec2 } from "../field/vec";
 import { Gizmos } from "./Gizmos";
@@ -170,6 +171,7 @@ export function CanvasView(props: {
       opacity: view.opacity,
       lightDir: view.lightDir,
       heightRange: [-maxH, maxH],
+      normalSigns: normalSigns(doc.normalDirs),
       orbit3d: show3d ? orbit : null,
     });
   });

@@ -25,30 +25,45 @@ test("heightmap: 16-bit gray, min->0 max->65535", () => {
   expect(png.data[1]).toBe(65535);
 });
 
+const DIRS_UP = { red: "right", green: "up" } as const;
+const DIRS_DOWN = { red: "right", green: "down" } as const;
+
 test("normal map: flat normal encodes (128,128,255), generic half-range blue", () => {
-  const png = decode(encodeNormalPng(flatNormals(1), 1, 1, { yUp: true }));
+  const png = decode(encodeNormalPng(flatNormals(1), 1, 1, DIRS_UP));
   expect([...png.data.slice(0, 4)]).toEqual([128, 128, 255, 255]);
 });
 
-test("normal map: yUp flips green", () => {
+test("normal map: green direction setting flips the channel", () => {
   const n = new Float32Array([0, Math.SQRT1_2, Math.SQRT1_2]); // tilted down-screen
-  const up = decode(encodeNormalPng(n, 1, 1, { yUp: true }));
-  const down = decode(encodeNormalPng(n, 1, 1, { yUp: false }));
-  expect(up.data[1]!).toBeLessThan(128); // y-up convention: down-screen tilt = dark green
+  const up = decode(encodeNormalPng(n, 1, 1, DIRS_UP));
+  const down = decode(encodeNormalPng(n, 1, 1, DIRS_DOWN));
+  expect(up.data[1]!).toBeLessThan(128); // green-up: down-screen tilt = dark green
   expect(down.data[1]!).toBeGreaterThan(128);
   expect(up.data[1]! + down.data[1]!).toBe(255); // mirrored around 0.5
 });
 
-test("nx: image-space green (no flip), full-range blue, mask alpha", () => {
-  const flat = decode(encodeNxPng(flatNormals(2), new Float32Array([1, 0]), 2, 1));
+test("normal map: red direction setting flips the channel", () => {
+  const n = new Float32Array([Math.SQRT1_2, 0, Math.SQRT1_2]); // tilted right
+  const right = decode(encodeNormalPng(n, 1, 1, DIRS_UP));
+  const left = decode(encodeNormalPng(n, 1, 1, { red: "left", green: "up" }));
+  expect(right.data[0]!).toBeGreaterThan(128);
+  expect(left.data[0]!).toBeLessThan(128);
+});
+
+test("nx: default red-right green-up, full-range blue, mask alpha", () => {
+  const flat = decode(encodeNxPng(flatNormals(2), new Float32Array([1, 0]), 2, 1, DIRS_UP));
   expect([...flat.data.slice(0, 4)]).toEqual([128, 128, 255, 255]);
   expect(flat.data[7]).toBe(0); // second pixel: mask 0 -> alpha 0
   // x-ramp normal (-sqrt2/2, 0, sqrt2/2): r = q8(0.1464) = 37, b = q8(0.7071) = 180
   const tilted = new Float32Array([-Math.SQRT1_2, 0, Math.SQRT1_2]);
-  const px = decode(encodeNxPng(tilted, new Float32Array([1]), 1, 1));
+  const px = decode(encodeNxPng(tilted, new Float32Array([1]), 1, 1, DIRS_UP));
   expect(px.data[0]).toBe(37);
   expect(px.data[1]).toBe(128);
   expect(px.data[2]).toBe(180);
+  // up-screen tilt (n.y < 0) brightens green under green-up
+  const upTilt = new Float32Array([0, -Math.SQRT1_2, Math.SQRT1_2]);
+  const gy = decode(encodeNxPng(upTilt, new Float32Array([1]), 1, 1, DIRS_UP));
+  expect(gy.data[1]!).toBeGreaterThan(128);
 });
 
 test("nxFileName strips a .df tag and appends .nx", () => {

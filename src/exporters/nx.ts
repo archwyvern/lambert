@@ -1,22 +1,26 @@
 import { encode } from "fast-png";
+import { NormalDirs, normalSigns } from "../document/schema";
 import { q8 } from "./normalmap";
 
 /**
- * Skyrat NX override encode. The Go processor decodes x = 2(r-0.5), y = 2(0.5-g), z = b/255
- * and works internally y-up; our normals are image-space y-down, so green is 0.5 + n.y/2
- * (the apparent flip cancels). Blue is FULL-range z (not 0.5+z/2). Alpha = authored mask —
- * the override only replaces the generator's bevel where alpha > 0.
+ * Skyrat NX override encode. Channel directions follow the project's NormalDirs
+ * (default red-right green-up, matching the artist's hand-painted NX files — the
+ * authority on the pipeline's convention). Blue is FULL-range z (not 0.5+z/2).
+ * Alpha = authored mask — the override only replaces the generator's bevel where
+ * alpha > 0.
  */
 export function encodeNxPng(
   normals: Float32Array,
   mask: Float32Array,
   width: number,
   height: number,
+  dirs: NormalDirs,
 ): Uint8Array {
+  const s = normalSigns(dirs);
   const data = new Uint8Array(width * height * 4);
   for (let i = 0, n = width * height; i < n; i++) {
-    data[i * 4] = q8(0.5 + normals[i * 3]! / 2);
-    data[i * 4 + 1] = q8(0.5 + normals[i * 3 + 1]! / 2);
+    data[i * 4] = q8(0.5 + (s.red * normals[i * 3]!) / 2);
+    data[i * 4 + 1] = q8(0.5 + (s.green * normals[i * 3 + 1]!) / 2);
     data[i * 4 + 2] = q8(normals[i * 3 + 2]!);
     data[i * 4 + 3] = q8(mask[i]!);
   }

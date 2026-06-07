@@ -14,7 +14,7 @@ export function buildNxExport(doc: FlatlandDoc, render: RenderResult, diffusePat
   if (render.width !== doc.source.width || render.height !== doc.source.height) {
     throw new Error(`render ${render.width}x${render.height} != doc ${doc.source.width}x${doc.source.height}`);
   }
-  const bytes = encodeNxPng(render.normals, render.mask, render.width, render.height);
+  const bytes = encodeNxPng(render.normals, render.mask, render.width, render.height, doc.normalDirs);
   const empty = render.mask.every((m) => m === 0);
   return {
     path: joinPath(dirname(diffusePath), nxFileName(basename(diffusePath))),

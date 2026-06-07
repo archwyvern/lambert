@@ -16,7 +16,7 @@ export async function runHarness(): Promise<void> {
 
   // Normal-map view: CPU-encode the GPU result into a PNG blob for a plain <img>
   const result = await gpu.evaluate(goldenShapes(), GOLDEN_W, GOLDEN_H, { supersample: 2 });
-  const png = encodeNormalPng(result.normals, result.width, result.height, { yUp: false });
+  const png = encodeNormalPng(result.normals, result.width, result.height, { red: "right", green: "up" });
   const img = new Image();
   img.src = URL.createObjectURL(new Blob([png as BlobPart], { type: "image/png" }));
   img.width = GOLDEN_W * SCALE;
