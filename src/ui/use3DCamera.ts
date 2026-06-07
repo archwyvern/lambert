@@ -7,39 +7,23 @@ type V3 = [number, number, number];
 
 /**
  * Orbit camera state + gestures, shared by the docked mini-view and the full editor view.
- * Buttons: right = rotate; left = pan in the view plane (left/right + up/down); left+right
- * = pan across the ground (left/right + forward/back along the camera); middle = nothing;
- * wheel = dolly.
+ * Buttons (decided live each move, so adding/dropping a button switches mode mid-drag):
+ *   right OR middle = rotate; left = pan in the view plane (left/right + up/down);
+ *   left+right = pan across the ground — forward/back along the camera + sideways.
+ *   wheel = dolly.
  */
 export function use3DCamera() {
   const [orbit, setOrbit] = useState<Orbit>({ ...DEFAULT_ORBIT });
-  // cleanup of the in-flight gesture, so adding/removing a button cleanly upgrades it
-  // (e.g. left-drag pan -> press right -> becomes a ground pan) rather than stacking two
-  const activeUp = useRef<(() => void) | null>(null);
+  const orbitRef = useRef(orbit); // live orbit for axis math inside the gesture closure
+  orbitRef.current = orbit;
+  const activeCleanup = useRef<(() => void) | null>(null);
 
-  // document-level CAPTURE listeners for the gesture lifetime — see CanvasView's note: react
-  // dispatch from #root + the panel's stopPropagation kills bubble-phase document listeners
-  const beginGesture = (e: React.PointerEvent, step: (dx: number, dy: number) => void): void => {
-    e.stopPropagation();
-    e.preventDefault();
-    activeUp.current?.();
-    const onMove = (ev: PointerEvent): void => step(ev.movementX, ev.movementY);
-    const onUp = (): void => {
-      document.removeEventListener("pointermove", onMove, true);
-      document.removeEventListener("pointerup", onUp, true);
-      activeUp.current = null;
-    };
-    document.addEventListener("pointermove", onMove, true);
-    document.addEventListener("pointerup", onUp, true);
-    activeUp.current = onUp;
-  };
-
-  const panTarget = (docW: number, docH: number, cssW: number, ax: V3, ay: V3, dx: number, dy: number): void => {
+  const panBy = (docW: number, docH: number, cssW: number, ax: V3, ay: V3, dx: number, dy: number): void => {
     const span = Math.max(docW, docH);
     setOrbit((o) => {
       const f = (o.dist * span) / cssW;
       const sx = dx * f;
-      const sy = -dy * f; // drag up = move "into" the scene / upward
+      const sy = -dy * f; // drag up (negative dy) -> move "into" the scene
       return {
         ...o,
         target: {
@@ -51,24 +35,42 @@ export function use3DCamera() {
     });
   };
 
+  // document-level CAPTURE listeners for the gesture lifetime — see CanvasView's note: react
+  // dispatch from #root + the panel's stopPropagation kills bubble-phase document listeners
   const onCanvasDown = (docW: number, docH: number, cssW: number) => (e: React.PointerEvent): void => {
-    const b = e.buttons; // mask of buttons currently down: 1 = left, 2 = right, 4 = middle
-    if (b & 1 && b & 2) {
-      const { right, groundFwd } = panAxes(orbit); // left+right = ground pan (left/right + fwd/back)
-      beginGesture(e, (dx, dy) => panTarget(docW, docH, cssW, right, groundFwd, dx, dy));
-    } else if (b & 2) {
-      beginGesture(e, (dx, dy) =>
+    if (e.buttons === 0) return;
+    e.stopPropagation();
+    e.preventDefault();
+    activeCleanup.current?.();
+    const onMove = (ev: PointerEvent): void => {
+      const b = ev.buttons; // 1 = left, 2 = right, 4 = middle
+      const dx = ev.movementX;
+      const dy = ev.movementY;
+      if (b & 1 && b & 2) {
+        const { right, groundFwd } = panAxes(orbitRef.current); // ground pan: sideways + fwd/back
+        panBy(docW, docH, cssW, right, groundFwd, dx, dy);
+      } else if (b & 2 || b & 4) {
         setOrbit((o) => ({
           ...o,
           yaw: o.yaw - dx * 0.01,
           pitch: Math.min(1.45, Math.max(0.08, o.pitch + dy * 0.01)),
-        })),
-      ); // right = rotate
-    } else if (b & 1) {
-      const { right, up } = panAxes(orbit); // left = screen pan (left/right + up/down)
-      beginGesture(e, (dx, dy) => panTarget(docW, docH, cssW, right, up, dx, dy));
-    }
-    // middle (b & 4 only) = nothing
+        })); // right or middle = rotate
+      } else if (b & 1) {
+        const { right, up } = panAxes(orbitRef.current); // screen pan: sideways + up/down
+        panBy(docW, docH, cssW, right, up, dx, dy);
+      }
+    };
+    const cleanup = (): void => {
+      document.removeEventListener("pointermove", onMove, true);
+      document.removeEventListener("pointerup", onUp, true);
+      activeCleanup.current = null;
+    };
+    const onUp = (ev: PointerEvent): void => {
+      if (ev.buttons === 0) cleanup(); // end only once every button is released
+    };
+    document.addEventListener("pointermove", onMove, true);
+    document.addEventListener("pointerup", onUp, true);
+    activeCleanup.current = cleanup;
   };
 
   const zoomBy = (factor: number): void =>

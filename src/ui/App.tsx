@@ -12,7 +12,7 @@ import { getHost } from "./host";
 import { Inspector } from "./Inspector";
 import { Layers } from "./Layers";
 import { Library } from "./Library";
-import { Toast, ToastState } from "./kit";
+import { StatusBar, ToastState } from "./kit";
 import { usePersistentState } from "./persist";
 import { Sash } from "./Sash";
 import { Toolbar } from "./Toolbar";
@@ -41,13 +41,9 @@ export function App(): React.JSX.Element {
   const [leftWidth, setLeftWidth] = usePersistentState("panel:left", 208);
   const [rightWidth, setRightWidth] = usePersistentState("panel:right", 288);
   const [toast, setToast] = useState<ToastState | null>(null);
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const notify = (msg: string, tone: ToastState["tone"] = "info"): void => {
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    setToast({ msg, tone });
-    toastTimer.current = setTimeout(() => setToast(null), 4000);
-  };
+  // status messages land in the bottom bar (not a popup); the last one persists until replaced
+  const notify = (msg: string, tone: ToastState["tone"] = "info"): void => setToast({ msg, tone });
 
   const run = (p: Promise<unknown>): void =>
     void p
@@ -256,7 +252,10 @@ export function App(): React.JSX.Element {
           <Inspector store={store} state={state} />
         </aside>
       </div>
-      <Toast toast={toast} />
+      <StatusBar
+        message={toast}
+        right={diffuse ? `${state.doc.source.width}×${state.doc.source.height} · ${state.doc.shapes.length} shapes` : null}
+      />
     </div>
   );
 }

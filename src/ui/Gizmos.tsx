@@ -284,7 +284,15 @@ export function Gizmos(props: {
         ? (() => {
             const sel = selVerts.map((i) => shape.controlPoints[i]!);
             const b = pointsBounds(sel);
-            const cl = [v2(b.min.x, b.min.y), v2(b.max.x, b.min.y), v2(b.max.x, b.max.y), v2(b.min.x, b.max.y)];
+            // pad the frame out from the dots (constant ~10 screen px) so corner handles
+            // don't sit on top of the vertices and stay grabbable
+            const gp = (PAD + 4) / Math.max(0.0001, (Math.abs(shape.transform.scale.x) + Math.abs(shape.transform.scale.y)) / 2);
+            const cl = [
+              v2(b.min.x - gp, b.min.y - gp),
+              v2(b.max.x + gp, b.min.y - gp),
+              v2(b.max.x + gp, b.max.y + gp),
+              v2(b.min.x - gp, b.max.y + gp),
+            ];
             const cc = cl.map((c) => canvasToScreen(viewport, localToCanvas(shape, c)));
             return (
               <>

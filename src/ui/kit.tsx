@@ -208,20 +208,15 @@ export interface ToastState {
   tone: "info" | "error";
 }
 
-/** Non-modal bottom-right toast (replaces alert() for save/export feedback). */
-export function Toast(props: { toast: ToastState | null }): React.JSX.Element | null {
-  if (!props.toast) return null;
-  const border = props.toast.tone === "error" ? "border-error/60" : "border-link/60";
+/** VSCode-style bottom status bar: latest message on the left, context info on the right. */
+export function StatusBar(props: { message: ToastState | null; right?: React.ReactNode }): React.JSX.Element {
+  const { message, right } = props;
   return (
-    <div className="pointer-events-none fixed right-4 bottom-4 z-50">
-      <div
-        className={cx(
-          "animate-fade-in max-w-[420px] border bg-surface2 px-3 py-2 text-base text-fg shadow-[var(--shadow-popover)]",
-          border,
-        )}
-      >
-        {props.toast.msg}
-      </div>
-    </div>
+    <footer className="flex h-[22px] shrink-0 items-center justify-between gap-4 border-t border-border bg-surface2 px-3 text-sm">
+      <span className={cx("min-w-0 truncate", message?.tone === "error" ? "text-error" : "text-fg-mid")}>
+        {message?.msg ?? ""}
+      </span>
+      {right ? <span className="shrink-0 tabular-nums text-fg-mid">{right}</span> : null}
+    </footer>
   );
 }
