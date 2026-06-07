@@ -1,3 +1,5 @@
+export {}; // module scope: keeps `status` from colliding with window.status
+
 const status = document.getElementById("status")!;
 
 async function probe(): Promise<void> {
