@@ -42,6 +42,16 @@ Editor basics: drag a shape from the library onto the canvas; click to select; d
 move; handles rotate/scale; white dots drag vertices; wheel zooms, shift/middle-drag pans;
 V cycles view modes; Ctrl+Z/Y undo/redo; Ctrl+D duplicates; Delete removes; arrows nudge.
 
+## Shape icons
+
+The library palette icons are clay renders of the actual shapes, generated headlessly:
+
+```bash
+blender --background --python blender/render_icons.py   # writes src/ui/icons/*.png
+```
+
+Add a builder to `blender/render_icons.py` when a new shape type lands.
+
 ## Exporters
 
 - Heightmap PNG (16-bit grayscale)
