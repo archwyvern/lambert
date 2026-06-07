@@ -1,4 +1,3 @@
-import { ChevronDownRegular, ChevronUpRegular } from "@fluentui/react-icons";
 import { useRef, useState } from "react";
 
 export function cx(...parts: Array<string | false | null | undefined>): string {
@@ -38,13 +37,17 @@ export function SectionLabel(props: { children: React.ReactNode; className?: str
   );
 }
 
-const SCRUB_PX_PER_STEP = 4;
-
-const roundTo = (v: number, decimals: number): number => Number(v.toFixed(decimals));
+function formatNumber(value: number, step: number): string {
+  if (step >= 1) return String(Math.round(value));
+  return parseFloat(value.toFixed(4)).toString();
+}
 
 /**
- * Spinbox: numeric input + stepper chevrons; the label is a scrubby slider
- * (drag horizontally; Alt = fine x0.1, Shift = coarse x10).
+ * Godot EditorSpinSlider, ported from the skyrat mock editor
+ * (packages/inspector/src/fields/SpinSlider.tsx). The whole box is a scrub surface:
+ * drag horizontally to adjust (pointer lock = infinite drag, Shift = fine), click
+ * without dragging (or Enter/F2) to type, Up/Down to step (Shift = x10). A thin
+ * accent bar shows the value within [min,max] when both bounds exist.
  */
 export function SpinBox(props: {
   label: string;
@@ -56,86 +59,125 @@ export function SpinBox(props: {
   onCommit?: () => void;
 }): React.JSX.Element {
   const { label, value, step = 1, min, max, onChange, onCommit } = props;
-  const scrub = useRef<{ startX: number; startValue: number } | null>(null);
-  const [text, setText] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState("");
+  // acc = accumulated movementX since pointer-down; startVal captured so drags don't compound
+  const drag = useRef<{ startVal: number; acc: number; moved: boolean } | null>(null);
 
-  const clamp = (v: number, effectiveStep = step): number => {
-    let r = v;
-    if (min !== undefined) r = Math.max(min, r);
-    if (max !== undefined) r = Math.min(max, r);
-    return roundTo(r, effectiveStep < 1 ? 2 : 0);
+  const hasRange = min !== undefined && max !== undefined && max > min;
+  const ratio = hasRange ? Math.min(1, Math.max(0, (value - min) / (max - min))) : 0;
+  // ~300px traverses a known range; capped so wide ranges aren't twitchy
+  const perPx = hasRange ? Math.min((max - min) / 300, 25 * step) : step * 0.5;
+
+  const clampRound = (v: number): number => {
+    let x = v;
+    if (min !== undefined) x = Math.max(min, x);
+    if (max !== undefined) x = Math.min(max, x);
+    if (step >= 1) return Math.round(x);
+    x = Math.round(x / step) * step;
+    return parseFloat(x.toFixed(6));
   };
-
-  const bump = (dir: 1 | -1): void => {
-    onChange(clamp(value + dir * step));
+  const nudge = (dir: number, coarse: boolean): void => {
+    onChange(clampRound(value + dir * step * (coarse ? 10 : 1)));
     onCommit?.();
   };
+  const beginEdit = (): void => {
+    setText(formatNumber(value, step));
+    setEditing(true);
+  };
+
+  const onPointerDown = (e: React.PointerEvent): void => {
+    if (editing || e.button !== 0) return;
+    const el = e.currentTarget as HTMLElement;
+    el.setPointerCapture?.(e.pointerId);
+    const lock = el.requestPointerLock?.() as unknown as Promise<void> | undefined;
+    if (lock && typeof lock.then === "function") lock.catch(() => {}); // lock denial: capture still works
+    drag.current = { startVal: value, acc: 0, moved: false };
+  };
+  const onPointerMove = (e: React.PointerEvent): void => {
+    const d = drag.current;
+    if (!d) return;
+    d.acc += e.movementX;
+    if (!d.moved && Math.abs(d.acc) < 3) return;
+    d.moved = true;
+    const fine = e.shiftKey ? 0.1 : 1;
+    onChange(clampRound(d.startVal + d.acc * perPx * fine));
+  };
+  const onPointerUp = (e: React.PointerEvent): void => {
+    const d = drag.current;
+    drag.current = null;
+    const el = e.currentTarget as HTMLElement;
+    el.releasePointerCapture?.(e.pointerId);
+    if (document.pointerLockElement === el) document.exitPointerLock?.();
+    if (d && !d.moved) beginEdit();
+    else if (d) onCommit?.();
+  };
+
+  const commit = (): void => {
+    const parsed = parseFloat(text);
+    if (!Number.isNaN(parsed)) {
+      onChange(clampRound(parsed));
+      onCommit?.();
+    }
+    setEditing(false);
+  };
+
+  const control = editing ? (
+    <input
+      autoFocus
+      type="text"
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      onFocus={(e) => e.currentTarget.select()}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") commit();
+        if (e.key === "Escape") setEditing(false);
+      }}
+      className="h-[22px] w-full border border-accent bg-surface2 px-1.5 font-mono text-base text-fg outline-none"
+    />
+  ) : (
+    <div
+      tabIndex={0}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === "F2") {
+          e.preventDefault();
+          beginEdit();
+        } else if (e.key === "ArrowUp") {
+          e.preventDefault();
+          nudge(1, e.shiftKey);
+        } else if (e.key === "ArrowDown") {
+          e.preventDefault();
+          nudge(-1, e.shiftKey);
+        }
+      }}
+      className="relative flex h-[22px] w-full cursor-ew-resize items-center gap-1 overflow-hidden border border-border bg-surface2 px-1.5 font-mono text-base text-fg select-none hover:border-accent/50 focus-visible:border-accent focus-visible:outline-none"
+      title="Drag to scrub · click or Enter to type · Up/Down to step · Shift = fine"
+    >
+      {hasRange ? (
+        <div
+          className="pointer-events-none absolute bottom-0 left-0 h-[2px] bg-accent"
+          style={{ width: `${ratio * 100}%` }}
+        />
+      ) : null}
+      <span className="pointer-events-none relative flex-1 truncate">{formatNumber(value, step)}</span>
+    </div>
+  );
 
   return (
-    <label className="flex min-h-[26px] items-center justify-between gap-2 py-0.5">
-      <span
-        className="cursor-ew-resize truncate select-none text-base text-fg-mid"
-        title="Drag to adjust (Alt = fine, Shift = coarse)"
-        onPointerDown={(e) => {
-          (e.target as Element).setPointerCapture(e.pointerId);
-          scrub.current = { startX: e.clientX, startValue: value };
-        }}
-        onPointerMove={(e) => {
-          if (!scrub.current) return;
-          const factor = e.altKey ? 0.1 : e.shiftKey ? 10 : 1;
-          const effectiveStep = step * factor;
-          const steps = Math.round((e.clientX - scrub.current.startX) / SCRUB_PX_PER_STEP);
-          onChange(clamp(scrub.current.startValue + steps * effectiveStep, effectiveStep));
-        }}
-        onPointerUp={() => {
-          scrub.current = null;
-          onCommit?.();
-        }}
-      >
+    <div className="flex min-h-[26px] items-center gap-2 py-0.5">
+      <span className="min-w-0 flex-1 truncate text-base text-fg-mid" title={label}>
         {label}
       </span>
-      <span className="flex h-[22px] items-stretch border border-border bg-surface2 focus-within:border-accent/50">
-        <input
-          type="number"
-          className="w-16 bg-transparent px-1.5 text-right font-mono text-base tabular-nums text-fg outline-none"
-          value={text ?? String(value)}
-          step={step}
-          min={min}
-          max={max}
-          onChange={(e) => {
-            setText(e.target.value);
-            const v = Number(e.target.value);
-            if (e.target.value !== "" && Number.isFinite(v)) onChange(clamp(v));
-          }}
-          onBlur={() => {
-            setText(null);
-            onCommit?.();
-          }}
-        />
-        <span className="flex flex-col border-l border-border">
-          <button
-            type="button"
-            tabIndex={-1}
-            className="flex h-[11px] w-4 items-center justify-center text-fg-mid hover:bg-hover hover:text-fg"
-            onClick={() => bump(1)}
-          >
-            <ChevronUpRegular style={{ fontSize: 11 }} />
-          </button>
-          <button
-            type="button"
-            tabIndex={-1}
-            className="flex h-[11px] w-4 items-center justify-center border-t border-border text-fg-mid hover:bg-hover hover:text-fg"
-            onClick={() => bump(-1)}
-          >
-            <ChevronDownRegular style={{ fontSize: 11 }} />
-          </button>
-        </span>
-      </span>
-    </label>
+      <span className="w-1/2 shrink-0">{control}</span>
+    </div>
   );
 }
 
-/** Compact labeled select (22px vscode form control). */
+/** Compact labeled select (22px form control, column-aligned with SpinBox). */
 export function SelectRow(props: {
   label: string;
   value: string;
@@ -143,10 +185,10 @@ export function SelectRow(props: {
   onChange: (v: string) => void;
 }): React.JSX.Element {
   return (
-    <label className="flex min-h-[26px] items-center justify-between gap-2 py-0.5">
-      <span className="truncate text-base text-fg-mid">{props.label}</span>
+    <label className="flex min-h-[26px] items-center gap-2 py-0.5">
+      <span className="min-w-0 flex-1 truncate text-base text-fg-mid">{props.label}</span>
       <select
-        className="h-[22px] cursor-pointer border border-border bg-surface2 px-1.5 text-base text-fg outline-none hover:bg-hover"
+        className="h-[22px] w-1/2 shrink-0 cursor-pointer border border-border bg-surface2 px-1 text-base text-fg outline-none hover:border-accent/50"
         value={props.value}
         onChange={(e) => props.onChange(e.target.value)}
       >
