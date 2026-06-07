@@ -1,5 +1,6 @@
 import type { DocumentStore, EditorState } from "../document/store";
 import { removeShape, reorderShape, updateShape } from "../document/docOps";
+import { polygonStats, regularPolygon, resamplePolyline } from "../field/controlPoints";
 import { getShapeType } from "../field/registry";
 import type { CombineOp } from "../field/combine";
 import type { ShapeInstance } from "../field/types";
@@ -54,6 +55,26 @@ export function Inspector(props: { store: DocumentStore; state: EditorState }): 
     <div>
       <div className="mb-2 border-b border-border pb-1.5 text-md font-semibold text-fg">{type.name}</div>
       <SectionLabel>Parameters</SectionLabel>
+      {type.controlPoints.kind !== "none" ? (
+        <SpinBox
+          label="vertices"
+          value={shape.controlPoints.length}
+          min={type.controlPoints.min ?? (type.controlPoints.kind === "polygon" ? 3 : 2)}
+          max={16}
+          onChange={(v) => {
+            const n = Math.round(v);
+            if (n === shape.controlPoints.length) return;
+            live((s) => {
+              if (type.controlPoints.kind === "polygon") {
+                const { centroid, radius } = polygonStats(s.controlPoints);
+                return { ...s, controlPoints: regularPolygon(centroid, radius, n) };
+              }
+              return { ...s, controlPoints: resamplePolyline(s.controlPoints, n) };
+            }, "verts");
+          }}
+          onCommit={commit}
+        />
+      ) : null}
       {Object.entries(type.params).map(([key, spec]) =>
         spec.type === "enum" ? (
           <SelectRow

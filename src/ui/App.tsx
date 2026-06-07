@@ -173,7 +173,8 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     const q = new URLSearchParams(location.search);
     if (!q.has("demo")) return;
-    void Promise.all([import("fast-png"), import("../field/fixtures")]).then(([{ encode }, { goldenShapes }]) => {
+    void Promise.all([import("fast-png"), import("../field/fixtures")])
+      .then(([{ encode }, { goldenShapes }]) => {
       const w = 96;
       const h = 96;
       const data = new Uint8Array(w * h * 4);
@@ -192,7 +193,9 @@ export function App(): React.JSX.Element {
       if (select) store.select(doc.shapes.find((s) => s.id === select)?.id ?? doc.shapes[0]?.id ?? null);
       const t = q.get("tool");
       if (t && t in TOOL_KEYS) setTool(TOOL_KEYS[t]!);
-    });
+      (window as unknown as { __flatlandDemoReady?: boolean }).__flatlandDemoReady = true;
+    })
+      .catch((err: unknown) => console.error("demo bootstrap failed", err));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

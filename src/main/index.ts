@@ -1,10 +1,18 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu } from "electron";
 import { readFile, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 // unpackaged dev runs report the app name as "Electron"; pin it so userData
 // (session memory) lands in ~/.config/flatland instead of the shared Electron dir
 app.setName("flatland");
+
+const isAutomation = process.argv.includes("--selftest") || process.argv.includes("--capture");
+if (isAutomation) {
+  // automated runs must not share the live instance's profile: LevelDB/Dawn cache
+  // locks make captures flaky-black and stall GPU init when an editor is open
+  app.setPath("userData", path.join(os.tmpdir(), "flatland-automation"));
+}
 
 // WebGPU is default-on for Windows/macOS Chromium but flag-gated on Linux; we own the
 // flags, so force it everywhere. Must run before app is ready.
@@ -132,15 +140,34 @@ app.whenReady().then(() => {
   }
 
   if (capturePath) {
-    // screenshot the window after it settles, write PNG, exit — automated visual checks
+    // screenshot for automated visual checks. Deterministic, not timer-based: poll until
+    // the UI reports ready (react mounted; demo content flagged), settle, then capture —
+    // a fixed delay raced slow chunk imports / first WebGPU present and captured black.
     win.webContents.once("did-finish-load", () => {
-      setTimeout(async () => {
-        const image = await win.webContents.capturePage();
-        const { writeFileSync } = await import("node:fs");
-        writeFileSync(capturePath, image.toPNG());
-        console.log(`captured ${capturePath}`);
-        app.exit(0);
-      }, 3000);
+      const started = Date.now();
+      const READY_PROBE = `(() => {
+        const r = document.getElementById("root");
+        const editor = r !== null && r.childElementCount > 0;
+        const harness = document.getElementById("views")?.childElementCount ?? 0;
+        const demo = new URLSearchParams(location.search).has("demo");
+        const demoReady = !demo || (window.__flatlandDemoReady === true && window.__flatlandFrameReady === true);
+        return (editor || harness > 0) && demoReady;
+      })()`;
+      const tryCapture = async (): Promise<void> => {
+        const ready = await win.webContents.executeJavaScript(READY_PROBE).catch(() => false);
+        if (!ready && Date.now() - started < 15000) {
+          setTimeout(() => void tryCapture(), 400);
+          return;
+        }
+        setTimeout(async () => {
+          const image = await win.webContents.capturePage();
+          const { writeFileSync } = await import("node:fs");
+          writeFileSync(capturePath, image.toPNG());
+          console.log(`captured ${capturePath}`);
+          app.exit(0);
+        }, 1500);
+      };
+      setTimeout(() => void tryCapture(), 400);
     });
   }
 

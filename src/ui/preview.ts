@@ -244,5 +244,7 @@ export class PreviewRenderer {
     pass.end();
     this.device.queue.submit([enc.finish()]);
     this.render3D(docW, docH, p);
+    // capture-readiness flag: the window has presented real content at least once
+    (globalThis as unknown as { __flatlandFrameReady?: boolean }).__flatlandFrameReady = true;
   }
 }
