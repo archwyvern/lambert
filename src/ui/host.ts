@@ -8,6 +8,10 @@ export interface Host {
   saveDialog(opts: { title: string; defaultPath?: string; filters: FileFilter[] }): Promise<string | null>;
   readFile(path: string): Promise<Uint8Array>;
   writeFile(path: string, data: Uint8Array): Promise<void>;
+  /** Tell main this window has a close guard; close events then ask before closing. */
+  guardClose(): void;
+  onConfirmClose(cb: () => void): void;
+  respondClose(ok: boolean): void;
 }
 
 interface HostWindow {

@@ -1,12 +1,15 @@
 import "./styles.css";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { DocumentStore } from "../document/store";
 import { duplicateShape, removeShape, updateShape } from "../document/docOps";
 import { emptyDoc } from "../document/schema";
+import { exportNx, openImageFlow, openProjectFlow, saveFlow } from "../document/io";
 import { v2 } from "../field/vec";
 import { CanvasView } from "./CanvasView";
+import { getHost } from "./host";
 import { Inspector } from "./Inspector";
 import { Library } from "./Library";
+import { Toast, ToastState } from "./kit";
 import { Toolbar } from "./Toolbar";
 import type { ViewMode } from "./preview";
 import { VIEW_MODES } from "./preview";
@@ -26,8 +29,33 @@ export function App(): React.JSX.Element {
   );
   const [view, setView] = useState<ViewState>({ mode: "lit", opacity: 1, lightDir: [-0.5, -0.5, 0.7] });
   const [diffuse, setDiffuse] = useState<{ bytes: Uint8Array; dir: string | null } | null>(null);
+  const [toast, setToast] = useState<ToastState | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // demo bootstrap for automated captures: ?demo=1&mode=<viewmode>
+  const notify = (msg: string, tone: ToastState["tone"] = "info"): void => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast({ msg, tone });
+    toastTimer.current = setTimeout(() => setToast(null), 4000);
+  };
+
+  const run = (p: Promise<unknown>): void =>
+    void p
+      .then((msg) => {
+        if (typeof msg === "string") notify(msg);
+      })
+      .catch((err: unknown) => notify(err instanceof Error ? err.message : String(err), "error"));
+
+  // close guard: main intercepts window close once we register; confirm when dirty
+  useEffect(() => {
+    const host = getHost();
+    host.guardClose();
+    host.onConfirmClose(() => {
+      const ok = !store.state.dirty || confirm("Unsaved changes — close anyway?");
+      host.respondClose(ok);
+    });
+  }, [store]);
+
+  // demo bootstrap for automated captures: ?demo=1&mode=<viewmode>&select=<shapeid>
   useEffect(() => {
     const q = new URLSearchParams(location.search);
     if (!q.has("demo")) return;
@@ -54,6 +82,25 @@ export function App(): React.JSX.Element {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      // file ops fire regardless of focus; editing keys defer to form controls
+      if (e.ctrlKey || e.metaKey) {
+        const k = e.key.toLowerCase();
+        if (k === "s") {
+          e.preventDefault();
+          if (diffuse) run(saveFlow(getHost(), store, e.shiftKey));
+          return;
+        }
+        if (k === "o") {
+          e.preventDefault();
+          run(e.shiftKey ? openProjectFlow(getHost(), store, setDiffuse) : openImageFlow(getHost(), store, setDiffuse));
+          return;
+        }
+        if (k === "e") {
+          e.preventDefault();
+          if (diffuse) run(exportNx(getHost(), store));
+          return;
+        }
+      }
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
       const id = store.state.selectedId;
       if (e.ctrlKey && e.key.toLowerCase() === "z") {
@@ -86,14 +133,23 @@ export function App(): React.JSX.Element {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [store]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store, diffuse]);
 
   return (
     <div className="flex h-screen flex-col bg-bg text-sm text-fg">
-      <Toolbar store={store} state={state} view={view} setView={setView} diffuse={diffuse} setDiffuse={setDiffuse} />
+      <Toolbar
+        store={store}
+        state={state}
+        view={view}
+        setView={setView}
+        diffuse={diffuse}
+        setDiffuse={setDiffuse}
+        run={run}
+      />
       <div className="flex min-h-0 flex-1">
         <aside className="w-48 overflow-y-auto border-r border-border bg-surface p-3">
-          <Library />
+          <Library enabled={!!diffuse} />
         </aside>
         <main className="relative min-w-0 flex-1 bg-[var(--color-viewport-bg)]">
           <CanvasView store={store} state={state} view={view} diffuseBytes={diffuse?.bytes ?? null} />
@@ -102,6 +158,7 @@ export function App(): React.JSX.Element {
           <Inspector store={store} state={state} />
         </aside>
       </div>
+      <Toast toast={toast} />
     </div>
   );
 }

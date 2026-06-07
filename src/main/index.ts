@@ -43,6 +43,25 @@ app.whenReady().then(() => {
     },
   });
 
+  // unsaved-changes guard: only armed once the editor renderer registers, so the
+  // harness/selftest/capture routes keep closing freely
+  let closeGuarded = false;
+  let allowClose = false;
+  ipcMain.on("guard-close", () => {
+    closeGuarded = true;
+  });
+  ipcMain.on("close-response", (_e, ok: boolean) => {
+    if (ok) {
+      allowClose = true;
+      win.close();
+    }
+  });
+  win.on("close", (e) => {
+    if (!closeGuarded || allowClose || selftest || capturePath) return;
+    e.preventDefault();
+    win.webContents.send("confirm-close");
+  });
+
   if (selftest) {
     ipcMain.once("selftest-result", (_event, report: { pass: boolean }) => {
       console.log(JSON.stringify(report, null, 2));

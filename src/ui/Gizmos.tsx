@@ -128,11 +128,19 @@ export function Gizmos(props: {
 
   return (
     <svg className="pointer-events-none absolute inset-0 h-full w-full">
+      <defs>
+        {/* dark halo so handles survive white height maps and saturated normal maps */}
+        <filter id="gizmo-halo" x="-50%" y="-50%" width="200%" height="200%">
+          <feDropShadow dx="0" dy="0" stdDeviation="1.2" floodColor="#000000" floodOpacity="0.9" />
+        </filter>
+      </defs>
+      <g filter="url(#gizmo-halo)">
       {/* oriented bounding box: rotates and shears with the shape's transform */}
       <polygon
         points={corners.map((c) => `${c.x},${c.y}`).join(" ")}
         fill="none"
         stroke="var(--color-accent)"
+        strokeWidth={1.5}
         strokeDasharray="4 3"
       />
       {corners.map((c, i) => {
@@ -174,11 +182,13 @@ export function Gizmos(props: {
             r={5}
             fill="#ffffff"
             stroke="var(--color-accent)"
+            strokeWidth={1.5}
             className="pointer-events-auto cursor-move"
             {...vertexHandle(i)}
           />
         );
       })}
+      </g>
     </svg>
   );
 }

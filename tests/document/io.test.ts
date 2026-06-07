@@ -31,6 +31,9 @@ function fakeHost(files: Record<string, Uint8Array>): Host {
       files[p] = d;
       return Promise.resolve();
     },
+    guardClose: () => {},
+    onConfirmClose: () => {},
+    respondClose: () => {},
   };
 }
 

@@ -5,16 +5,24 @@ export function cx(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(" ");
 }
 
+/** camelCase identifier -> spaced label ("slopeWidth" -> "slope width"); CSS uppercases. */
+export function humanizeLabel(key: string): string {
+  return key.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase();
+}
+
 export type ButtonVariant = "primary" | "ghost" | "danger";
 
 const BUTTON_BASE =
-  "inline-flex items-center justify-center gap-1.5 uppercase tracking-[var(--tracking-label)] " +
-  "border cursor-pointer transition disabled:opacity-40 disabled:cursor-not-allowed px-3 py-1 text-sm";
+  "inline-flex shrink-0 items-center justify-center gap-1.5 uppercase tracking-[var(--tracking-label)] " +
+  "whitespace-nowrap border cursor-pointer transition disabled:cursor-not-allowed px-3 py-1 text-sm";
 
 const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
-  primary: "bg-accent-faint border-accent-dim text-accent hover:bg-accent/15",
-  ghost: "bg-transparent border-border text-fg-mid hover:text-fg hover:bg-accent-faint",
-  danger: "bg-error-faint border-error/40 text-error hover:bg-error/15",
+  // disabled primaries swap the gold for muted fg instead of fading below legibility
+  primary:
+    "bg-accent-faint border-accent-dim text-accent hover:bg-accent/15 " +
+    "disabled:text-fg-mid disabled:bg-transparent disabled:border-border disabled:opacity-60",
+  ghost: "bg-transparent border-border text-fg-mid hover:text-fg hover:bg-accent-faint disabled:opacity-50",
+  danger: "bg-error-faint border-error/40 text-error hover:bg-error/15 disabled:opacity-50",
 };
 
 export function Button(
@@ -40,9 +48,12 @@ export function SectionLabel(props: { children: React.ReactNode; className?: str
 
 const SCRUB_PX_PER_STEP = 4;
 
+const roundTo = (v: number, decimals: number): number => Number(v.toFixed(decimals));
+
 /**
  * Spinbox: numeric input + stepper chevrons; the label is a Photoshop-style scrubby
- * slider (drag horizontally to adjust). Arrow keys work on the input natively.
+ * slider (drag horizontally; Alt = fine x0.1, Shift = coarse x10). Arrow keys work on
+ * the input natively.
  */
 export function SpinBox(props: {
   label: string;
@@ -57,13 +68,11 @@ export function SpinBox(props: {
   const scrub = useRef<{ startX: number; startValue: number } | null>(null);
   const [text, setText] = useState<string | null>(null);
 
-  const clamp = (v: number): number => {
+  const clamp = (v: number, effectiveStep = step): number => {
     let r = v;
     if (min !== undefined) r = Math.max(min, r);
     if (max !== undefined) r = Math.min(max, r);
-    // snap away float noise from scrubbing/stepping
-    const decimals = step < 1 ? 2 : 0;
-    return Number(r.toFixed(decimals));
+    return roundTo(r, effectiveStep < 1 ? 2 : 0);
   };
 
   const bump = (dir: 1 | -1): void => {
@@ -74,16 +83,18 @@ export function SpinBox(props: {
   return (
     <label className="flex items-center justify-between gap-2 py-0.5">
       <span
-        className="cursor-ew-resize select-none text-sm text-fg-mid"
-        title="Drag to adjust"
+        className="cursor-ew-resize select-none text-sm uppercase tracking-[var(--tracking-tight)] text-fg-mid"
+        title="Drag to adjust (Alt = fine, Shift = coarse)"
         onPointerDown={(e) => {
           (e.target as Element).setPointerCapture(e.pointerId);
           scrub.current = { startX: e.clientX, startValue: value };
         }}
         onPointerMove={(e) => {
           if (!scrub.current) return;
+          const factor = e.altKey ? 0.1 : e.shiftKey ? 10 : 1;
+          const effectiveStep = step * factor;
           const steps = Math.round((e.clientX - scrub.current.startX) / SCRUB_PX_PER_STEP);
-          onChange(clamp(scrub.current.startValue + steps * step));
+          onChange(clamp(scrub.current.startValue + steps * effectiveStep, effectiveStep));
         }}
         onPointerUp={() => {
           scrub.current = null;
@@ -117,7 +128,7 @@ export function SpinBox(props: {
             className="flex h-[11px] w-4 items-center justify-center text-fg-mid hover:bg-surface3 hover:text-accent"
             onClick={() => bump(1)}
           >
-            <ChevronUpRegular style={{ fontSize: 9 }} />
+            <ChevronUpRegular style={{ fontSize: 11 }} />
           </button>
           <button
             type="button"
@@ -125,7 +136,7 @@ export function SpinBox(props: {
             className="flex h-[11px] w-4 items-center justify-center border-t border-border text-fg-mid hover:bg-surface3 hover:text-accent"
             onClick={() => bump(-1)}
           >
-            <ChevronDownRegular style={{ fontSize: 9 }} />
+            <ChevronDownRegular style={{ fontSize: 11 }} />
           </button>
         </span>
       </span>
@@ -142,7 +153,7 @@ export function SelectRow(props: {
 }): React.JSX.Element {
   return (
     <label className="flex items-center justify-between gap-2 py-0.5">
-      <span className="text-sm text-fg-mid">{props.label}</span>
+      <span className="text-sm uppercase tracking-[var(--tracking-tight)] text-fg-mid">{props.label}</span>
       <select
         className="h-[22px] cursor-pointer border border-border bg-surface px-1 text-sm text-fg outline-none"
         value={props.value}
@@ -155,5 +166,28 @@ export function SelectRow(props: {
         ))}
       </select>
     </label>
+  );
+}
+
+export interface ToastState {
+  msg: string;
+  tone: "info" | "error";
+}
+
+/** Non-modal bottom-right toast (replaces alert() for save/export feedback). */
+export function Toast(props: { toast: ToastState | null }): React.JSX.Element | null {
+  if (!props.toast) return null;
+  const border = props.toast.tone === "error" ? "border-error/50" : "border-accent-dim";
+  return (
+    <div className="pointer-events-none fixed right-4 bottom-4 z-50">
+      <div
+        className={cx(
+          "animate-fade-in max-w-[420px] border bg-surface2 px-3 py-2 text-sm text-fg shadow-[var(--shadow-popover)]",
+          border,
+        )}
+      >
+        {props.toast.msg}
+      </div>
+    </div>
   );
 }

@@ -25,6 +25,7 @@ export function CanvasView(props: {
   const [viewport, setViewport] = useState<Viewport>({ zoom: 1, panX: 0, panY: 0 });
   const [gpuError, setGpuError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  const [cursor, setCursor] = useState<Vec2 | null>(null);
   const dragRef = useRef<Drag | null>(null);
 
   const doc = state.doc;
@@ -95,6 +96,8 @@ export function CanvasView(props: {
   };
 
   const onPointerMove = (e: React.PointerEvent): void => {
+    const cp = toCanvasPoint(e);
+    setCursor(v2(Math.floor(cp.x), Math.floor(cp.y)));
     const drag = dragRef.current;
     if (!drag) return;
     if (drag.kind === "pan") {
@@ -127,6 +130,7 @@ export function CanvasView(props: {
 
   const onDrop = (e: React.DragEvent): void => {
     e.preventDefault();
+    if (!diffuseBytes) return; // no document: nothing to author against
     const typeId = e.dataTransfer.getData("application/x-flatland-shape");
     if (!typeId) return;
     const rect = hostRef.current!.getBoundingClientRect();
@@ -134,6 +138,27 @@ export function CanvasView(props: {
     store.update((d) => addShape(d, typeId, p));
     store.endGesture();
   };
+
+  // viewport keyboard: Ctrl+0 = fit, Ctrl+1 = 100%
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      if (e.key !== "0" && e.key !== "1") return;
+      e.preventDefault();
+      const rect = hostRef.current!.getBoundingClientRect();
+      if (e.key === "0") {
+        setViewport(fitViewport(doc.source.width, doc.source.height, rect.width, rect.height, 40));
+      } else {
+        setViewport({
+          zoom: 1,
+          panX: (rect.width - doc.source.width) / 2,
+          panY: (rect.height - doc.source.height) / 2,
+        });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [doc.source.width, doc.source.height]);
 
   return (
     <div
@@ -162,6 +187,18 @@ export function CanvasView(props: {
         </div>
       ) : null}
       <Gizmos doc={doc} selectedId={state.selectedId} viewport={viewport} store={store} />
+      {diffuseBytes ? (
+        <div className="pointer-events-none absolute bottom-2 left-2 flex gap-3 border border-border bg-surface2/90 px-2 py-0.5 text-sm tabular-nums text-fg-mid">
+          <span title="Zoom (Ctrl+0 fit, Ctrl+1 100%)" className="text-fg">
+            {Math.round(viewport.zoom * 100)}%
+          </span>
+          {cursor ? (
+            <span>
+              {cursor.x}, {cursor.y}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

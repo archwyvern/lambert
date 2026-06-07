@@ -3,9 +3,13 @@ import { removeShape, reorderShape, updateShape } from "../document/docOps";
 import { getShapeType } from "../field/registry";
 import type { CombineOp } from "../field/combine";
 import type { ShapeInstance } from "../field/types";
-import { Button, SectionLabel, SelectRow, SpinBox } from "./kit";
+import { Button, humanizeLabel, SectionLabel, SelectRow, SpinBox } from "./kit";
 
 const COMBINE_OPS = ["raise", "add", "carve"] as const;
+
+const toDeg = (rad: number): number => Number(((rad * 180) / Math.PI).toFixed(1));
+const toRad = (deg: number): number => (deg * Math.PI) / 180;
+const safeScale = (v: number): number => Math.sign(v || 1) * Math.max(0.05, Math.abs(v));
 
 export function Inspector(props: { store: DocumentStore; state: EditorState }): React.JSX.Element {
   const { store, state } = props;
@@ -27,12 +31,15 @@ export function Inspector(props: { store: DocumentStore; state: EditorState }): 
 
   return (
     <div>
-      <div className="mb-2 text-md font-semibold text-accent">{type.name}</div>
+      <div className="mb-2 text-md font-semibold uppercase tracking-[var(--tracking-label)] text-accent">
+        {type.name}
+      </div>
+      <SectionLabel>Parameters</SectionLabel>
       {Object.entries(type.params).map(([key, spec]) =>
         spec.type === "enum" ? (
           <SelectRow
             key={key}
-            label={key}
+            label={humanizeLabel(key)}
             value={String(shape.params[key])}
             options={spec.options}
             onChange={(v) => {
@@ -43,7 +50,7 @@ export function Inspector(props: { store: DocumentStore; state: EditorState }): 
         ) : (
           <SpinBox
             key={key}
-            label={key}
+            label={humanizeLabel(key)}
             value={Number(shape.params[key])}
             min={spec.min}
             max={spec.max}
@@ -52,6 +59,55 @@ export function Inspector(props: { store: DocumentStore; state: EditorState }): 
           />
         ),
       )}
+      <div className="my-3 border-t border-border" />
+      <SectionLabel>Transform</SectionLabel>
+      <SpinBox
+        label="x"
+        value={Number(shape.transform.pos.x.toFixed(1))}
+        onChange={(v) =>
+          live((s) => ({ ...s, transform: { ...s.transform, pos: { ...s.transform.pos, x: v } } }), "tx")
+        }
+        onCommit={commit}
+      />
+      <SpinBox
+        label="y"
+        value={Number(shape.transform.pos.y.toFixed(1))}
+        onChange={(v) =>
+          live((s) => ({ ...s, transform: { ...s.transform, pos: { ...s.transform.pos, y: v } } }), "ty")
+        }
+        onCommit={commit}
+      />
+      <SpinBox
+        label="rotation"
+        value={toDeg(shape.transform.rotation)}
+        step={5}
+        onChange={(v) => live((s) => ({ ...s, transform: { ...s.transform, rotation: toRad(v) } }), "trot")}
+        onCommit={commit}
+      />
+      <SpinBox
+        label="scale x"
+        value={Number(shape.transform.scale.x.toFixed(2))}
+        step={0.1}
+        onChange={(v) =>
+          live(
+            (s) => ({ ...s, transform: { ...s.transform, scale: { ...s.transform.scale, x: safeScale(v) } } }),
+            "tsx",
+          )
+        }
+        onCommit={commit}
+      />
+      <SpinBox
+        label="scale y"
+        value={Number(shape.transform.scale.y.toFixed(2))}
+        step={0.1}
+        onChange={(v) =>
+          live(
+            (s) => ({ ...s, transform: { ...s.transform, scale: { ...s.transform.scale, y: safeScale(v) } } }),
+            "tsy",
+          )
+        }
+        onCommit={commit}
+      />
       <div className="my-3 border-t border-border" />
       <SectionLabel>Compositing</SectionLabel>
       <SelectRow

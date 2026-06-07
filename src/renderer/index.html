@@ -4,12 +4,13 @@
     <meta charset="utf-8" />
     <title>Flatland</title>
     <style>
-      body { background: #16161a; color: #ececef; font: 14px system-ui; margin: 0; }
+      /* harness/selftest routes only; the editor styles itself via tailwind tokens */
+      body { background: #1a1a1c; color: #ffffff; font: 12px system-ui; margin: 0; }
       #status, #views { margin: 1.5rem; }
       #status[hidden] { display: none; }
       #views:empty { display: none; margin: 0; }
       #status { white-space: pre-wrap; }
-      #views canvas, #views img { image-rendering: pixelated; border: 1px solid #333; margin-right: 1rem; }
+      #views canvas, #views img { image-rendering: pixelated; border: 1px solid #303036; margin-right: 1rem; }
     </style>
   </head>
   <body>
