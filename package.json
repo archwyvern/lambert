@@ -1,0 +1,25 @@
+{
+  "name": "flatland",
+  "version": "0.1.0",
+  "description": "Shape-based height field authoring for normal maps. 3D but not 3D, done the hard way.",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "eval": "tsx src/cli/evaluate.ts",
+    "gen-goldens": "tsx tests/golden/gen.ts"
+  },
+  "packageManager": "pnpm@10.33.4",
+  "devDependencies": {
+    "@types/node": "^25.9.2",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  },
+  "dependencies": {
+    "fast-png": "^8.0.0",
+    "zod": "^4.4.3"
+  }
+}
