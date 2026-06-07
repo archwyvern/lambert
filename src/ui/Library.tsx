@@ -19,27 +19,29 @@ export function Library(props: { enabled: boolean }): React.JSX.Element {
   return (
     <div>
       <SectionLabel>Shapes</SectionLabel>
-      <div className="flex flex-col gap-1">
+      <div className="grid grid-cols-2 gap-1.5">
         {allShapeTypes()
           .filter((t) => t.wgsl)
           .map((t) => (
             <button
               key={t.id}
               disabled={!enabled}
-              className="flex cursor-grab items-center gap-2 border border-border bg-surface2 px-2 py-1 text-left text-base text-fg transition hover:border-border-light hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-border disabled:hover:bg-surface2"
+              title={t.name}
+              className="aspect-square cursor-grab border border-border bg-surface2 p-1 transition hover:border-accent/50 hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border disabled:hover:bg-surface2"
               data-shape-type={t.id}
               draggable={enabled}
               onDragStart={(e) => e.dataTransfer.setData("application/x-flatland-shape", t.id)}
             >
               {SHAPE_ICONS[t.id] ? (
-                <img src={SHAPE_ICONS[t.id]} alt="" className="h-7 w-7 shrink-0" draggable={false} />
-              ) : null}
-              {t.name}
+                <img src={SHAPE_ICONS[t.id]} alt={t.name} className="h-full w-full" draggable={false} />
+              ) : (
+                <span className="text-base text-fg">{t.name}</span>
+              )}
             </button>
           ))}
       </div>
-      <p className="mt-3 text-sm leading-snug text-fg-mid">
-        {enabled ? "Drag a shape onto the canvas to place it." : "Open an image first (File menu)."}
+      <p className="mt-2 text-sm leading-snug text-fg-mid">
+        {enabled ? "Drag a shape onto the canvas." : "Open an image first (File menu)."}
       </p>
     </div>
   );

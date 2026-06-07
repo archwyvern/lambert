@@ -13,18 +13,20 @@
   --color-surface3: #242526;
   --color-border: #2a2b2c;
   --color-border-light: #333536;
-  --color-accent: #c75050;
-  --color-accent-dim: rgba(199, 80, 80, 0.15);
-  --color-accent-faint: rgba(199, 80, 80, 0.08);
+  /* grey + gold: vscode-like surfaces, skyrat gold accent (user preference over the
+     space2d editor's terracotta) */
+  --color-accent: #c8a84e;
+  --color-accent-dim: rgba(200, 168, 78, 0.15);
+  --color-accent-faint: rgba(200, 168, 78, 0.08);
   --color-fg: #bbbebf;
   --color-fg-mid: #8c8c8c;
   --color-success: #72c892;
   --color-error: #f48771;
   --color-warning: #e5ba7d;
   --color-link: #48a0c7;
-  --color-selection: #276782;
+  --color-selection: rgba(200, 168, 78, 0.3);
   --color-hover: #262728;
-  --color-list-active: rgba(57, 148, 188, 0.15);
+  --color-list-active: rgba(200, 168, 78, 0.15);
   --color-viewport-bg: #121314;
   --text-sm: 0.75rem; /* 12px floor */
   --text-base: 0.8125rem; /* 13px standard ui text */

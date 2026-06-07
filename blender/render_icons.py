@@ -33,11 +33,13 @@ def reset_scene() -> None:
 
 
 def add_clay_material(obj: bpy.types.Object) -> None:
+    # mid-gray clay with a harder key/fill ratio (set in the lights) so the form's
+    # edges read at small sizes; pure white washed out the silhouettes
     mat = bpy.data.materials.new("clay")
     mat.use_nodes = True
     bsdf = mat.node_tree.nodes["Principled BSDF"]
-    bsdf.inputs["Base Color"].default_value = (0.78, 0.78, 0.80, 1.0)
-    bsdf.inputs["Roughness"].default_value = 0.65
+    bsdf.inputs["Base Color"].default_value = (0.52, 0.53, 0.55, 1.0)
+    bsdf.inputs["Roughness"].default_value = 0.55
     obj.data.materials.append(mat)
 
 
@@ -52,14 +54,15 @@ def setup_camera_and_light() -> None:
     cam.rotation_euler = (math.radians(60), 0.0, math.radians(45))
     bpy.context.scene.camera = cam
 
+    # hard key + weak fill + dim ambient = strong facet contrast (edges readable small)
     sun_data = bpy.data.lights.new("sun", type="SUN")
-    sun_data.energy = 3.0
+    sun_data.energy = 5.5
     sun = bpy.data.objects.new("sun", sun_data)
     bpy.context.collection.objects.link(sun)
     sun.rotation_euler = (math.radians(50), math.radians(10), math.radians(25))
 
     fill_data = bpy.data.lights.new("fill", type="SUN")
-    fill_data.energy = 0.8
+    fill_data.energy = 0.35
     fill = bpy.data.objects.new("fill", fill_data)
     bpy.context.collection.objects.link(fill)
     fill.rotation_euler = (math.radians(60), 0.0, math.radians(205))
@@ -68,8 +71,16 @@ def setup_camera_and_light() -> None:
     world.use_nodes = True
     bg = world.node_tree.nodes["Background"]
     bg.inputs[0].default_value = (0.5, 0.5, 0.5, 1.0)
-    bg.inputs[1].default_value = 0.4
+    bg.inputs[1].default_value = 0.15
     bpy.context.scene.world = world
+
+    # ambient occlusion deepens creases (engine-dependent flags; best effort)
+    eevee = bpy.context.scene.eevee
+    for flag in ("use_gtao", "use_fast_gi"):
+        try:
+            setattr(eevee, flag, True)
+        except (AttributeError, TypeError):
+            pass
 
 
 def smooth(obj: bpy.types.Object) -> None:
