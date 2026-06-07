@@ -25,10 +25,20 @@ test("invisible shapes are skipped", () => {
 
 test("raise: overlapping shapes merge to the taller", () => {
   const low = createShapeInstance("plateau", v2(64, 64));
+  low.combine = { op: "raise", blend: 0 };
   const tall = createShapeInstance("plateau", v2(80, 64));
   tall.params.height = 40;
+  tall.combine = { op: "raise", blend: 0 };
   const r = evaluateField([low, tall], 160, 128);
   expect(r.heightMap[px(r, 80, 64)]!).toBeCloseTo(40, 0); // overlap: taller wins
+});
+
+test("default combine is add: a stud keeps its tallness on top of a slab", () => {
+  const slab = createShapeInstance("plateau", v2(64, 64));
+  const stud = createShapeInstance("dome", v2(64, 64));
+  stud.params = { ...stud.params, radiusX: 8, radiusY: 8, height: 10 };
+  const r = evaluateField([slab, stud], 128, 128);
+  expect(r.heightMap[px(r, 64, 64)]!).toBeGreaterThan(33.9); // 24 + ~10, not max(24, 10)
 });
 
 test("add follows underlying curvature", () => {

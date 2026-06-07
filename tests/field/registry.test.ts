@@ -32,7 +32,7 @@ test("createShapeInstance seeds defaults from the schema", () => {
   expect(inst.transform.pos).toEqual({ x: 10, y: 20 });
   expect(inst.params.height).toBe(24);
   expect(inst.params.kind).toBe("a");
-  expect(inst.combine).toEqual({ op: "raise", blend: 0 });
+  expect(inst.combine).toEqual({ op: "add", blend: 0 }); // height = tallness, not level
   expect(inst.strength).toBe(1);
   expect(inst.visible).toBe(true);
   expect(numParam(inst, "height")).toBe(24);

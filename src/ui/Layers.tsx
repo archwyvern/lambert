@@ -17,8 +17,8 @@ const SHAPE_ICONS: Record<string, string> = {
   groove: grooveIcon,
 };
 
-/** One-glyph compositing marker so carves/adds are visible at a glance. */
-const OP_MARK: Record<string, string> = { raise: "", add: "+", carve: "-" };
+/** One-glyph compositing marker; the default (add) stays unmarked. */
+const OP_MARK: Record<string, string> = { raise: "^", add: "", carve: "-" };
 
 interface Menu {
   x: number;
