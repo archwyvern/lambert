@@ -1,4 +1,4 @@
-import { evaluateField } from "./evalCpu";
+import { evaluateField, FieldResult } from "./evalCpu";
 import { deriveNormals } from "./normals";
 import type { ShapeInstance } from "./types";
 
@@ -17,23 +17,12 @@ export interface RenderOptions {
 }
 
 /**
- * Full render: evaluate the fold (optionally at NxN supersampling), derive normals at the
- * high resolution, then box-filter height/mask/normals down and renormalize the normals.
- * Mirrors what the GPU export path (plan 2) must produce.
+ * Scale shape instances onto a canvas f times larger: positions, scales, and blends
+ * multiply by f so footprints keep their relative area. Heights are NOT scaled — the
+ * normal derivation compensates with slopeScale = f.
  */
-export function renderField(
-  shapes: ShapeInstance[],
-  width: number,
-  height: number,
-  opts: RenderOptions,
-): RenderResult {
-  const f = opts.supersample;
-  if (f === 1) {
-    const field = evaluateField(shapes, width, height);
-    return { ...field, normals: deriveNormals(field.heightMap, width, height) };
-  }
-
-  const hiShapes = shapes.map((s) => ({
+export function scaleShapesForSupersample(shapes: ShapeInstance[], f: number): ShapeInstance[] {
+  return shapes.map((s) => ({
     ...s,
     transform: {
       pos: { x: s.transform.pos.x * f, y: s.transform.pos.y * f },
@@ -42,12 +31,18 @@ export function renderField(
     },
     combine: { ...s.combine, blend: s.combine.blend * f },
   }));
-  const hw = width * f;
-  const hh = height * f;
-  const hi = evaluateField(hiShapes, hw, hh);
-  // slopeScale = f: heights are NOT scaled with the canvas, so hi-res gradients are f x
-  // too shallow without it
-  const hiNormals = deriveNormals(hi.heightMap, hw, hh, f);
+}
+
+/**
+ * Box-filter a hi-res field + its normals down by factor f; normals renormalize.
+ * Shared by the CPU reference and the GPU export path (which reads back hi-res tiles).
+ */
+export function downsampleRender(hi: FieldResult, hiNormals: Float32Array, f: number): RenderResult {
+  const width = hi.width / f;
+  const height = hi.height / f;
+  if (!Number.isInteger(width) || !Number.isInteger(height)) {
+    throw new Error(`hi-res dims ${hi.width}x${hi.height} not divisible by ${f}`);
+  }
   const heightMap = new Float32Array(width * height);
   const mask = new Float32Array(width * height);
   const normals = new Float32Array(width * height * 3);
@@ -60,7 +55,7 @@ export function renderField(
       let nz = 0;
       for (let sy = 0; sy < f; sy++) {
         for (let sx = 0; sx < f; sx++) {
-          const i = (y * f + sy) * hw + (x * f + sx);
+          const i = (y * f + sy) * hi.width + (x * f + sx);
           sh += hi.heightMap[i]!;
           sm += hi.mask[i]!;
           nx += hiNormals[i * 3]!;
@@ -79,4 +74,21 @@ export function renderField(
     }
   }
   return { width, height, heightMap, mask, normals };
+}
+
+/** Full CPU render. The reference implementation the GPU path is drift-tested against. */
+export function renderField(
+  shapes: ShapeInstance[],
+  width: number,
+  height: number,
+  opts: RenderOptions,
+): RenderResult {
+  const f = opts.supersample;
+  if (f === 1) {
+    const field = evaluateField(shapes, width, height);
+    return { ...field, normals: deriveNormals(field.heightMap, width, height) };
+  }
+  const hi = evaluateField(scaleShapesForSupersample(shapes, f), width * f, height * f);
+  const hiNormals = deriveNormals(hi.heightMap, hi.width, hi.height, f);
+  return downsampleRender(hi, hiNormals, f);
 }
