@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { DocumentStore } from "../document/store";
 import { updateShape } from "../document/docOps";
 import type { FlatlandDoc } from "../document/schema";
@@ -6,7 +6,7 @@ import type { FlatlandDoc } from "../document/schema";
 import { toLocal } from "../field/transform";
 import type { ShapeInstance } from "../field/types";
 import { v2, Vec2 } from "../field/vec";
-import { axisScaleFromDrag } from "./picking";
+import { axisScaleFromDrag, groupScaleFactor, pointsBounds, scalePointsAbout } from "./picking";
 import type { ToolMode } from "./tools";
 import { canvasToScreen, screenToCanvas, Viewport } from "./viewport";
 
@@ -60,6 +60,10 @@ export function Gizmos(props: {
     anchorLocal: Vec2;
     anchorCanvas: Vec2;
   } | null>(null);
+  // multi-vertex selection (indices into controlPoints) + its move/scale drag state
+  const [selVerts, setSelVerts] = useState<number[]>([]);
+  useEffect(() => setSelVerts([]), [selectedId]); // reset when the selected shape changes
+  const vertDrag = useRef<{ startCanvas: Vec2; starts: { i: number; p: Vec2 }[]; pivot: Vec2 } | null>(null);
   const shape = doc.shapes.find((s) => s.id === selectedId);
   if (!shape) return null;
 
@@ -145,18 +149,79 @@ export function Gizmos(props: {
     });
   };
 
-  const vertexHandle = (i: number) =>
-    handleProps(boundsCorners[0]!, (p) => {
-      const local = toLocal(shape.transform, p);
-      store.update(
-        (d) =>
-          updateShape(d, shape.id, (s) => ({
-            ...s,
-            controlPoints: s.controlPoints.map((cp, ci) => (ci === i ? local : cp)),
-          })),
-        { coalesce: `vtx:${shape.id}:${i}` },
+  // commit a transform of the selected control points (move or scale), keyed by their start
+  // positions captured at drag-start so repeated moves don't compound
+  const applyVertDrag = (transformLocal: (start: Vec2) => Vec2): void => {
+    const d = vertDrag.current!;
+    const byIndex = new Map(d.starts.map((s) => [s.i, s.p]));
+    store.update(
+      (doc2) =>
+        updateShape(doc2, shape.id, (s) => ({
+          ...s,
+          controlPoints: s.controlPoints.map((cp, ci) => {
+            const start = byIndex.get(ci);
+            return start ? transformLocal(start) : cp;
+          }),
+        })),
+      { coalesce: `vgrp:${shape.id}` },
+    );
+  };
+
+  const beginVertDrag = (e: React.PointerEvent, indices: number[], pivot: Vec2): void => {
+    e.stopPropagation();
+    (e.target as Element).setPointerCapture(e.pointerId);
+    vertDrag.current = {
+      startCanvas: eventCanvasPoint(e),
+      starts: indices.map((i) => ({ i, p: shape.controlPoints[i]! })),
+      pivot,
+    };
+  };
+
+  const vertEndProps = {
+    onPointerUp: (e: React.PointerEvent) => {
+      e.stopPropagation();
+      vertDrag.current = null;
+      store.endGesture();
+    },
+  };
+
+  // a vertex dot: shift-click toggles it in the selection; plain drag moves the selection
+  // (selecting just this one first if it wasn't already selected)
+  const vertexHandle = (i: number) => ({
+    ...vertEndProps,
+    onPointerDown: (e: React.PointerEvent) => {
+      if (e.shiftKey) {
+        e.stopPropagation();
+        setSelVerts((s) => (s.includes(i) ? s.filter((x) => x !== i) : [...s, i]));
+        return;
+      }
+      const group = selVerts.includes(i) ? selVerts : [i];
+      if (!selVerts.includes(i)) setSelVerts([i]);
+      beginVertDrag(e, group, v2(0, 0));
+    },
+    onPointerMove: (e: React.PointerEvent) => {
+      if (!vertDrag.current) return;
+      const d = toLocal(shape.transform, eventCanvasPoint(e));
+      const s0 = toLocal(shape.transform, vertDrag.current.startCanvas);
+      const dl = v2(d.x - s0.x, d.y - s0.y);
+      applyVertDrag((start) => v2(start.x + dl.x, start.y + dl.y));
+    },
+  });
+
+  // group-scale handle on the selection's bbox corner: scales selected verts about centroid
+  const groupScaleHandle = (pivot: Vec2) => ({
+    ...vertEndProps,
+    onPointerDown: (e: React.PointerEvent) => beginVertDrag(e, selVerts, pivot),
+    onPointerMove: (e: React.PointerEvent) => {
+      if (!vertDrag.current) return;
+      const factor = groupScaleFactor(
+        vertDrag.current.pivot,
+        toLocal(shape.transform, vertDrag.current.startCanvas),
+        toLocal(shape.transform, eventCanvasPoint(e)),
       );
-    });
+      applyVertDrag((start) => scalePointsAbout([start], vertDrag.current!.pivot, factor)[0]!);
+    },
+  });
 
   return (
     <svg className="pointer-events-none absolute inset-0 h-full w-full">
@@ -219,22 +284,57 @@ export function Gizmos(props: {
             );
           })
         : null}
-      {handles && shape.controlPoints.map((cp, i) => {
-        const sp = canvasToScreen(viewport, localToCanvas(shape, cp));
-        return (
-          <circle
-            key={i}
-            cx={sp.x}
-            cy={sp.y}
-            r={5}
-            fill="#ffffff"
-            stroke="var(--color-accent)"
-            strokeWidth={1.5}
-            className="pointer-events-auto cursor-move"
-            {...vertexHandle(i)}
-          />
-        );
-      })}
+      {/* group-scale frame: bbox of the selected vertices with corner handles (>=2 selected) */}
+      {handles && selVerts.length >= 2
+        ? (() => {
+            const sel = selVerts.map((i) => shape.controlPoints[i]!);
+            const b = pointsBounds(sel);
+            const cl = [v2(b.min.x, b.min.y), v2(b.max.x, b.min.y), v2(b.max.x, b.max.y), v2(b.min.x, b.max.y)];
+            const cc = cl.map((c) => canvasToScreen(viewport, localToCanvas(shape, c)));
+            return (
+              <>
+                <polygon
+                  points={cc.map((c) => `${c.x},${c.y}`).join(" ")}
+                  fill="none"
+                  stroke="var(--color-accent)"
+                  strokeWidth={1}
+                  strokeDasharray="2 3"
+                  opacity={0.8}
+                />
+                {cc.map((c, i) => (
+                  <rect
+                    key={`gs${i}`}
+                    x={c.x - 4}
+                    y={c.y - 4}
+                    width={8}
+                    height={8}
+                    fill="var(--color-accent)"
+                    className="pointer-events-auto cursor-nwse-resize"
+                    {...groupScaleHandle(b.centroid)}
+                  />
+                ))}
+              </>
+            );
+          })()
+        : null}
+      {handles &&
+        shape.controlPoints.map((cp, i) => {
+          const sp = canvasToScreen(viewport, localToCanvas(shape, cp));
+          const selected = selVerts.includes(i);
+          return (
+            <circle
+              key={i}
+              cx={sp.x}
+              cy={sp.y}
+              r={5}
+              fill={selected ? "var(--color-accent)" : "#ffffff"}
+              stroke={selected ? "#ffffff" : "var(--color-accent)"}
+              strokeWidth={1.5}
+              className="pointer-events-auto cursor-move"
+              {...vertexHandle(i)}
+            />
+          );
+        })}
       </g>
     </svg>
   );

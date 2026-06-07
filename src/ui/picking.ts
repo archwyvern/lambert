@@ -1,7 +1,7 @@
 import { getShapeType } from "../field/registry";
 import { distanceScale, toLocal } from "../field/transform";
 import type { ShapeInstance } from "../field/types";
-import type { Vec2 } from "../field/vec";
+import { v2, Vec2 } from "../field/vec";
 
 const PICK_SLOP_PX = 1;
 
@@ -73,4 +73,37 @@ export function axisScaleFromDrag(
   const apply = (v: number, num: number, den: number): number =>
     Math.abs(den) < 1e-3 ? v : clampMag(v * (num / den));
   return { x: apply(startScale.x, b.x, a.x), y: apply(startScale.y, b.y, a.y), z: startScale.z };
+}
+
+// --- multi-vertex group editing (move/scale a set of selected control points) ---
+
+/** Axis-aligned bounds + centroid of a set of points (shape-local). */
+export function pointsBounds(pts: Vec2[]): { min: Vec2; max: Vec2; centroid: Vec2 } {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let cx = 0;
+  let cy = 0;
+  for (const p of pts) {
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
+    cx += p.x;
+    cy += p.y;
+  }
+  return { min: v2(minX, minY), max: v2(maxX, maxY), centroid: v2(cx / pts.length, cy / pts.length) };
+}
+
+/** Per-axis scale factor for a group drag: how far the handle moved from the pivot. */
+export function groupScaleFactor(pivot: Vec2, startLocal: Vec2, currentLocal: Vec2): Vec2 {
+  const fx = Math.abs(startLocal.x - pivot.x) < 1e-3 ? 1 : (currentLocal.x - pivot.x) / (startLocal.x - pivot.x);
+  const fy = Math.abs(startLocal.y - pivot.y) < 1e-3 ? 1 : (currentLocal.y - pivot.y) / (startLocal.y - pivot.y);
+  return v2(fx, fy);
+}
+
+/** Scale points about a pivot by a per-axis factor (group vertex scale). */
+export function scalePointsAbout(pts: Vec2[], pivot: Vec2, factor: Vec2): Vec2[] {
+  return pts.map((p) => v2(pivot.x + (p.x - pivot.x) * factor.x, pivot.y + (p.y - pivot.y) * factor.y));
 }
