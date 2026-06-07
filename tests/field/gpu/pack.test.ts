@@ -36,11 +36,12 @@ test("plateau: control points and enum param index", () => {
   const plateau = createShapeInstance("plateau", v2(0, 0));
   plateau.params.profile = "round";
   const { records, points } = packShapes([plateau]);
-  expect(records[12]).toBe(4); // 4 vertices
-  expect(records[15]).toBe(2); // profile "round" -> options index 2
-  expect(points[0]).toBe(-32); // first vertex x
-  expect(points[1]).toBe(-32); // first vertex y
-  expect(points.length).toBe(8);
+  expect(records[12]).toBe(8); // 4 base + 4 top-rim vertices
+  expect(records[14]).toBe(2); // profile "round" -> options index 2
+  expect(points[0]).toBe(-32); // first base vertex x
+  expect(points[1]).toBe(-32); // first base vertex y
+  expect(points[8]).toBe(-20); // first top-rim vertex x
+  expect(points.length).toBe(16);
 });
 
 test("multiple shapes: cpStart advances, invisible skipped", () => {
@@ -51,7 +52,7 @@ test("multiple shapes: cpStart advances, invisible skipped", () => {
   const { records, count } = packShapes([a, hidden, b]);
   expect(count).toBe(2);
   expect(records.length).toBe(2 * RECORD_F32);
-  expect(records[RECORD_F32 + 11]).toBe(4); // ridge cpStart after plateau's 4 points
+  expect(records[RECORD_F32 + 11]).toBe(8); // ridge cpStart after plateau's 8 points
   expect(records[RECORD_F32 + 12]).toBe(2); // ridge polyline 2 points
 });
 

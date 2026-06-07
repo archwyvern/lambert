@@ -54,17 +54,33 @@ export function Inspector(props: { store: DocumentStore; state: EditorState }): 
       <SectionLabel>Parameters</SectionLabel>
       {type.controlPoints.kind !== "none" ? (
         <SpinBox
-          label="vertices"
-          value={shape.controlPoints.length}
-          min={type.controlPoints.min ?? (type.controlPoints.kind === "polygon" ? 3 : 2)}
+          label={type.controlPoints.kind === "rings" ? "vertices / ring" : "vertices"}
+          value={
+            type.controlPoints.kind === "rings" ? shape.controlPoints.length >> 1 : shape.controlPoints.length
+          }
+          min={type.controlPoints.min ?? (type.controlPoints.kind === "polyline" ? 2 : 3)}
           max={16}
           onChange={(v) => {
             const n = Math.round(v);
-            if (n === shape.controlPoints.length) return;
+            const current =
+              type.controlPoints.kind === "rings" ? shape.controlPoints.length >> 1 : shape.controlPoints.length;
+            if (n === current) return;
             live((s) => {
               if (type.controlPoints.kind === "polygon") {
                 const { centroid, radius } = polygonStats(s.controlPoints);
                 return { ...s, controlPoints: regularPolygon(centroid, radius, n) };
+              }
+              if (type.controlPoints.kind === "rings") {
+                const half = s.controlPoints.length >> 1;
+                const base = polygonStats(s.controlPoints.slice(0, half));
+                const top = polygonStats(s.controlPoints.slice(half));
+                return {
+                  ...s,
+                  controlPoints: [
+                    ...regularPolygon(base.centroid, base.radius, n),
+                    ...regularPolygon(top.centroid, top.radius, n),
+                  ],
+                };
               }
               return { ...s, controlPoints: resamplePolyline(s.controlPoints, n) };
             }, "verts");

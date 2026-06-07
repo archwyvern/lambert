@@ -18,7 +18,8 @@ export interface ParamSpecEnum {
 export type ParamSpec = ParamSpecPx | ParamSpecEnum;
 
 export interface ControlPointSpec {
-  kind: "none" | "polygon" | "polyline";
+  /** rings = two equal-count polygon rings in one array (first half base, second half top). */
+  kind: "none" | "polygon" | "polyline" | "rings";
   min?: number;
   /** Default control points in shape-local px. */
   default: Vec2[];

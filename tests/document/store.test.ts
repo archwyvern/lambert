@@ -51,6 +51,21 @@ test("schema: legacy per-shape op fields are stripped on load", () => {
   expect("op" in back.shapes[0]!.combine).toBe(false);
 });
 
+test("schema: legacy single-ring plateau gains a top rim from slopeWidth", () => {
+  const doc = addShape(emptyDoc("x.png", 64, 64), "plateau", v2(0, 0));
+  const raw = JSON.parse(serializeDoc(doc));
+  raw.shapes[0].controlPoints = [
+    { x: -32, y: -32 }, { x: 32, y: -32 }, { x: 32, y: 32 }, { x: -32, y: 32 },
+  ];
+  raw.shapes[0].params = { height: 24, slopeWidth: 12, profile: "linear" };
+  const back = parseDoc(JSON.stringify(raw));
+  const cps = back.shapes[0]!.controlPoints;
+  expect(cps.length).toBe(8);
+  expect(cps[4]!.x).toBeCloseTo(-20); // apothem 32, inset 12 -> scale 20/32
+  expect(cps[4]!.y).toBeCloseTo(-20);
+  expect("slopeWidth" in back.shapes[0]!.params).toBe(false);
+});
+
 test("schema: optional shape name round-trips", () => {
   const doc = addShape(emptyDoc("x.png", 64, 64), "dome", v2(0, 0));
   doc.shapes[0]!.name = "boss stud";

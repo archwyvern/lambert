@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { polygonStats } from "../field/controlPoints";
 import type { ShapeInstance } from "../field/types";
 
 const vec2Schema = z.object({ x: z.number(), y: z.number() });
@@ -82,6 +83,19 @@ export function parseDoc(json: string): FlatlandDoc {
     if (s.strength !== undefined) {
       s.transform.scale.z *= s.strength; // migrate legacy strength into tallness scale
       delete s.strength;
+    }
+    // legacy single-ring plateau: synthesize the top rim from slopeWidth (the straight-edge
+    // inset matches via the apothem; the old SDF inset rounded corners, this miters them)
+    if (s.typeId === "plateau" && typeof s.params.slopeWidth === "number") {
+      const base = s.controlPoints;
+      const { centroid, radius } = polygonStats(base);
+      const apothem = radius * Math.cos(Math.PI / Math.max(base.length, 3));
+      const k = Math.max(0.2, (apothem - s.params.slopeWidth) / Math.max(apothem, 1e-6));
+      s.controlPoints = [
+        ...base,
+        ...base.map((v) => ({ x: centroid.x + (v.x - centroid.x) * k, y: centroid.y + (v.y - centroid.y) * k })),
+      ];
+      delete s.params.slopeWidth;
     }
   }
   return doc as unknown as FlatlandDoc;

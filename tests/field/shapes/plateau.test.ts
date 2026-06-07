@@ -4,29 +4,50 @@ import { createShapeInstance, getShapeType } from "../../../src/field/registry";
 import { v2 } from "../../../src/field/vec";
 
 const plateau = getShapeType("plateau");
-// defaults: square +/-32, height 24, slopeWidth 12, profile linear
+// defaults: base ring +/-32, top rim +/-20, height 24, profile linear
 const inst = createShapeInstance("plateau", v2(0, 0));
 
-test("flat top where inside-distance exceeds slopeWidth", () => {
+test("flat top inside the top rim", () => {
   expect(plateau.eval(v2(0, 0), inst).height).toBeCloseTo(24);
   expect(plateau.eval(v2(10, 5), inst).height).toBeCloseTo(24);
+  expect(plateau.eval(v2(20, 0), inst).height).toBeCloseTo(24); // on the rim edge
 });
 
-test("linear ramp on the slope", () => {
-  // p=(26,0): inside = 6, t = 0.5 -> 12
+test("linear ramp across the slope band", () => {
+  // p=(26,0): sdB = -6, sdT = 6 -> t = 0.5 -> 12
   expect(plateau.eval(v2(26, 0), inst).height).toBeCloseTo(12);
 });
 
-test("zero outside, sd positive outside", () => {
+test("zero outside, sd positive outside (sd = base footprint)", () => {
   const s = plateau.eval(v2(40, 0), inst);
   expect(s.height).toBe(0);
   expect(s.sd).toBeCloseTo(8);
 });
 
-test("dragged vertices change the footprint", () => {
+test("dragging both rings moves the footprint and the flat top", () => {
   const stretched = {
     ...inst,
-    controlPoints: [v2(-64, -32), v2(32, -32), v2(32, 32), v2(-64, 32)],
+    controlPoints: [
+      v2(-64, -32), v2(32, -32), v2(32, 32), v2(-64, 32),
+      v2(-52, -20), v2(20, -20), v2(20, 20), v2(-52, 20),
+    ],
   };
-  expect(plateau.eval(v2(-58, 0), stretched).height).toBeCloseTo(12); // inside=6, t=0.5
+  expect(plateau.eval(v2(-58, 0), stretched).height).toBeCloseTo(12); // mid-band on the stretched side
+  expect(plateau.eval(v2(-40, 0), stretched).height).toBeCloseTo(24); // inside the stretched top
+});
+
+test("skewed top rim tilts one slope without touching the other", () => {
+  // top rim pushed +8 in x: the left band widens (shallower), the right narrows (steeper)
+  const skewed = {
+    ...inst,
+    controlPoints: [
+      v2(-32, -32), v2(32, -32), v2(32, 32), v2(-32, 32),
+      v2(-12, -20), v2(28, -20), v2(28, 20), v2(-12, 20),
+    ],
+  };
+  // left band spans -32..-12 (width 20): p=(-22,0) -> t = 0.5 -> 12
+  expect(plateau.eval(v2(-22, 0), skewed).height).toBeCloseTo(12);
+  // right band spans 28..32 (width 4): p=(30,0) -> t = 0.5 -> 12, but p=(26,0) is full height
+  expect(plateau.eval(v2(30, 0), skewed).height).toBeCloseTo(12);
+  expect(plateau.eval(v2(26, 0), skewed).height).toBeCloseTo(24);
 });
