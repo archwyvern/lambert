@@ -1,9 +1,12 @@
+import { CubeRegular, DismissRegular } from "@fluentui/react-icons";
 import { useEffect, useRef, useState } from "react";
 import type { DocumentStore, EditorState } from "../document/store";
 import { addShape, updateShape } from "../document/docOps";
+import type { Orbit } from "../field/gpu/preview3d";
 import { v2, Vec2 } from "../field/vec";
 import { Gizmos } from "./Gizmos";
 import { LightPad } from "./LightPad";
+import { usePersistentState } from "./persist";
 import { axisScaleFromDrag, constrainAxis, pickShape, rotationFromDrag, snapAngle } from "./picking";
 import { PreviewRenderer } from "./preview";
 import { fitViewport, screenToCanvas, Viewport, zoomAt } from "./viewport";
@@ -43,6 +46,10 @@ export function CanvasView(props: {
   const [cursor, setCursor] = useState<Vec2 | null>(null);
   const dragRef = useRef<Drag | null>(null);
   const spaceRef = useRef(false);
+  const [show3d, setShow3d] = usePersistentState("panel:3d", false);
+  const [orbit, setOrbit] = useState<Orbit>({ yaw: 0.65, pitch: 0.65, dist: 1.3 });
+  const canvas3dRef = useRef<HTMLCanvasElement>(null);
+  const orbitDrag = useRef<{ x: number; y: number } | null>(null);
 
   const doc = state.doc;
 
@@ -103,6 +110,23 @@ export function CanvasView(props: {
     return () => window.removeEventListener("flatland-zoom", onZoom);
   }, [doc.source.width, doc.source.height]);
 
+  // demo/capture hook: ?p3d=1 opens the 3D panel
+  useEffect(() => {
+    if (new URLSearchParams(location.search).has("p3d")) setShow3d(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // attach the 3D inspection canvas while the panel is open
+  useEffect(() => {
+    const r = rendererRef.current;
+    const canvas = canvas3dRef.current;
+    if (!ready || !r || !show3d || !canvas) return;
+    canvas.width = Math.floor(300 * devicePixelRatio);
+    canvas.height = Math.floor(300 * devicePixelRatio);
+    r.attach3D(canvas);
+    return () => r.attach3D(null);
+  }, [ready, show3d, diffuseBytes]);
+
   // upload diffuse when it changes; refit the view to the (possibly new) doc dims
   useEffect(() => {
     if (!ready || !rendererRef.current || !diffuseBytes) return;
@@ -126,6 +150,7 @@ export function CanvasView(props: {
       opacity: view.opacity,
       lightDir: view.lightDir,
       heightRange: [-maxH, maxH],
+      orbit3d: show3d ? orbit : null,
     });
   });
 
@@ -285,6 +310,63 @@ export function CanvasView(props: {
           <LightPad lightDir={view.lightDir} onChange={onLightChange} radius={34} />
           <span className="text-sm uppercase tracking-[var(--tracking-tight)] text-fg-mid">light</span>
         </div>
+      ) : null}
+      {diffuseBytes && show3d ? (
+        <div
+          className="absolute right-3 bottom-8 border border-border bg-surface2/95"
+          onPointerDown={(e) => e.stopPropagation()}
+          onPointerMove={(e) => e.stopPropagation()}
+          onPointerUp={(e) => e.stopPropagation()}
+          onWheel={(e) => e.stopPropagation()}
+        >
+          <div className="flex h-[24px] items-center justify-between border-b border-border px-2">
+            <span className="text-sm font-semibold uppercase tracking-wide text-fg-mid">3D</span>
+            <button
+              title="Close"
+              className="flex h-[18px] w-[18px] items-center justify-center text-fg-mid hover:text-fg"
+              onClick={() => setShow3d(false)}
+            >
+              <DismissRegular style={{ fontSize: 12 }} />
+            </button>
+          </div>
+          <canvas
+            ref={canvas3dRef}
+            style={{ width: 300, height: 300 }}
+            className="cursor-grab active:cursor-grabbing"
+            onPointerDown={(e) => {
+              (e.target as Element).setPointerCapture(e.pointerId);
+              orbitDrag.current = { x: e.clientX, y: e.clientY };
+            }}
+            onPointerMove={(e) => {
+              const d = orbitDrag.current;
+              if (!d) return;
+              const dx = e.clientX - d.x;
+              const dy = e.clientY - d.y;
+              orbitDrag.current = { x: e.clientX, y: e.clientY };
+              setOrbit((o) => ({
+                yaw: o.yaw - dx * 0.01,
+                pitch: Math.min(1.45, Math.max(0.08, o.pitch + dy * 0.01)),
+                dist: o.dist,
+              }));
+            }}
+            onPointerUp={() => {
+              orbitDrag.current = null;
+            }}
+            onWheel={(e) => {
+              const f = e.deltaY < 0 ? 1 / 1.1 : 1.1;
+              setOrbit((o) => ({ ...o, dist: Math.min(4, Math.max(0.4, o.dist * f)) }));
+            }}
+          />
+        </div>
+      ) : null}
+      {diffuseBytes && !show3d ? (
+        <button
+          title="3D preview"
+          className="absolute right-3 bottom-8 flex h-[26px] w-[30px] items-center justify-center border border-border bg-surface2/90 text-fg-mid hover:bg-hover hover:text-fg"
+          onClick={() => setShow3d(true)}
+        >
+          <CubeRegular style={{ fontSize: 15 }} />
+        </button>
       ) : null}
       {diffuseBytes ? (
         <div className="pointer-events-none absolute bottom-2 left-2 flex gap-3 border border-border bg-surface2/90 px-2 py-0.5 text-sm tabular-nums text-fg-mid">

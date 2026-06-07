@@ -46,6 +46,11 @@ scaling. Wheel zooms, middle-drag or Space-drag pans, V cycles view modes, arrow
 Delete removes. File/Edit/View live in the application menu (Ctrl+O/S/E, Ctrl+Z/Y/D,
 Ctrl+0 fit, Ctrl+1 100%). The light pad sits in the viewport corner in lit view.
 
+3D preview: the cube button (bottom-right of the viewport) opens an orbitable displaced
+view of the height field — drag orbits, wheel dollies. It shares the lit view's exact
+lighting; use it to judge height relationships, not final looks (the game only ever
+sees the normal map, so the lit view stays the ground truth).
+
 Layers panel: click selects (the only selection surface for W/E/R), drag reorders,
 double-click or F2 renames, right-click for rename/duplicate/front/back/delete; the
 eye toggles visibility and the lock makes a layer inert on canvas (the inspector can
