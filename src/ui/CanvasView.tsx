@@ -3,16 +3,17 @@ import { useEffect, useRef, useState } from "react";
 import type { DocumentStore, EditorState } from "../document/store";
 import { addShape, updateShape } from "../document/docOps";
 import { getShapeType } from "../field/registry";
+import { fromLocal } from "../field/transform";
 import { normalSigns } from "../document/schema";
 import { v2, Vec2 } from "../field/vec";
 import { Gizmos } from "./Gizmos";
 import { LightPad } from "./LightPad";
 import { usePersistentState } from "./persist";
-import { axisScaleFromDrag, constrainAxis, pickShape, rotationFromDrag, snapAngle } from "./picking";
+import { axisScaleFromDrag, constrainAxis, pickShape, pointsInBox, rotationFromDrag, snapAngle } from "./picking";
 import { PreviewRenderer } from "./preview";
 import { Dock3D, DOCKED_SIZE, HEADER3D, Preview3DPanel } from "./Preview3DPanel";
 import { use3DCamera } from "./use3DCamera";
-import { fitViewport, screenToCanvas, Viewport, zoomAt } from "./viewport";
+import { canvasToScreen, fitViewport, screenToCanvas, Viewport, zoomAt } from "./viewport";
 import type { ToolMode } from "./tools";
 import type { ViewState } from "./App";
 
@@ -29,7 +30,8 @@ type Drag =
       startScale: { x: number; y: number; z: number };
       pivot: Vec2;
       rotation: number;
-    };
+    }
+  | { kind: "marquee"; startCanvas: Vec2; current: Vec2; additive: boolean; base: number[]; moved: boolean };
 
 export function CanvasView(props: {
   store: DocumentStore;
@@ -48,6 +50,8 @@ export function CanvasView(props: {
   const [ready, setReady] = useState(false);
   const [cursor, setCursor] = useState<Vec2 | null>(null);
   const dragRef = useRef<Drag | null>(null);
+  const [selVerts, setSelVerts] = useState<number[]>([]);
+  const [marquee, setMarquee] = useState<{ a: Vec2; b: Vec2 } | null>(null);
   const [show3d, setShow3d] = usePersistentState("panel:3d", false);
   const [dock3d, setDock3d] = usePersistentState<Dock3D>("panel:3d:dock", "docked");
   const [hostSize, setHostSize] = useState({ w: 1, h: 1 });
@@ -102,6 +106,9 @@ export function CanvasView(props: {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // vertex selection is per-shape: clear it whenever the selected shape changes
+  useEffect(() => setSelVerts([]), [state.selectedId]);
 
   // menu-driven zoom (accelerators are owned by the application menu)
   useEffect(() => {
@@ -210,8 +217,22 @@ export function CanvasView(props: {
     if (effective === "select") {
       // only the pointer picks by clicking; other tools select via the layer panel
       const hit = pickShape(doc.shapes, p);
-      store.select(hit?.id ?? null);
-      if (hit) dragRef.current = { kind: "move", id: hit.id, startCanvas: p, startPos: hit.transform.pos };
+      if (hit) {
+        store.select(hit.id);
+        dragRef.current = { kind: "move", id: hit.id, startCanvas: p, startPos: hit.transform.pos };
+        return;
+      }
+      // empty space: begin a vertex marquee (a plain click with no drag still deselects on
+      // up). Dragging from here box-selects the selected shape's vertices — never conflicts
+      // with shape-move (that starts on the body) or vertex drag (that starts on a dot).
+      dragRef.current = {
+        kind: "marquee",
+        startCanvas: p,
+        current: p,
+        additive: e.shiftKey,
+        base: e.shiftKey ? selVerts : [],
+        moved: false,
+      };
       return;
     }
 
@@ -251,6 +272,19 @@ export function CanvasView(props: {
       dragRef.current = { ...drag, lastX: e.clientX, lastY: e.clientY };
       return;
     }
+    if (drag.kind === "marquee") {
+      // only a control-point shape can be box-selected; otherwise the empty drag is inert
+      const sel = doc.shapes.find((s) => s.id === state.selectedId);
+      if (!sel || getShapeType(sel.typeId).controlPoints.kind === "none") return;
+      const moved = drag.moved || Math.hypot(cp.x - drag.startCanvas.x, cp.y - drag.startCanvas.y) * viewport.zoom > 3;
+      dragRef.current = { ...drag, current: cp, moved };
+      if (!moved) return;
+      setMarquee({ a: drag.startCanvas, b: cp });
+      const canvasPts = sel.controlPoints.map((q) => fromLocal(sel.transform, q));
+      const inBox = pointsInBox(canvasPts, drag.startCanvas, cp);
+      setSelVerts(drag.additive ? Array.from(new Set([...drag.base, ...inBox])) : inBox);
+      return;
+    }
     if (drag.kind === "move") {
       let dx = cp.x - drag.startCanvas.x;
       let dy = cp.y - drag.startCanvas.y;
@@ -281,6 +315,13 @@ export function CanvasView(props: {
   };
 
   const endDrag = (): void => {
+    const drag = dragRef.current;
+    if (drag?.kind === "marquee" && !drag.moved && !drag.additive) {
+      // a plain empty click (no box drawn) deselects the shape and its vertices
+      store.select(null);
+      setSelVerts([]);
+    }
+    setMarquee(null);
     dragRef.current = null;
     store.endGesture();
   };
@@ -330,7 +371,32 @@ export function CanvasView(props: {
           </div>
         </div>
       ) : null}
-      <Gizmos doc={doc} selectedId={state.selectedId} viewport={viewport} store={store} tool={tool} />
+      <Gizmos
+        doc={doc}
+        selectedId={state.selectedId}
+        viewport={viewport}
+        store={store}
+        tool={tool}
+        selVerts={selVerts}
+        setSelVerts={setSelVerts}
+      />
+      {marquee ? (
+        (() => {
+          const a = canvasToScreen(viewport, marquee.a);
+          const b = canvasToScreen(viewport, marquee.b);
+          return (
+            <div
+              className="pointer-events-none absolute border border-accent bg-accent/15"
+              style={{
+                left: Math.min(a.x, b.x),
+                top: Math.min(a.y, b.y),
+                width: Math.abs(a.x - b.x),
+                height: Math.abs(a.y - b.y),
+              }}
+            />
+          );
+        })()
+      ) : null}
       {diffuseBytes && view.mode === "lit" ? (
         <div className="absolute top-3 right-3 flex flex-col items-center gap-1 border border-border bg-surface2/90 p-2">
           <LightPad lightDir={view.lightDir} onChange={onLightChange} radius={34} />

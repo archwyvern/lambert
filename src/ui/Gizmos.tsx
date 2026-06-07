@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef } from "react";
 import type { DocumentStore } from "../document/store";
 import { updateShape } from "../document/docOps";
 import type { FlatlandDoc } from "../document/schema";
 
-import { toLocal } from "../field/transform";
+import { fromLocal, toLocal } from "../field/transform";
 import type { ShapeInstance } from "../field/types";
 import { v2, Vec2 } from "../field/vec";
 import { axisScaleFromDrag, groupScaleFactor, pointsBounds, scalePointsAbout } from "./picking";
@@ -29,15 +29,7 @@ function localBounds(s: ShapeInstance): { min: Vec2; max: Vec2 } {
 }
 
 /** Forward of toLocal: scale THEN rotate, then translate (pinned by picking.test.ts). */
-function localToCanvas(s: ShapeInstance, cp: Vec2): Vec2 {
-  const t = s.transform;
-  const sx = cp.x * t.scale.x;
-  const sy = cp.y * t.scale.y;
-  return v2(
-    t.pos.x + sx * Math.cos(t.rotation) - sy * Math.sin(t.rotation),
-    t.pos.y + sx * Math.sin(t.rotation) + sy * Math.cos(t.rotation),
-  );
-}
+const localToCanvas = (s: ShapeInstance, cp: Vec2): Vec2 => fromLocal(s.transform, cp);
 
 const PAD = 6; // local-px breathing room around the footprint
 
@@ -48,8 +40,11 @@ export function Gizmos(props: {
   store: DocumentStore;
   /** Full handle set only in select mode; explicit godot tools show the frame alone. */
   tool: ToolMode;
+  /** Selected control-point indices (lifted to CanvasView so the marquee can drive them). */
+  selVerts: number[];
+  setSelVerts: (v: number[] | ((p: number[]) => number[])) => void;
 }): React.JSX.Element | null {
-  const { doc, selectedId, viewport, store, tool } = props;
+  const { doc, selectedId, viewport, store, tool, selVerts, setSelVerts } = props;
   const handles = tool === "select" && !doc.shapes.find((s) => s.id === selectedId)?.locked;
   const dragState = useRef<{
     start: Vec2;
@@ -60,9 +55,7 @@ export function Gizmos(props: {
     anchorLocal: Vec2;
     anchorCanvas: Vec2;
   } | null>(null);
-  // multi-vertex selection (indices into controlPoints) + its move/scale drag state
-  const [selVerts, setSelVerts] = useState<number[]>([]);
-  useEffect(() => setSelVerts([]), [selectedId]); // reset when the selected shape changes
+  // multi-vertex selection lives in CanvasView; this is the move/scale drag state
   const vertDrag = useRef<{ startCanvas: Vec2; starts: { i: number; p: Vec2 }[]; pivot: Vec2 } | null>(null);
   const shape = doc.shapes.find((s) => s.id === selectedId);
   if (!shape) return null;

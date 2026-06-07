@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import "../../src/field/shapes";
 import { createShapeInstance } from "../../src/field/registry";
-import { axisScaleFromDrag, constrainAxis, groupScaleFactor, pointsBounds, scalePointsAbout, pickShape, rotationFromDrag, snapAngle } from "../../src/ui/picking";
+import { axisScaleFromDrag, constrainAxis, groupScaleFactor, pointsBounds, pointsInBox, scalePointsAbout, pickShape, rotationFromDrag, snapAngle } from "../../src/ui/picking";
 import { toLocal } from "../../src/field/transform";
 import { v2 } from "../../src/field/vec";
 
@@ -104,4 +104,11 @@ test("scalePointsAbout: scales each point around the pivot per axis", () => {
   const out = scalePointsAbout([v2(2, 2), v2(-2, 6)], v2(0, 2), v2(2, 0.5));
   expect(out[0]).toEqual(v2(4, 2)); // (2,2): x*2 about 0, y about 2 unchanged
   expect(out[1]).toEqual(v2(-4, 4)); // (-2,6): x*2, (6-2)*0.5+2 = 4
+});
+
+test("pointsInBox: indices of canvas points inside the marquee, order-independent corners", () => {
+  const pts = [v2(0, 0), v2(5, 5), v2(20, 20), v2(-3, 8)];
+  expect(pointsInBox(pts, v2(-1, -1), v2(10, 10))).toEqual([0, 1]);
+  expect(pointsInBox(pts, v2(10, 10), v2(-1, -1))).toEqual([0, 1]); // a/b swapped = same box
+  expect(pointsInBox(pts, v2(-5, 6), v2(0, 12))).toEqual([3]);
 });

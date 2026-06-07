@@ -31,6 +31,15 @@ export function toLocal(t: Transform2D, p: Vec2): Vec2 {
   return v2(rx / t.scale.x, ry / t.scale.y);
 }
 
+/** Map a shape-local point into canvas space (forward of toLocal: scale, rotate, translate). */
+export function fromLocal(t: Transform2D, p: Vec2): Vec2 {
+  const sx = p.x * t.scale.x;
+  const sy = p.y * t.scale.y;
+  const c = Math.cos(t.rotation);
+  const s = Math.sin(t.rotation);
+  return v2(t.pos.x + sx * c - sy * s, t.pos.y + sx * s + sy * c);
+}
+
 /**
  * Approximate multiplier converting shape-local distances to canvas px.
  * Exact for uniform scale; average of |sx|,|sy| otherwise (documented approximation).

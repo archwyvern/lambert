@@ -107,3 +107,14 @@ export function groupScaleFactor(pivot: Vec2, startLocal: Vec2, currentLocal: Ve
 export function scalePointsAbout(pts: Vec2[], pivot: Vec2, factor: Vec2): Vec2[] {
   return pts.map((p) => v2(pivot.x + (p.x - pivot.x) * factor.x, pivot.y + (p.y - pivot.y) * factor.y));
 }
+
+/** Indices of canvas-space points inside the axis-aligned box between a and b (marquee). */
+export function pointsInBox(canvasPts: Vec2[], a: Vec2, b: Vec2): number[] {
+  const lo = v2(Math.min(a.x, b.x), Math.min(a.y, b.y));
+  const hi = v2(Math.max(a.x, b.x), Math.max(a.y, b.y));
+  const out: number[] = [];
+  canvasPts.forEach((p, i) => {
+    if (p.x >= lo.x && p.x <= hi.x && p.y >= lo.y && p.y <= hi.y) out.push(i);
+  });
+  return out;
+}
