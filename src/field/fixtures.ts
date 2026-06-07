@@ -9,7 +9,7 @@ export function goldenShapes(): ShapeInstance[] {
   slab.id = "slab";
   const dome = createShapeInstance("dome", v2(40, 48));
   dome.id = "dome";
-  dome.transform.scale = { x: 16 / 48, y: 16 / 48, z: 1.5 }; // 16px footprint, 36px tall
+  dome.transform.scale = { x: 16 / 48, y: 16 / 48, z: 36 / 48 }; // 16px footprint, 36px tall
   const ridge = createShapeInstance("ridge", v2(72, 24));
   ridge.id = "ridge";
   ridge.transform.rotation = Math.PI / 6;

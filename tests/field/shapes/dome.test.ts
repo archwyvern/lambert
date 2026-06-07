@@ -4,12 +4,12 @@ import { createShapeInstance, getShapeType } from "../../../src/field/registry";
 import { v2 } from "../../../src/field/vec";
 
 const dome = getShapeType("dome");
-const inst = createShapeInstance("dome", v2(0, 0)); // circle radius 48, tallness 24
+const inst = createShapeInstance("dome", v2(0, 0)); // hemisphere radius 48
 
-test("spherical cap: peak at center, zero at the rim", () => {
-  expect(dome.eval(v2(0, 0), inst).height).toBeCloseTo(24);
+test("hemisphere: peak = radius at center, zero at the rim", () => {
+  expect(dome.eval(v2(0, 0), inst).height).toBeCloseTo(48);
   expect(dome.eval(v2(48, 0), inst).height).toBe(0);
-  expect(dome.eval(v2(24, 0), inst).height).toBeCloseTo(24 * Math.sqrt(0.75));
+  expect(dome.eval(v2(24, 0), inst).height).toBeCloseTo(48 * Math.sqrt(0.75));
 });
 
 test("circular footprint: sd is distance to the rim in any direction", () => {

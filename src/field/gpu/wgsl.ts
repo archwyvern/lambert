@@ -137,8 +137,10 @@ fn fold(@builtin(global_invocation_id) gid: vec3u) {
     let inf = influence(smp.y * rec(base, 10u));
     if (inf <= 0.0) { continue; }
     let h = rec(base, 21u) + smp.x * rec(base, 3u); // elevation + extrude
-    bigH = mix(bigH, combine_height(u32(rec(base, 1u)), bigH, h), inf);
-    bigM = max(bigM, inf);
+    let next = mix(bigH, combine_height(u32(rec(base, 1u)), bigH, h), inf);
+    // mask only where the shape actually changed the surface (sunk shapes leave none)
+    bigM = max(bigM, min(1.0, abs(next - bigH) * 2.0));
+    bigH = next;
   }
   textureStore(outField, vec2u(gid.xy), vec4f(bigH, bigM, 0.0, 0.0));
 }

@@ -36,8 +36,11 @@ export function evaluateField(shapes: ShapeInstance[], width: number, height: nu
         const inf = influence(sample.sd * ds);
         if (inf <= 0) continue;
         const h = s.transform.pos.z + sample.height * s.transform.scale.z; // elevation + extrude
-        H = mix(H, combineHeight(op, H, h), inf);
-        M = Math.max(M, inf);
+        const next = mix(H, combineHeight(op, H, h), inf);
+        // mask only where the shape actually changed the surface — a sunk shape (negative
+        // elevation) leaves no footprint, so it can't flatten the NX override around itself
+        M = Math.max(M, Math.min(1, Math.abs(next - H) * 2));
+        H = next;
       }
       const i = y * width + x;
       heightMap[i] = H;

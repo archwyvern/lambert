@@ -78,7 +78,7 @@ export function emptyDoc(sourcePath: string, width: number, height: number): Fla
 /** Pre-elevation documents stored tallness as a px param; nominal = the old default. */
 const LEGACY_TALLNESS: Record<string, { param: string; nominal: number }> = {
   plateau: { param: "height", nominal: 24 },
-  dome: { param: "height", nominal: 24 },
+  dome: { param: "height", nominal: 48 },
   ridge: { param: "height", nominal: 16 },
   groove: { param: "depth", nominal: 8 },
 };
