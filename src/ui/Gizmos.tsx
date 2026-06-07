@@ -137,20 +137,27 @@ export function Gizmos(props: {
         strokeDasharray="4 3"
       />
       {handles
-        ? corners.map((c, i) => (
+        ? corners.map((c, i) => {
             /* scale: on the corner; per-axis, shift locks uniform. No rotate handles —
-               godot select mode rotates via Ctrl-drag or the E tool, not corner widgets. */
-            <rect
-              key={i}
-              x={c.x - 5}
-              y={c.y - 5}
-              width={10}
-              height={10}
-              fill="var(--color-accent)"
-              className="pointer-events-auto cursor-nwse-resize"
-              {...scale}
-            />
-          ))
+               godot select mode rotates via Ctrl-drag or the E tool, not corner widgets.
+               Cursor diagonal follows the handle's direction off the box center (screen
+               space, so rotation is accounted for): dx*dy > 0 = NW/SE, < 0 = NE/SW. */
+            const cx = corners.reduce((a, k) => a + k.x, 0) / corners.length;
+            const cy = corners.reduce((a, k) => a + k.y, 0) / corners.length;
+            const nwse = (c.x - cx) * (c.y - cy) > 0;
+            return (
+              <rect
+                key={i}
+                x={c.x - 5}
+                y={c.y - 5}
+                width={10}
+                height={10}
+                fill="var(--color-accent)"
+                className={`pointer-events-auto ${nwse ? "cursor-nwse-resize" : "cursor-nesw-resize"}`}
+                {...scale}
+              />
+            );
+          })
         : null}
       {handles && shape.controlPoints.map((cp, i) => {
         const sp = canvasToScreen(viewport, localToCanvas(shape, cp));
