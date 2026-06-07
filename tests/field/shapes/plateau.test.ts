@@ -36,6 +36,14 @@ test("dragging both rings moves the footprint and the flat top", () => {
   expect(plateau.eval(v2(-40, 0), stretched).height).toBeCloseTo(24); // inside the stretched top
 });
 
+test("corner crease: base vertex connects straight to its top vertex", () => {
+  // (26,26) lies exactly on the crease line from base corner (32,32) to top corner
+  // (20,20), halfway along -> t = 0.5. The old SDF-ratio fan gave ~0.41 here.
+  expect(plateau.eval(v2(26, 26), inst).height).toBeCloseTo(12);
+  // off-crease inside the right face: planar interpolation across the band
+  expect(plateau.eval(v2(29, 0), inst).height).toBeCloseTo(24 * (3 / 12));
+});
+
 test("skewed top rim tilts one slope without touching the other", () => {
   // top rim pushed +8 in x: the left band widens (shallower), the right narrows (steeper)
   const skewed = {
