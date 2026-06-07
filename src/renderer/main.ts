@@ -1,5 +1,3 @@
-export {}; // module scope: keeps `status` from colliding with window.status
-
 const status = document.getElementById("status")!;
 
 async function probe(): Promise<void> {
@@ -10,6 +8,13 @@ async function probe(): Promise<void> {
   status.textContent = `WebGPU adapter: ${info.vendor} ${info.architecture ?? ""} (${info.description || "no description"})`;
 }
 
-probe().catch((err: unknown) => {
-  status.textContent = `WebGPU FAILED: ${err instanceof Error ? err.message : String(err)}`;
-});
+const params = new URLSearchParams(location.search);
+if (params.has("selftest")) {
+  void import("./selftest").then((m) => m.runSelftest());
+} else {
+  probe().catch((err: unknown) => {
+    status.textContent = `WebGPU FAILED: ${err instanceof Error ? err.message : String(err)}`;
+  });
+}
+
+export {}; // module scope: keeps `status` from colliding with window.status

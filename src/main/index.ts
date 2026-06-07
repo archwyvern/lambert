@@ -16,6 +16,9 @@ app.whenReady().then(() => {
     show: !selftest,
     webPreferences: {
       preload: path.join(import.meta.dirname, "../preload/index.mjs"),
+      // electron-vite emits the preload as ESM (.mjs); Electron only loads ESM preloads
+      // with the renderer sandbox off. contextIsolation stays on.
+      sandbox: false,
     },
   });
 
