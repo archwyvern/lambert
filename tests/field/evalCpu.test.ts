@@ -33,12 +33,12 @@ test("raise: overlapping shapes merge to the taller", () => {
   expect(r.heightMap[px(r, 80, 64)]!).toBeCloseTo(40, 0); // overlap: taller wins
 });
 
-test("default combine is add: a stud keeps its tallness on top of a slab", () => {
+test("default combine clips: overlapping shapes do not stack heights", () => {
   const slab = createShapeInstance("plateau", v2(64, 64));
   const stud = createShapeInstance("dome", v2(64, 64));
   stud.params = { ...stud.params, radiusX: 8, radiusY: 8, height: 10 };
   const r = evaluateField([slab, stud], 128, 128);
-  expect(r.heightMap[px(r, 64, 64)]!).toBeGreaterThan(33.9); // 24 + ~10, not max(24, 10)
+  expect(r.heightMap[px(r, 64, 64)]!).toBeCloseTo(24, 0); // max(24, ~10), not 34
 });
 
 test("add follows underlying curvature", () => {

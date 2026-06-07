@@ -30,9 +30,10 @@ export function createShapeInstance(typeId: string, pos: Vec2): ShapeInstance {
     transform: { pos, rotation: 0, scale: { x: 1, y: 1, z: 1 } },
     params,
     controlPoints: t.controlPoints.default.map((p) => ({ ...p })),
-    // add = height is how tall the shape is on whatever is beneath it (raise/max would
-    // make height an absolute level above zero — wrong mental model for stacked detail)
-    combine: { op: t.defaultCombine ?? "add", blend: 0 },
+    // raise (max) = overlapping shapes CLIP into each other like solids; they don't
+    // stack heights (user decision — use the add op explicitly for curvature-following
+    // detail, and scale.z for tallness)
+    combine: { op: t.defaultCombine ?? "raise", blend: 0 },
     visible: true,
     locked: false,
   };
