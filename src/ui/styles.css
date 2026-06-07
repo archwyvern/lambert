@@ -1,0 +1,13 @@
+@import "tailwindcss";
+/* electron-vite's renderer root is src/renderer; tailwind's auto-detection never sees
+   src/ui without an explicit source (path is relative to this file) */
+@source "./";
+
+@theme {
+  --color-panel: #1b1b1f;
+  --color-panel-edge: #2a2a30;
+  --color-canvasbg: #101013;
+  --color-accent: #6ea8fe;
+  --color-fg: #f2f2f4;
+  --color-fg-mid: #c8c8cd;
+}
