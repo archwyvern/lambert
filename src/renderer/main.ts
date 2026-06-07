@@ -1,20 +1,14 @@
 const status = document.getElementById("status")!;
 
-async function probe(): Promise<void> {
-  if (!navigator.gpu) throw new Error("navigator.gpu missing — WebGPU not enabled");
-  const adapter = await navigator.gpu.requestAdapter();
-  if (!adapter) throw new Error("requestAdapter() returned null — no usable GPU");
-  const info = adapter.info;
-  status.textContent = `WebGPU adapter: ${info.vendor} ${info.architecture ?? ""} (${info.description || "no description"})`;
-}
-
 const params = new URLSearchParams(location.search);
 if (params.has("selftest")) {
   void import("./selftest").then((m) => m.runSelftest());
 } else {
-  probe().catch((err: unknown) => {
-    status.textContent = `WebGPU FAILED: ${err instanceof Error ? err.message : String(err)}`;
-  });
+  void import("./harness")
+    .then((m) => m.runHarness())
+    .catch((err: unknown) => {
+      status.textContent = `harness FAILED: ${err instanceof Error ? `${err.message}\n${err.stack ?? ""}` : String(err)}`;
+    });
 }
 
 export {}; // module scope: keeps `status` from colliding with window.status

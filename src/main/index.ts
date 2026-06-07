@@ -8,6 +8,8 @@ app.commandLine.appendSwitch("enable-features", "Vulkan,VulkanFromANGLE");
 app.commandLine.appendSwitch("use-angle", "vulkan");
 
 const selftest = process.argv.includes("--selftest");
+const captureIndex = process.argv.indexOf("--capture");
+const capturePath = captureIndex >= 0 ? process.argv[captureIndex + 1] : undefined;
 
 app.whenReady().then(() => {
   const win = new BrowserWindow({
@@ -31,6 +33,19 @@ app.whenReady().then(() => {
       console.error("selftest timed out after 60s");
       app.exit(2);
     }, 60_000);
+  }
+
+  if (capturePath) {
+    // screenshot the harness after it settles, write PNG, exit — automated visual checks
+    win.webContents.once("did-finish-load", () => {
+      setTimeout(async () => {
+        const image = await win.webContents.capturePage();
+        const { writeFileSync } = await import("node:fs");
+        writeFileSync(capturePath, image.toPNG());
+        console.log(`captured ${capturePath}`);
+        app.exit(0);
+      }, 3000);
+    });
   }
 
   const devUrl = process.env["ELECTRON_RENDERER_URL"];
