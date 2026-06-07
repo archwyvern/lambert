@@ -48,7 +48,6 @@ export function CanvasView(props: {
   const [ready, setReady] = useState(false);
   const [cursor, setCursor] = useState<Vec2 | null>(null);
   const dragRef = useRef<Drag | null>(null);
-  const spaceRef = useRef(false);
   const [show3d, setShow3d] = usePersistentState("panel:3d", false);
   const [dock3d, setDock3d] = usePersistentState<Dock3D>("panel:3d:dock", "docked");
   const [hostSize, setHostSize] = useState({ w: 1, h: 1 });
@@ -84,25 +83,22 @@ export function CanvasView(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // space = shrink the full 3D view back to docked; otherwise temporary canvas pan (godot)
+  // space = toggle the full-editor 3D view on/off (off -> fullscreen, fullscreen -> hidden).
+  // The docked mini-view stays reachable via the cube button + the header maximize toggle.
   useEffect(() => {
     const down = (e: KeyboardEvent): void => {
       if (e.code !== "Space" || e.target instanceof HTMLInputElement) return;
+      e.preventDefault();
       if (fullRef.current) {
-        e.preventDefault();
-        setDock3d("docked");
+        setShow3d(false);
       } else {
-        spaceRef.current = true;
+        setShow3d(true);
+        setDock3d("full");
       }
     };
-    const up = (e: KeyboardEvent): void => {
-      if (e.code === "Space") spaceRef.current = false;
-    };
     window.addEventListener("keydown", down);
-    window.addEventListener("keyup", up);
     return () => {
       window.removeEventListener("keydown", down);
-      window.removeEventListener("keyup", up);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -191,7 +187,7 @@ export function CanvasView(props: {
 
   const onPointerDown = (e: React.PointerEvent): void => {
     (e.target as Element).setPointerCapture(e.pointerId);
-    if (e.button === 1 || spaceRef.current) {
+    if (e.button === 1) {
       dragRef.current = { kind: "pan", lastX: e.clientX, lastY: e.clientY };
       return;
     }
