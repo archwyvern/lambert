@@ -23,19 +23,37 @@ export function rotationFromDrag(pivot: Vec2, startPoint: Vec2, currentPoint: Ve
   return startRotation + (a1 - a0);
 }
 
-/** New scale from the ratio of pivot distances; sign-preserving, magnitude-clamped. */
-export function scaleFromDrag(
+const clampMag = (v: number): number => Math.sign(v || 1) * Math.max(0.05, Math.abs(v));
+
+/**
+ * Photoshop-like corner scaling around the shape's pivot. Unlocked (default): each local
+ * axis scales by the drag ratio along that axis — dragging across the pivot mirrors.
+ * uniform (shift held): the pivot-distance ratio applies to both axes.
+ */
+export function axisScaleFromDrag(
   pivot: Vec2,
+  rotation: number,
   startPoint: Vec2,
   currentPoint: Vec2,
   startScale: { x: number; y: number },
+  uniform: boolean,
 ): { x: number; y: number } {
-  const d0 = Math.hypot(startPoint.x - pivot.x, startPoint.y - pivot.y) || 1;
-  const d1 = Math.hypot(currentPoint.x - pivot.x, currentPoint.y - pivot.y);
-  const ratio = d1 / d0;
-  const apply = (v: number): number => {
-    const next = v * ratio;
-    return Math.sign(next || 1) * Math.max(0.05, Math.abs(next));
-  };
-  return { x: apply(startScale.x), y: apply(startScale.y) };
+  if (uniform) {
+    const d0 = Math.hypot(startPoint.x - pivot.x, startPoint.y - pivot.y) || 1;
+    const d1 = Math.hypot(currentPoint.x - pivot.x, currentPoint.y - pivot.y);
+    const ratio = d1 / d0;
+    return { x: clampMag(startScale.x * ratio), y: clampMag(startScale.y * ratio) };
+  }
+  // un-rotate into the shape's local axes (scale still applied — ratios cancel it out)
+  const c = Math.cos(-rotation);
+  const s = Math.sin(-rotation);
+  const unrot = (p: Vec2): Vec2 => ({
+    x: (p.x - pivot.x) * c - (p.y - pivot.y) * s,
+    y: (p.x - pivot.x) * s + (p.y - pivot.y) * c,
+  });
+  const a = unrot(startPoint);
+  const b = unrot(currentPoint);
+  const apply = (v: number, num: number, den: number): number =>
+    Math.abs(den) < 1e-3 ? v : clampMag(v * (num / den));
+  return { x: apply(startScale.x, b.x, a.x), y: apply(startScale.y, b.y, a.y) };
 }

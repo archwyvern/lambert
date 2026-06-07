@@ -12,7 +12,8 @@ export interface PreviewParams {
   shapes: ShapeInstance[];
   viewport: Viewport;
   mode: ViewMode;
-  onion: number;
+  /** Overlay opacity for height/normal modes; 1 = pure overlay (still mask-gated). */
+  opacity: number;
   lightDir: [number, number, number];
   /** Height-view normalization range; pass the doc's plausible height span. */
   heightRange: [number, number];
@@ -122,7 +123,7 @@ export class PreviewRenderer {
     u[3] = MODE_INDEX[p.mode];
     f[4] = docW;
     f[5] = docH;
-    f[6] = p.onion;
+    f[6] = p.opacity;
     f[7] = p.heightRange[0];
     f[8] = p.heightRange[1];
     f[9] = p.lightDir[0];

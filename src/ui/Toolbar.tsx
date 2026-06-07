@@ -62,17 +62,20 @@ export function Toolbar(props: {
             </option>
           ))}
         </select>
-        <label className="flex items-center gap-1 text-fg-mid">
-          onion
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={view.onion}
-            onChange={(e) => setView((v) => ({ ...v, onion: Number(e.target.value) }))}
-          />
-        </label>
+        {view.mode === "height" || view.mode === "normal" ? (
+          <label className="flex items-center gap-1 text-fg-mid">
+            opacity
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={view.opacity}
+              onChange={(e) => setView((v) => ({ ...v, opacity: Number(e.target.value) }))}
+            />
+            <span className="w-10 text-right">{Math.round(view.opacity * 100)}%</span>
+          </label>
+        ) : null}
         <LightPad lightDir={view.lightDir} onChange={(d) => setView((v) => ({ ...v, lightDir: d }))} />
       </div>
     </header>

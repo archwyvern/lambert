@@ -6,21 +6,27 @@ import { numParam } from "../field/registry";
 import { toLocal } from "../field/transform";
 import type { ShapeInstance } from "../field/types";
 import { v2, Vec2 } from "../field/vec";
-import { rotationFromDrag, scaleFromDrag } from "./picking";
+import { axisScaleFromDrag, rotationFromDrag } from "./picking";
 import { canvasToScreen, screenToCanvas, Viewport } from "./viewport";
 
-/** Local-space half-extents of a shape's footprint, for the gizmo frame. */
-function localHalfExtents(s: ShapeInstance): Vec2 {
+/** Shape-local footprint bounds (control-point extents; dome from its radii). */
+function localBounds(s: ShapeInstance): { min: Vec2; max: Vec2 } {
   if (s.controlPoints.length > 0) {
-    let mx = 1;
-    let my = 1;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
     for (const p of s.controlPoints) {
-      mx = Math.max(mx, Math.abs(p.x));
-      my = Math.max(my, Math.abs(p.y));
+      minX = Math.min(minX, p.x);
+      minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x);
+      maxY = Math.max(maxY, p.y);
     }
-    return v2(mx, my);
+    return { min: v2(minX, minY), max: v2(maxX, maxY) };
   }
-  return v2(numParam(s, "radiusX"), numParam(s, "radiusY")); // dome is the only no-point type in v1
+  const rx = numParam(s, "radiusX");
+  const ry = numParam(s, "radiusY");
+  return { min: v2(-rx, -ry), max: v2(rx, ry) };
 }
 
 /** Forward of toLocal: scale THEN rotate, then translate (pinned by picking.test.ts). */
@@ -34,6 +40,9 @@ function localToCanvas(s: ShapeInstance, cp: Vec2): Vec2 {
   );
 }
 
+const PAD = 6; // local-px breathing room around the footprint
+const ROTATE_OFFSET = 16; // screen-px outward from each corner to the rotate dot
+
 export function Gizmos(props: {
   doc: FlatlandDoc;
   selectedId: string | null;
@@ -45,10 +54,19 @@ export function Gizmos(props: {
   const shape = doc.shapes.find((s) => s.id === selectedId);
   if (!shape) return null;
 
-  const center = canvasToScreen(viewport, shape.transform.pos);
-  const ext = localHalfExtents(shape);
-  const frame =
-    Math.max(ext.x * Math.abs(shape.transform.scale.x), ext.y * Math.abs(shape.transform.scale.y)) * viewport.zoom + 14;
+  const bounds = localBounds(shape);
+  const pad = PAD / Math.max(0.0001, (Math.abs(shape.transform.scale.x) + Math.abs(shape.transform.scale.y)) / 2);
+  const cornersLocal = [
+    v2(bounds.min.x - pad, bounds.min.y - pad),
+    v2(bounds.max.x + pad, bounds.min.y - pad),
+    v2(bounds.max.x + pad, bounds.max.y + pad),
+    v2(bounds.min.x - pad, bounds.max.y + pad),
+  ];
+  const corners = cornersLocal.map((c) => canvasToScreen(viewport, localToCanvas(shape, c)));
+  const boxCenter = v2(
+    corners.reduce((a, c) => a + c.x, 0) / 4,
+    corners.reduce((a, c) => a + c.y, 0) / 4,
+  );
 
   const eventCanvasPoint = (e: React.PointerEvent): Vec2 => {
     const svg = (e.currentTarget as SVGGraphicsElement).ownerSVGElement!;
@@ -66,11 +84,11 @@ export function Gizmos(props: {
     };
   };
 
-  const handleProps = (apply: (p: Vec2) => void) => ({
+  const handleProps = (apply: (p: Vec2, e: React.PointerEvent) => void) => ({
     onPointerDown: beginHandleDrag,
     onPointerMove: (e: React.PointerEvent) => {
       if (!dragState.current) return;
-      apply(eventCanvasPoint(e));
+      apply(eventCanvasPoint(e), e);
     },
     onPointerUp: (e: React.PointerEvent) => {
       e.stopPropagation();
@@ -87,9 +105,9 @@ export function Gizmos(props: {
     });
   });
 
-  const scale = handleProps((p) => {
+  const scale = handleProps((p, e) => {
     const ds = dragState.current!;
-    const sc = scaleFromDrag(shape.transform.pos, ds.start, p, ds.scale);
+    const sc = axisScaleFromDrag(shape.transform.pos, ds.rotation, ds.start, p, ds.scale, e.shiftKey);
     store.update((d) => updateShape(d, shape.id, (s) => ({ ...s, transform: { ...s.transform, scale: sc } })), {
       coalesce: `scale:${shape.id}`,
     });
@@ -110,33 +128,42 @@ export function Gizmos(props: {
 
   return (
     <svg className="pointer-events-none absolute inset-0 h-full w-full">
-      <rect
-        x={center.x - frame}
-        y={center.y - frame}
-        width={frame * 2}
-        height={frame * 2}
+      {/* oriented bounding box: rotates and shears with the shape's transform */}
+      <polygon
+        points={corners.map((c) => `${c.x},${c.y}`).join(" ")}
         fill="none"
         stroke="var(--color-accent)"
         strokeDasharray="4 3"
       />
-      <line x1={center.x} y1={center.y - frame} x2={center.x} y2={center.y - frame - 12} stroke="var(--color-accent)" />
-      <circle
-        cx={center.x}
-        cy={center.y - frame - 18}
-        r={6}
-        fill="var(--color-accent)"
-        className="pointer-events-auto cursor-grab"
-        {...rotate}
-      />
-      <rect
-        x={center.x + frame - 5}
-        y={center.y + frame - 5}
-        width={10}
-        height={10}
-        fill="var(--color-accent)"
-        className="pointer-events-auto cursor-nwse-resize"
-        {...scale}
-      />
+      {corners.map((c, i) => {
+        const dir = v2(c.x - boxCenter.x, c.y - boxCenter.y);
+        const len = Math.hypot(dir.x, dir.y) || 1;
+        const out = v2(c.x + (dir.x / len) * ROTATE_OFFSET, c.y + (dir.y / len) * ROTATE_OFFSET);
+        return (
+          <g key={i}>
+            {/* rotate: just outside the corner (photoshop-style) */}
+            <circle
+              cx={out.x}
+              cy={out.y}
+              r={6}
+              fill="transparent"
+              stroke="var(--color-accent)"
+              className="pointer-events-auto cursor-grab"
+              {...rotate}
+            />
+            {/* scale: on the corner; per-axis, shift locks uniform */}
+            <rect
+              x={c.x - 5}
+              y={c.y - 5}
+              width={10}
+              height={10}
+              fill="var(--color-accent)"
+              className="pointer-events-auto cursor-nwse-resize"
+              {...scale}
+            />
+          </g>
+        );
+      })}
       {shape.controlPoints.map((cp, i) => {
         const sp = canvasToScreen(viewport, localToCanvas(shape, cp));
         return (

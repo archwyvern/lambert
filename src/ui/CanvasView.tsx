@@ -71,7 +71,7 @@ export function CanvasView(props: {
       shapes: doc.shapes,
       viewport,
       mode: view.mode,
-      onion: view.onion,
+      opacity: view.opacity,
       lightDir: view.lightDir,
       heightRange: [-maxH, maxH],
     });

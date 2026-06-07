@@ -13,7 +13,8 @@ import { VIEW_MODES } from "./preview";
 
 export interface ViewState {
   mode: ViewMode;
-  onion: number;
+  /** Overlay opacity for height/normal views (1 = 100%). */
+  opacity: number;
   lightDir: [number, number, number];
 }
 
@@ -23,7 +24,7 @@ export function App(): React.JSX.Element {
     (fn) => store.subscribe(fn),
     () => store.state,
   );
-  const [view, setView] = useState<ViewState>({ mode: "lit", onion: 0.35, lightDir: [-0.5, -0.5, 0.7] });
+  const [view, setView] = useState<ViewState>({ mode: "lit", opacity: 1, lightDir: [-0.5, -0.5, 0.7] });
   const [diffuse, setDiffuse] = useState<{ bytes: Uint8Array; dir: string | null } | null>(null);
 
   // demo bootstrap for automated captures: ?demo=1&mode=<viewmode>

@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import "../../src/field/shapes";
 import { createShapeInstance } from "../../src/field/registry";
-import { pickShape, rotationFromDrag, scaleFromDrag } from "../../src/ui/picking";
+import { axisScaleFromDrag, pickShape, rotationFromDrag } from "../../src/ui/picking";
 import { toLocal } from "../../src/field/transform";
 import { v2 } from "../../src/field/vec";
 
@@ -28,12 +28,33 @@ test("rotationFromDrag: quarter turn around the pivot", () => {
   expect(rot).toBeCloseTo(0.5 + Math.PI / 2);
 });
 
-test("scaleFromDrag: distance ratio, clamped away from zero", () => {
-  const s = scaleFromDrag(v2(0, 0), v2(10, 0), v2(20, 0), { x: 1, y: 2 });
+test("axisScaleFromDrag: per-axis unlocked scaling (corner drag)", () => {
+  const s = axisScaleFromDrag(v2(0, 0), 0, v2(10, 10), v2(20, 5), { x: 1, y: 1 }, false);
+  expect(s.x).toBeCloseTo(2);
+  expect(s.y).toBeCloseTo(0.5);
+});
+
+test("axisScaleFromDrag: uniform lock uses the distance ratio on both axes", () => {
+  const s = axisScaleFromDrag(v2(0, 0), 0, v2(10, 0), v2(20, 0), { x: 1, y: 2 }, true);
   expect(s.x).toBeCloseTo(2);
   expect(s.y).toBeCloseTo(4);
-  const tiny = scaleFromDrag(v2(0, 0), v2(10, 0), v2(0.01, 0), { x: 1, y: 1 });
-  expect(tiny.x).toBeGreaterThanOrEqual(0.05);
+});
+
+test("axisScaleFromDrag: axes follow the shape's rotation", () => {
+  // shape rotated +90deg: its local +x axis points down-screen (+y canvas)
+  const s = axisScaleFromDrag(v2(0, 0), Math.PI / 2, v2(0, 10), v2(0, 20), { x: 1, y: 1 }, false);
+  expect(s.x).toBeCloseTo(2); // dragged along local x
+  expect(s.y).toBeCloseTo(1);
+});
+
+test("axisScaleFromDrag: near-zero start axis is left unchanged, flips allowed", () => {
+  const onAxis = axisScaleFromDrag(v2(0, 0), 0, v2(10, 0), v2(20, 7), { x: 1, y: 1 }, false);
+  expect(onAxis.x).toBeCloseTo(2);
+  expect(onAxis.y).toBe(1); // start y component ~0: leave alone, no explosion
+  const flipped = axisScaleFromDrag(v2(0, 0), 0, v2(10, 10), v2(-20, 10), { x: 1, y: 1 }, false);
+  expect(flipped.x).toBeCloseTo(-2); // dragging across the pivot mirrors (photoshop-like)
+  const tiny = axisScaleFromDrag(v2(0, 0), 0, v2(10, 10), v2(0.01, 10), { x: 1, y: 1 }, false);
+  expect(Math.abs(tiny.x)).toBeGreaterThanOrEqual(0.05);
 });
 
 test("gizmo forward transform must invert toLocal (scale THEN rotate)", () => {
