@@ -51,9 +51,15 @@ export function Gizmos(props: {
 }): React.JSX.Element | null {
   const { doc, selectedId, viewport, store, tool } = props;
   const handles = tool === "select" && !doc.shapes.find((s) => s.id === selectedId)?.locked;
-  const dragState = useRef<{ start: Vec2; rotation: number; scale: { x: number; y: number; z: number } } | null>(
-    null,
-  );
+  const dragState = useRef<{
+    start: Vec2;
+    rotation: number;
+    scale: { x: number; y: number; z: number };
+    pos: { x: number; y: number; z: number };
+    /** Fixed point the scale pivots about (the opposite corner/edge), local + canvas. */
+    anchorLocal: Vec2;
+    anchorCanvas: Vec2;
+  } | null>(null);
   const shape = doc.shapes.find((s) => s.id === selectedId);
   if (!shape) return null;
 
@@ -66,6 +72,13 @@ export function Gizmos(props: {
     v2(bounds.min.x - pad, bounds.max.y + pad),
   ];
   const corners = cornersLocal.map((c) => canvasToScreen(viewport, localToCanvas(shape, c)));
+  // footprint corners (no pad): stable during a scale drag, used as scale anchors
+  const boundsCorners = [
+    v2(bounds.min.x, bounds.min.y),
+    v2(bounds.max.x, bounds.min.y),
+    v2(bounds.max.x, bounds.max.y),
+    v2(bounds.min.x, bounds.max.y),
+  ];
 
   const eventCanvasPoint = (e: React.PointerEvent): Vec2 => {
     const svg = (e.currentTarget as SVGGraphicsElement).ownerSVGElement!;
@@ -73,18 +86,21 @@ export function Gizmos(props: {
     return screenToCanvas(viewport, v2(e.clientX - rect.left, e.clientY - rect.top));
   };
 
-  const beginHandleDrag = (e: React.PointerEvent): void => {
+  const begin = (anchorLocal: Vec2) => (e: React.PointerEvent): void => {
     e.stopPropagation();
     (e.target as Element).setPointerCapture(e.pointerId);
     dragState.current = {
       start: eventCanvasPoint(e),
       rotation: shape.transform.rotation,
       scale: { ...shape.transform.scale },
+      pos: { ...shape.transform.pos },
+      anchorLocal,
+      anchorCanvas: localToCanvas(shape, anchorLocal),
     };
   };
 
-  const handleProps = (apply: (p: Vec2, e: React.PointerEvent) => void) => ({
-    onPointerDown: beginHandleDrag,
+  const handleProps = (anchorLocal: Vec2, apply: (p: Vec2, e: React.PointerEvent) => void) => ({
+    onPointerDown: begin(anchorLocal),
     onPointerMove: (e: React.PointerEvent) => {
       if (!dragState.current) return;
       apply(eventCanvasPoint(e), e);
@@ -96,29 +112,41 @@ export function Gizmos(props: {
     },
   });
 
-  const applyScale = (sc: { x: number; y: number; z: number }): void => {
-    store.update((d) => updateShape(d, shape.id, (s) => ({ ...s, transform: { ...s.transform, scale: sc } })), {
-      coalesce: `scale:${shape.id}`,
+  /** Apply a new scale while pinning the drag anchor (opposite corner/edge) in place. */
+  const scaleAround = (sc: { x: number; y: number; z: number }): void => {
+    const ds = dragState.current!;
+    const c = Math.cos(ds.rotation);
+    const s = Math.sin(ds.rotation);
+    const rx = ds.anchorLocal.x * sc.x;
+    const ry = ds.anchorLocal.y * sc.y;
+    // pos shifts so anchorLocal still lands on anchorCanvas under the new scale
+    const pos = { x: ds.anchorCanvas.x - (rx * c - ry * s), y: ds.anchorCanvas.y - (rx * s + ry * c), z: ds.pos.z };
+    store.update(
+      (d) => updateShape(d, shape.id, (sh) => ({ ...sh, transform: { ...sh.transform, scale: sc, pos } })),
+      { coalesce: `scale:${shape.id}` },
+    );
+  };
+
+  /** Corner drag: scales both footprint axes from the opposite corner (shift = uniform). */
+  const cornerScale = (i: number) =>
+    handleProps(boundsCorners[(i + 2) % 4]!, (p, e) => {
+      const ds = dragState.current!;
+      scaleAround(axisScaleFromDrag(ds.anchorCanvas, ds.rotation, ds.start, p, ds.scale, e.shiftKey));
+    });
+
+  /** Edge drag: scales the perpendicular axis from the opposite edge (shift = uniform). */
+  const edgeScale = (i: number, axis: "x" | "y") => {
+    const a = boundsCorners[(i + 2) % 4]!;
+    const b = boundsCorners[(i + 3) % 4]!;
+    return handleProps(v2((a.x + b.x) / 2, (a.y + b.y) / 2), (p, e) => {
+      const ds = dragState.current!;
+      const sc = axisScaleFromDrag(ds.anchorCanvas, ds.rotation, ds.start, p, ds.scale, e.shiftKey);
+      scaleAround(e.shiftKey ? sc : axis === "x" ? { ...ds.scale, x: sc.x } : { ...ds.scale, y: sc.y });
     });
   };
 
-  const scale = handleProps((p, e) => {
-    const ds = dragState.current!;
-    applyScale(axisScaleFromDrag(shape.transform.pos, ds.rotation, ds.start, p, ds.scale, e.shiftKey));
-  });
-
-  /** Edge drag scales only the perpendicular axis (shift still goes uniform). */
-  const edgeScale = (axis: "x" | "y") =>
-    handleProps((p, e) => {
-      const ds = dragState.current!;
-      const sc = axisScaleFromDrag(shape.transform.pos, ds.rotation, ds.start, p, ds.scale, e.shiftKey);
-      applyScale(
-        e.shiftKey ? sc : axis === "x" ? { ...ds.scale, x: sc.x } : { ...ds.scale, y: sc.y },
-      );
-    });
-
   const vertexHandle = (i: number) =>
-    handleProps((p) => {
+    handleProps(boundsCorners[0]!, (p) => {
       const local = toLocal(shape.transform, p);
       store.update(
         (d) =>
@@ -163,7 +191,7 @@ export function Gizmos(props: {
                 stroke="transparent"
                 strokeWidth={10}
                 className={`pointer-events-auto ${horizontal ? "cursor-ns-resize" : "cursor-ew-resize"}`}
-                {...edgeScale(i % 2 === 0 ? "y" : "x")}
+                {...edgeScale(i, i % 2 === 0 ? "y" : "x")}
               />
             );
           })
@@ -186,7 +214,7 @@ export function Gizmos(props: {
                 height={10}
                 fill="var(--color-accent)"
                 className={`pointer-events-auto ${nwse ? "cursor-nwse-resize" : "cursor-nesw-resize"}`}
-                {...scale}
+                {...cornerScale(i)}
               />
             );
           })
