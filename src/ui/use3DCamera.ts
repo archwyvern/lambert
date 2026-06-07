@@ -76,7 +76,20 @@ export function use3DCamera() {
   const zoomBy = (factor: number): void =>
     setOrbit((o) => ({ ...o, dist: Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, o.dist * factor)) }));
 
-  const onWheel = (e: React.WheelEvent): void => zoomBy(e.deltaY < 0 ? 0.9 : 1.1);
+  // plain wheel = dolly the camera in/out (dist); shift+wheel = push the focal point
+  // forward/back along the view direction (same as the left+right drag, in discrete steps)
+  const onWheel = (docW: number, docH: number) => (e: React.WheelEvent): void => {
+    if (!e.shiftKey) {
+      zoomBy(e.deltaY < 0 ? 0.9 : 1.1);
+      return;
+    }
+    const { fwd } = panAxes(orbitRef.current);
+    const step = (e.deltaY < 0 ? 1 : -1) * Math.max(docW, docH) * orbitRef.current.dist * 0.12;
+    setOrbit((o) => ({
+      ...o,
+      target: { x: o.target.x + fwd[0] * step, y: o.target.y + fwd[1] * step, z: o.target.z + fwd[2] * step },
+    }));
+  };
 
   const focal = (docW: number, docH: number, cssW: number, cssH: number): { x: number; y: number } | null =>
     projectToScreen(orbitMvp(orbit, docW, docH, cssW / Math.max(1, cssH)), orbitTarget(orbit), cssW, cssH);

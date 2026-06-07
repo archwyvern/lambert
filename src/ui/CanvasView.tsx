@@ -430,7 +430,7 @@ export function CanvasView(props: {
           onToggleSize={() => setDock3d(full ? "docked" : "full")}
           onClose={() => setShow3d(false)}
           onCanvasDown={cam3d.onCanvasDown(doc.source.width, doc.source.height, c3w)}
-          onWheel={cam3d.onWheel}
+          onWheel={cam3d.onWheel(doc.source.width, doc.source.height)}
           zoomBy={cam3d.zoomBy}
           focal={focal3d}
         />
