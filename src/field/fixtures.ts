@@ -26,6 +26,7 @@ export function stressShapes(): ShapeInstance[] {
   dome.id = "stress-dome";
   dome.transform.rotation = 0.7;
   dome.transform.scale = { x: 1.5, y: 0.75, z: 1 };
+  dome.transform.pos.z = 5; // exercise the elevation slot in the GPU drift test
   const ridge = createShapeInstance("ridge", v2(48, 60));
   ridge.id = "stress-ridge";
   ridge.transform.rotation = -0.4;
