@@ -48,8 +48,11 @@ export function Preview3DPanel(props: {
   onCanvasDown: (e: React.PointerEvent) => void;
   onWheel: (e: React.WheelEvent) => void;
   zoomBy: (factor: number) => void;
+  /** Orbit/pan focal point in canvas CSS px, or null if off-screen/behind camera. */
+  focal: { x: number; y: number } | null;
 }): React.JSX.Element {
-  const { canvasRef, canvasW, canvasH, mode, geom, setGeom, setMode, onClose, onCanvasDown, onWheel, zoomBy } = props;
+  const { canvasRef, canvasW, canvasH, mode, geom, setGeom, setMode, onClose, onCanvasDown, onWheel, zoomBy, focal } =
+    props;
   const geomRef = useRef(geom);
   geomRef.current = geom;
 
@@ -108,6 +111,24 @@ export function Preview3DPanel(props: {
           onPointerDown={onCanvasDown}
           onWheel={onWheel}
         />
+        {focal && focal.x >= 0 && focal.x <= canvasW && focal.y >= 0 && focal.y <= canvasH ? (
+          <svg
+            className="pointer-events-none absolute top-0 left-0"
+            width={canvasW}
+            height={canvasH}
+            style={{ overflow: "visible" }}
+          >
+            <g
+              stroke="var(--color-accent)"
+              strokeWidth={1.25}
+              style={{ filter: "drop-shadow(0 0 1.5px rgba(0,0,0,0.9))" }}
+            >
+              <line x1={focal.x - 7} y1={focal.y} x2={focal.x + 7} y2={focal.y} />
+              <line x1={focal.x} y1={focal.y - 7} x2={focal.x} y2={focal.y + 7} />
+              <circle cx={focal.x} cy={focal.y} r={3} fill="none" />
+            </g>
+          </svg>
+        ) : null}
         {floating ? (
           <div
             title="Resize"

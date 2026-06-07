@@ -155,31 +155,55 @@ export function mat4Mul(a: Float32Array, b: Float32Array): Float32Array {
   return out;
 }
 
-/** MVP for an orbit camera; pan slides the look-at target in the camera's screen plane. */
-export function orbitMvp(orbit: Orbit, docW: number, docH: number, aspect: number): Float32Array {
-  const span = Math.max(docW, docH);
-  const radius = span * orbit.dist;
-  const off: [number, number, number] = [
-    radius * Math.cos(orbit.pitch) * Math.sin(orbit.yaw),
-    radius * Math.sin(orbit.pitch),
-    radius * Math.cos(orbit.pitch) * Math.cos(orbit.yaw),
+type V3 = [number, number, number];
+
+/** Camera right/up screen-plane basis from yaw/pitch (radius-independent). */
+function orbitBasis(orbit: Orbit): { off: V3; right: V3; up: V3 } {
+  const off: V3 = [
+    Math.cos(orbit.pitch) * Math.sin(orbit.yaw),
+    Math.sin(orbit.pitch),
+    Math.cos(orbit.pitch) * Math.cos(orbit.yaw),
   ];
-  // camera basis from the view direction (target -> eye is +off): right & up span the screen
-  const fl = Math.hypot(off[0], off[1], off[2]) || 1;
-  const fwd: [number, number, number] = [-off[0] / fl, -off[1] / fl, -off[2] / fl];
-  const right: [number, number, number] = [fwd[2], 0, -fwd[0]];
+  const fwd: V3 = [-off[0], -off[1], -off[2]];
+  const right: V3 = [fwd[2], 0, -fwd[0]];
   const rl = Math.hypot(right[0], right[1], right[2]) || 1;
   right[0] /= rl;
   right[2] /= rl;
-  const up: [number, number, number] = [
+  const up: V3 = [
     right[1] * fwd[2] - right[2] * fwd[1],
     right[2] * fwd[0] - right[0] * fwd[2],
     right[0] * fwd[1] - right[1] * fwd[0],
   ];
+  return { off, right, up };
+}
+
+/** World position of the orbit/pan focal point (look-at target). */
+export function orbitTarget(orbit: Orbit, docW: number, docH: number): V3 {
+  const span = Math.max(docW, docH);
+  const { right, up } = orbitBasis(orbit);
   const px = orbit.panX * span;
   const py = orbit.panY * span;
-  const target: [number, number, number] = [right[0] * px + up[0] * py, right[1] * px + up[1] * py, right[2] * px + up[2] * py];
-  const eye: [number, number, number] = [target[0] + off[0], target[1] + off[1], target[2] + off[2]];
+  return [right[0] * px + up[0] * py, right[1] * px + up[1] * py, right[2] * px + up[2] * py];
+}
+
+/** MVP for an orbit camera; pan slides the look-at target in the camera's screen plane. */
+export function orbitMvp(orbit: Orbit, docW: number, docH: number, aspect: number): Float32Array {
+  const span = Math.max(docW, docH);
+  const radius = span * orbit.dist;
+  const { off } = orbitBasis(orbit);
+  const target = orbitTarget(orbit, docW, docH);
+  const eye: V3 = [target[0] + off[0] * radius, target[1] + off[1] * radius, target[2] + off[2] * radius];
   const proj = perspective(Math.PI / 4, aspect, 1, radius * 10 + span);
   return mat4Mul(proj, lookAt(eye, target));
+}
+
+/** Project a world point to canvas CSS px (top-left origin); null if behind the camera. */
+export function projectToScreen(mvp: Float32Array, p: V3, w: number, h: number): { x: number; y: number } | null {
+  const v = [p[0], p[1], p[2], 1];
+  const clip = [0, 0, 0, 0];
+  for (let i = 0; i < 4; i++) clip[i] = mvp[i]! * v[0]! + mvp[4 + i]! * v[1]! + mvp[8 + i]! * v[2]! + mvp[12 + i]! * v[3]!;
+  if (clip[3]! <= 0) return null; // behind the camera
+  const ndcX = clip[0]! / clip[3]!;
+  const ndcY = clip[1]! / clip[3]!;
+  return { x: (ndcX * 0.5 + 0.5) * w, y: (1 - (ndcY * 0.5 + 0.5)) * h };
 }

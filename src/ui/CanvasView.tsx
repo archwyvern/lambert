@@ -4,7 +4,7 @@ import type { DocumentStore, EditorState } from "../document/store";
 import { addShape, updateShape } from "../document/docOps";
 import { getShapeType } from "../field/registry";
 import { normalSigns } from "../document/schema";
-import { DEFAULT_ORBIT, Orbit } from "../field/gpu/preview3d";
+import { DEFAULT_ORBIT, Orbit, orbitMvp, orbitTarget, projectToScreen } from "../field/gpu/preview3d";
 import { v2, Vec2 } from "../field/vec";
 import { Gizmos } from "./Gizmos";
 import { LightPad } from "./LightPad";
@@ -163,6 +163,14 @@ export function CanvasView(props: {
   // 3D panel canvas CSS size depends on dock mode / float geometry
   const canvas3dW = dock3d === "float" ? geom3d.w : DOCKED_SIZE;
   const canvas3dH = dock3d === "float" ? geom3d.h - HEADER_H : DOCKED_SIZE;
+
+  // project the orbit/pan focal point to the 3D canvas for the crosshair overlay
+  const focal3d = projectToScreen(
+    orbitMvp(orbit, doc.source.width, doc.source.height, canvas3dW / Math.max(1, canvas3dH)),
+    orbitTarget(orbit, doc.source.width, doc.source.height),
+    canvas3dW,
+    canvas3dH,
+  );
 
   // attach the 3D inspection canvas while the panel is open; resize backing store to match
   useEffect(() => {
@@ -377,6 +385,7 @@ export function CanvasView(props: {
           onCanvasDown={on3dCanvasDown}
           onWheel={(e) => zoom3dBy(e.deltaY < 0 ? 0.9 : 1.1)}
           zoomBy={zoom3dBy}
+          focal={focal3d}
         />
       ) : null}
       {diffuseBytes && !show3d ? (
