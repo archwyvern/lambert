@@ -13,10 +13,14 @@ import { Inspector } from "./Inspector";
 import { Layers } from "./Layers";
 import { Library } from "./Library";
 import { Toast, ToastState } from "./kit";
+import { usePersistentState } from "./persist";
+import { Sash } from "./Sash";
 import { Toolbar } from "./Toolbar";
 import type { ViewMode } from "./preview";
 import { VIEW_MODES } from "./preview";
 import { TOOL_KEYS, ToolMode } from "./tools";
+
+const clampPanel = (w: number): number => Math.min(480, Math.max(160, w));
 
 export interface ViewState {
   mode: ViewMode;
@@ -34,6 +38,8 @@ export function App(): React.JSX.Element {
   const [view, setView] = useState<ViewState>({ mode: "lit", opacity: 1, lightDir: [-0.5, -0.5, 0.7] });
   const [tool, setTool] = useState<ToolMode>("select");
   const [diffuse, setDiffuse] = useState<{ bytes: Uint8Array; dir: string | null } | null>(null);
+  const [leftWidth, setLeftWidth] = usePersistentState("panel:left", 208);
+  const [rightWidth, setRightWidth] = usePersistentState("panel:right", 288);
   const [toast, setToast] = useState<ToastState | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -227,10 +233,11 @@ export function App(): React.JSX.Element {
     <div className="flex h-screen flex-col bg-bg text-base text-fg">
       <Toolbar store={store} state={state} view={view} setView={setView} tool={tool} setTool={setTool} />
       <div className="flex min-h-0 flex-1">
-        <aside className="flex w-52 flex-col gap-4 border-r border-border bg-bg p-3">
+        <aside className="flex shrink-0 flex-col gap-4 bg-bg p-3" style={{ width: leftWidth }}>
           <Library enabled={!!diffuse} />
           <Layers store={store} state={state} />
         </aside>
+        <Sash onDrag={(dx) => setLeftWidth((w) => clampPanel(w + dx))} />
         <main className="relative min-w-0 flex-1 bg-[var(--color-viewport-bg)]">
           <CanvasView
             store={store}
@@ -241,7 +248,8 @@ export function App(): React.JSX.Element {
             onLightChange={(d) => setView((v) => ({ ...v, lightDir: d }))}
           />
         </main>
-        <aside className="w-72 overflow-y-auto border-l border-border bg-bg p-3">
+        <Sash onDrag={(dx) => setRightWidth((w) => clampPanel(w - dx))} />
+        <aside className="shrink-0 overflow-y-auto bg-bg p-3" style={{ width: rightWidth }}>
           <Inspector store={store} state={state} />
         </aside>
       </div>

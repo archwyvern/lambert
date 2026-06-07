@@ -33,6 +33,8 @@ export interface CombineSpec {
 export interface ShapeInstance {
   id: string;
   typeId: string;
+  /** User-given layer name; display falls back to the type name when absent. */
+  name?: string;
   transform: Transform2D;
   params: Record<string, number | string | boolean>;
   controlPoints: Vec2[];

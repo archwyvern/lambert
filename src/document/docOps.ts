@@ -31,6 +31,18 @@ export function reorderShape(doc: FlatlandDoc, id: string, delta: number): Flatl
   return { ...doc, shapes };
 }
 
+/** Move a shape to a final array index (drag-reorder semantics: remove, then insert). */
+export function moveShapeTo(doc: FlatlandDoc, id: string, finalIndex: number): FlatlandDoc {
+  const from = doc.shapes.findIndex((s) => s.id === id);
+  if (from < 0) return doc;
+  const to = Math.min(doc.shapes.length - 1, Math.max(0, finalIndex));
+  if (to === from) return doc;
+  const shapes = [...doc.shapes];
+  const [moved] = shapes.splice(from, 1);
+  shapes.splice(to, 0, moved!);
+  return { ...doc, shapes };
+}
+
 export function duplicateShape(doc: FlatlandDoc, id: string): FlatlandDoc {
   const src = doc.shapes.find((s) => s.id === id);
   if (!src) return doc;

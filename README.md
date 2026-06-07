@@ -46,6 +46,12 @@ scaling. Wheel zooms, middle-drag or Space-drag pans, V cycles view modes, arrow
 Delete removes. File/Edit/View live in the application menu (Ctrl+O/S/E, Ctrl+Z/Y/D,
 Ctrl+0 fit, Ctrl+1 100%). The light pad sits in the viewport corner in lit view.
 
+Layers panel: click selects (the only selection surface for W/E/R), drag reorders,
+double-click or F2 renames, right-click for rename/duplicate/front/back/delete; the
+eye toggles visibility and the lock makes a layer inert on canvas (the inspector can
+still edit it). The +/- marker flags add/carve compositing. Both sidebars resize by
+dragging their edge; widths persist across launches.
+
 ## Shape icons
 
 The library palette icons are clay renders of the actual shapes, generated headlessly:

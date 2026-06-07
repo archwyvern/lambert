@@ -6,6 +6,7 @@ const vec2Schema = z.object({ x: z.number(), y: z.number() });
 const shapeSchema = z.object({
   id: z.string(),
   typeId: z.string(),
+  name: z.string().optional(),
   transform: z.object({
     pos: vec2Schema,
     rotation: z.number(),

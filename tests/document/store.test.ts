@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import "../../src/field/shapes";
-import { emptyDoc } from "../../src/document/schema";
-import { addShape, duplicateShape, removeShape, reorderShape, updateShape } from "../../src/document/docOps";
+import { emptyDoc, parseDoc, serializeDoc } from "../../src/document/schema";
+import { addShape, duplicateShape, moveShapeTo, removeShape, reorderShape, updateShape } from "../../src/document/docOps";
 import { DocumentStore } from "../../src/document/store";
 import { v2 } from "../../src/field/vec";
 
@@ -29,6 +29,25 @@ test("removeShape, duplicateShape, reorderShape", () => {
   expect(dup.shapes[2]!.id).not.toBe(a);
   expect(dup.shapes[2]!.transform.pos).toEqual({ x: srcPos.x + 5, y: srcPos.y + 5 });
   expect(removeShape(doc, a!).shapes.map((s) => s.id)).toEqual([b]);
+});
+
+test("moveShapeTo: final-index semantics for drag reorder", () => {
+  let doc = emptyDoc("x.png", 64, 64);
+  doc = addShape(doc, "dome", v2(0, 0));
+  doc = addShape(doc, "ridge", v2(0, 0));
+  doc = addShape(doc, "groove", v2(0, 0));
+  const [a, b, c] = doc.shapes.map((s) => s.id);
+  expect(moveShapeTo(doc, a!, 2).shapes.map((s) => s.id)).toEqual([b, c, a]);
+  expect(moveShapeTo(doc, c!, 0).shapes.map((s) => s.id)).toEqual([c, a, b]);
+  expect(moveShapeTo(doc, b!, 1).shapes.map((s) => s.id)).toEqual([a, b, c]); // no-op
+  expect(moveShapeTo(doc, "ghost", 0)).toBe(doc);
+});
+
+test("schema: optional shape name round-trips", () => {
+  const doc = addShape(emptyDoc("x.png", 64, 64), "dome", v2(0, 0));
+  doc.shapes[0]!.name = "boss stud";
+  const back = parseDoc(serializeDoc(doc));
+  expect(back.shapes[0]!.name).toBe("boss stud");
 });
 
 test("store: update pushes undo, redo clears on new edit", () => {

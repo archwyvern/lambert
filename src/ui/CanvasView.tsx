@@ -164,9 +164,10 @@ export function CanvasView(props: {
       return;
     }
 
-    // explicit tools operate on the current selection only, wherever you grab
+    // explicit tools operate on the current selection only, wherever you grab;
+    // locked layers are inert on canvas (inspector still edits them)
     const target = doc.shapes.find((s) => s.id === state.selectedId) ?? null;
-    if (!target) return;
+    if (!target || target.locked) return;
     if (effective === "move") {
       dragRef.current = { kind: "move", id: target.id, startCanvas: p, startPos: target.transform.pos };
     } else if (effective === "rotate") {

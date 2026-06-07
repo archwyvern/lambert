@@ -52,7 +52,7 @@ export function Gizmos(props: {
   tool: ToolMode;
 }): React.JSX.Element | null {
   const { doc, selectedId, viewport, store, tool } = props;
-  const handles = tool === "select";
+  const handles = tool === "select" && !doc.shapes.find((s) => s.id === selectedId)?.locked;
   const dragState = useRef<{ start: Vec2; rotation: number; scale: { x: number; y: number } } | null>(null);
   const shape = doc.shapes.find((s) => s.id === selectedId);
   if (!shape) return null;
