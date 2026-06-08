@@ -1,18 +1,14 @@
-import { CubeRegular } from "@fluentui/react-icons";
 import { useEffect, useRef, useState } from "react";
 import type { DocumentStore, EditorState } from "../document/store";
 import { addShape, updateShape } from "../document/docOps";
-import { getShapeType, shapeMaxHeight } from "../field/registry";
+import { getShapeType } from "../field/registry";
 import { fromLocal } from "../field/transform";
 import { normalSigns } from "../document/schema";
 import { v2, Vec2 } from "../field/vec";
 import { Gizmos } from "./Gizmos";
 import { LightPad } from "./LightPad";
-import { usePersistentState } from "./persist";
 import { axisScaleFromDrag, constrainAxis, pickShape, pointsInBox, rotationFromDrag, snapAngle } from "./picking";
 import { PreviewRenderer } from "./preview";
-import { Dock3D, DOCKED_SIZE, HEADER3D, Preview3DPanel } from "./Preview3DPanel";
-import { use3DCamera } from "./use3DCamera";
 import { canvasToScreen, fitViewport, screenToCanvas, Viewport, zoomAt } from "./viewport";
 import type { ToolMode } from "./tools";
 import type { ViewState } from "./App";
@@ -52,18 +48,10 @@ export function CanvasView(props: {
   const [ready, setReady] = useState(false);
   const [cursor, setCursor] = useState<Vec2 | null>(null);
   const dragRef = useRef<Drag | null>(null);
+  const spaceRef = useRef(false);
   const [marquee, setMarquee] = useState<{ a: Vec2; b: Vec2 } | null>(null);
-  const [show3d, setShow3d] = usePersistentState("panel:3d", false);
-  const [dock3d, setDock3d] = usePersistentState<Dock3D>("panel:3d:dock", "docked");
-  const [hostSize, setHostSize] = useState({ w: 1, h: 1 });
-  const canvas3dRef = useRef<HTMLCanvasElement>(null);
-  const cam3d = use3DCamera();
 
   const doc = state.doc;
-  const full = show3d && dock3d === "full";
-  // refs so the global keydown handler reads live values without re-subscribing
-  const fullRef = useRef(full);
-  fullRef.current = full;
 
   // init renderer + canvas sizing
   useEffect(() => {
@@ -71,7 +59,6 @@ export function CanvasView(props: {
     const canvas = canvasRef.current!;
     const resize = (): void => {
       const r = host.getBoundingClientRect();
-      setHostSize({ w: Math.max(1, Math.floor(r.width)), h: Math.max(1, Math.floor(r.height)) });
       canvas.width = Math.max(1, Math.floor(r.width * devicePixelRatio));
       canvas.height = Math.max(1, Math.floor(r.height * devicePixelRatio));
     };
@@ -88,24 +75,20 @@ export function CanvasView(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // space = toggle the full-editor 3D view on/off (off -> fullscreen, fullscreen -> hidden).
-  // The docked mini-view stays reachable via the cube button + the header maximize toggle.
+  // space = temporary pan (godot-style); tracked outside react state for the drag handlers
   useEffect(() => {
     const down = (e: KeyboardEvent): void => {
-      if (e.code !== "Space" || e.target instanceof HTMLInputElement) return;
-      e.preventDefault();
-      if (fullRef.current) {
-        setShow3d(false);
-      } else {
-        setShow3d(true);
-        setDock3d("full");
-      }
+      if (e.code === "Space" && !(e.target instanceof HTMLInputElement)) spaceRef.current = true;
+    };
+    const up = (e: KeyboardEvent): void => {
+      if (e.code === "Space") spaceRef.current = false;
     };
     window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
     return () => {
       window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // menu-driven zoom (accelerators are owned by the application menu)
@@ -127,32 +110,6 @@ export function CanvasView(props: {
     return () => window.removeEventListener("flatland-zoom", onZoom);
   }, [doc.source.width, doc.source.height]);
 
-  // demo/capture hook: ?p3d opens the 3D view (docked, or filling the editor with &full3d)
-  useEffect(() => {
-    const q = new URLSearchParams(location.search);
-    if (q.has("p3d")) {
-      setShow3d(true);
-      setDock3d(q.has("full3d") ? "full" : "docked");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // 3D canvas CSS size: docked = fixed mini-view; full = fills the editor area
-  const c3w = full ? hostSize.w : DOCKED_SIZE;
-  const c3h = full ? hostSize.h - HEADER3D : DOCKED_SIZE;
-  const focal3d = cam3d.focal(doc.source.width, doc.source.height, c3w, c3h);
-
-  // attach the embedded 3D canvas while open; resize the backing store to the current mode
-  useEffect(() => {
-    const r = rendererRef.current;
-    const canvas = canvas3dRef.current;
-    if (!ready || !r || !show3d || !canvas) return;
-    canvas.width = Math.max(1, Math.floor(c3w * devicePixelRatio));
-    canvas.height = Math.max(1, Math.floor(c3h * devicePixelRatio));
-    r.attach3D(canvas);
-    return () => r.attach3D(null);
-  }, [ready, show3d, diffuseBytes, c3w, c3h]);
-
   // upload diffuse when it changes; refit the view to the (possibly new) doc dims
   useEffect(() => {
     if (!ready || !rendererRef.current || !diffuseBytes) return;
@@ -166,7 +123,11 @@ export function CanvasView(props: {
     const r = rendererRef.current;
     if (!r || !diffuseBytes || !ready) return;
     const maxH = doc.shapes.reduce(
-      (m, s) => Math.max(m, Math.abs(s.transform.pos.z) + shapeMaxHeight(s) * Math.abs(s.transform.scale.z)),
+      (m, s) =>
+        Math.max(
+          m,
+          Math.abs(s.transform.pos.z) + (getShapeType(s.typeId).nominalHeight ?? 0) * Math.abs(s.transform.scale.z),
+        ),
       8,
     );
     r.requestRender(doc.source.width, doc.source.height, {
@@ -177,7 +138,6 @@ export function CanvasView(props: {
       lightDir: view.lightDir,
       heightRange: [-maxH, maxH],
       normalSigns: normalSigns(doc.normalDirs),
-      orbit3d: show3d ? cam3d.orbit : null,
     });
   });
 
@@ -188,7 +148,7 @@ export function CanvasView(props: {
 
   const onPointerDown = (e: React.PointerEvent): void => {
     (e.target as Element).setPointerCapture(e.pointerId);
-    if (e.button === 1) {
+    if (e.button === 1 || spaceRef.current) {
       dragRef.current = { kind: "pan", lastX: e.clientX, lastY: e.clientY };
       return;
     }
@@ -417,29 +377,6 @@ export function CanvasView(props: {
           <LightPad lightDir={view.lightDir} onChange={onLightChange} radius={34} />
           <span className="text-sm uppercase tracking-[var(--tracking-tight)] text-fg-mid">light</span>
         </div>
-      ) : null}
-      {diffuseBytes && show3d ? (
-        <Preview3DPanel
-          mode={dock3d}
-          canvasRef={canvas3dRef}
-          canvasW={c3w}
-          canvasH={c3h}
-          onToggleSize={() => setDock3d(full ? "docked" : "full")}
-          onClose={() => setShow3d(false)}
-          onCanvasDown={cam3d.onCanvasDown(doc.source.width, doc.source.height, c3w)}
-          onWheel={cam3d.onWheel(doc.source.width, doc.source.height)}
-          zoomBy={cam3d.zoomBy}
-          focal={focal3d}
-        />
-      ) : null}
-      {diffuseBytes && !show3d ? (
-        <button
-          title="3D preview"
-          className="absolute right-3 bottom-8 flex h-[26px] w-[30px] items-center justify-center border border-border bg-surface2/90 text-fg-mid hover:bg-hover hover:text-fg"
-          onClick={() => setShow3d(true)}
-        >
-          <CubeRegular style={{ fontSize: 15 }} />
-        </button>
       ) : null}
       {diffuseBytes ? (
         <div className="pointer-events-none absolute bottom-2 left-2 flex gap-3 border border-border bg-surface2/90 px-2 py-0.5 text-sm tabular-nums text-fg-mid">

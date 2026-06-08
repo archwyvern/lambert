@@ -1,8 +1,6 @@
 import type { DocumentStore, EditorState } from "../document/store";
 import { removeShape, reorderShape, updateShape } from "../document/docOps";
 import { polygonStats, regularPolygon, resamplePolyline } from "../field/controlPoints";
-import { canConvertToMesh, convertToMesh } from "../field/meshConvert";
-import { connectVerts, deleteVerts } from "../field/meshOps";
 import { getShapeType } from "../field/registry";
 import type { ShapeInstance } from "../field/types";
 import { Button, humanizeLabel, SectionLabel, SelectRow, SpinBox } from "./kit";
@@ -11,13 +9,8 @@ const toDeg = (rad: number): number => Number(((rad * 180) / Math.PI).toFixed(1)
 const toRad = (deg: number): number => (deg * Math.PI) / 180;
 const safeScale = (v: number): number => Math.max(0.05, v); // no negative/mirrored scale
 
-export function Inspector(props: {
-  store: DocumentStore;
-  state: EditorState;
-  selVerts: number[];
-  setSelVerts: (v: number[]) => void;
-}): React.JSX.Element {
-  const { store, state, selVerts, setSelVerts } = props;
+export function Inspector(props: { store: DocumentStore; state: EditorState }): React.JSX.Element {
+  const { store, state } = props;
   const shape = state.doc.shapes.find((s) => s.id === state.selectedId);
   if (!shape) {
     const doc = state.doc;
@@ -58,12 +51,10 @@ export function Inspector(props: {
   return (
     <div>
       <div className="mb-2 border-b border-border pb-1.5 text-md font-semibold text-fg">{type.name}</div>
-      {type.controlPoints.kind !== "none" && type.controlPoints.kind !== "mesh" ? (
-        <SectionLabel>Parameters</SectionLabel>
-      ) : Object.keys(type.params).length > 0 ? (
+      {type.controlPoints.kind !== "none" || Object.keys(type.params).length > 0 ? (
         <SectionLabel>Parameters</SectionLabel>
       ) : null}
-      {type.controlPoints.kind !== "none" && type.controlPoints.kind !== "mesh" ? (
+      {type.controlPoints.kind !== "none" ? (
         <SpinBox
           label={type.controlPoints.kind === "rings" ? "vertices / ring" : "vertices"}
           value={
@@ -123,61 +114,6 @@ export function Inspector(props: {
           />
         ),
       )}
-      {shape.mesh && selVerts.length > 0 ? (
-        <>
-          <div className="my-3 border-t border-border" />
-          <SectionLabel>{selVerts.length === 1 ? "Vertex" : `${selVerts.length} Vertices`}</SectionLabel>
-          <SpinBox
-            label="height"
-            value={Number((shape.mesh.z[selVerts[0]!] ?? 0).toFixed(1))}
-            step={1}
-            onChange={(v) =>
-              live(
-                (s) => ({
-                  ...s,
-                  mesh: s.mesh ? { ...s.mesh, z: s.mesh.z.map((z, i) => (selVerts.includes(i) ? v : z)) } : s.mesh,
-                }),
-                "vz",
-              )
-            }
-            onCommit={commit}
-          />
-          {selVerts.length === 2 ? (
-            <Button
-              className="mt-1 w-full"
-              onClick={() => {
-                store.update((d) =>
-                  updateShape(d, shape.id, (s) => {
-                    const t = s.mesh && connectVerts(s.mesh, selVerts[0]!, selVerts[1]!);
-                    return t ? { ...s, mesh: t } : s;
-                  }),
-                );
-                commit();
-              }}
-            >
-              Connect Vertices
-            </Button>
-          ) : null}
-          <Button
-            variant="danger"
-            className="mt-1 w-full"
-            onClick={() => {
-              store.update((d) =>
-                updateShape(d, shape.id, (s) => {
-                  if (!s.mesh) return s;
-                  const r = deleteVerts(s.controlPoints, s.mesh, selVerts);
-                  return r ? { ...s, controlPoints: r.controlPoints, mesh: r.mesh } : s;
-                }),
-              );
-              commit();
-              setSelVerts([]);
-            }}
-          >
-            Delete {selVerts.length === 1 ? "Vertex" : "Vertices"}
-          </Button>
-          <p className="mt-1 text-sm leading-snug text-fg-mid">Click an edge to add a vertex.</p>
-        </>
-      ) : null}
       <div className="my-3 border-t border-border" />
       <SectionLabel>Transform</SectionLabel>
       <SpinBox
@@ -247,22 +183,6 @@ export function Inspector(props: {
         }
         onCommit={commit}
       />
-      {canConvertToMesh(shape) ? (
-        <>
-          <div className="my-3 border-t border-border" />
-          <Button
-            className="w-full"
-            onClick={() => {
-              const m = convertToMesh(shape);
-              store.update((d) => ({ ...d, shapes: d.shapes.map((s) => (s.id === shape.id ? m : s)) }));
-              commit();
-              store.select(m.id);
-            }}
-          >
-            Convert to Mesh
-          </Button>
-        </>
-      ) : null}
       <div className="my-3 border-t border-border" />
       <div className="flex gap-1">
         <Button

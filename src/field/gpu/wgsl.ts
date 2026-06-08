@@ -5,8 +5,7 @@ export const PARAMS_OFFSET = 13;
 export const MAX_PARAMS = 8;
 
 /** Record layout (f32 slots): see pack.ts — typeIndex, op, (free), scaleZ, posXY,
- *  cos/sin(-rot), invScaleXY, distScale, cpStart, cpCount, params[8], elevation,
- *  meshTriStart, meshTriCount. */
+ *  cos/sin(-rot), invScaleXY, distScale, cpStart, cpCount, params[8], elevation, pad[2]. */
 const COMMON = /* wgsl */ `
 struct Uniforms {
   width: u32,
@@ -23,8 +22,6 @@ struct Uniforms {
 @group(0) @binding(1) var<storage, read> records: array<f32>;
 @group(0) @binding(2) var<storage, read> points: array<vec2f>;
 @group(0) @binding(3) var outField: texture_storage_2d<rg32float, write>;
-// mesh-plane triangles: 3 consecutive vec4 (local x,y,z, pad) per triangle
-@group(0) @binding(4) var<storage, read> meshTris: array<vec4f>;
 
 const RECORD: u32 = ${RECORD_F32}u;
 

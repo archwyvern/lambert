@@ -35,12 +35,6 @@ export function createShapeInstance(typeId: string, pos: Vec2): ShapeInstance {
   };
 }
 
-/** Peak |height| in px at scale.z = 1: the type's nominal, or the mesh's tallest vertex. */
-export function shapeMaxHeight(shape: ShapeInstance): number {
-  if (shape.mesh) return shape.mesh.z.reduce((m, z) => Math.max(m, Math.abs(z)), 0);
-  return getShapeType(shape.typeId).nominalHeight ?? 0;
-}
-
 export function numParam(shape: ShapeInstance, key: string): number {
   const value = shape.params[key];
   if (typeof value !== "number") throw new Error(`param ${key} of ${shape.typeId} is not a number`);

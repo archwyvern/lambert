@@ -18,20 +18,11 @@ export interface ParamSpecEnum {
 export type ParamSpec = ParamSpecPx | ParamSpecEnum;
 
 export interface ControlPointSpec {
-  /** rings = two equal-count polygon rings in one array (first half base, second half top).
-   *  mesh = free triangulated surface; topology in ShapeInstance.mesh, xy in controlPoints. */
-  kind: "none" | "polygon" | "polyline" | "rings" | "mesh";
+  /** rings = two equal-count polygon rings in one array (first half base, second half top). */
+  kind: "none" | "polygon" | "polyline" | "rings";
   min?: number;
   /** Default control points in shape-local px. */
   default: Vec2[];
-}
-
-/** A mesh-plane's topology: per-vertex height (index-aligned with controlPoints) + triangles. */
-export interface MeshData {
-  /** Height in px at each vertex (scale.z multiplies, pos.z elevates — like every shape). */
-  z: number[];
-  /** Triangles as triples of vertex indices into controlPoints. */
-  tris: [number, number, number][];
 }
 
 export interface ShapeInstance {
@@ -42,8 +33,6 @@ export interface ShapeInstance {
   transform: Transform2D;
   params: Record<string, number | string | boolean>;
   controlPoints: Vec2[];
-  /** Present only for mesh-plane shapes (typeId "mesh"); aligns with controlPoints. */
-  mesh?: MeshData;
   visible: boolean;
   locked: boolean;
 }
@@ -64,8 +53,6 @@ export interface ShapeType {
   defaultCombine?: CombineOp;
   /** Intrinsic tallness in px at scale.z = 1 (extrude basis). */
   nominalHeight?: number;
-  /** Hidden from the library palette even though it has WGSL (created by conversion). */
-  libraryHidden?: boolean;
   /**
    * WGSL mirror of eval: `fn shape_<id>(p: vec2f, base: u32) -> vec2f` returning
    * (height, sd). Params read at base+13+declarationIndex; enums as option index.

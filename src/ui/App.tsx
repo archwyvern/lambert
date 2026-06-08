@@ -2,7 +2,6 @@ import "./styles.css";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { DocumentStore } from "../document/store";
 import { duplicateShape, removeShape, updateShape } from "../document/docOps";
-import { deleteVerts } from "../field/meshOps";
 import { emptyDoc } from "../document/schema";
 import { diffusePathByStore, exportNx, openImageFlow, openProjectFlow, saveFlow } from "../document/io";
 import { dirname } from "../document/paths";
@@ -41,8 +40,6 @@ export function App(): React.JSX.Element {
   // selected control-point indices (shared: the canvas marquee/handles drive it, the
   // inspector edits vertex height); cleared whenever the selected shape changes
   const [selVerts, setSelVerts] = useState<number[]>([]);
-  const selVertsRef = useRef(selVerts); // live read inside the stable keydown listener
-  selVertsRef.current = selVerts;
   const [diffuse, setDiffuse] = useState<{ bytes: Uint8Array; dir: string | null } | null>(null);
   const [leftWidth, setLeftWidth] = usePersistentState("panel:left", 208);
   const [rightWidth, setRightWidth] = usePersistentState("panel:right", 288);
@@ -177,8 +174,8 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     const q = new URLSearchParams(location.search);
     if (!q.has("demo")) return;
-    void Promise.all([import("fast-png"), import("../field/fixtures"), import("../field/meshConvert")])
-      .then(([{ encode }, { goldenShapes }, { convertToMesh }]) => {
+    void Promise.all([import("fast-png"), import("../field/fixtures")])
+      .then(([{ encode }, { goldenShapes }]) => {
       const w = 96;
       const h = 96;
       const data = new Uint8Array(w * h * 4);
@@ -188,9 +185,7 @@ export function App(): React.JSX.Element {
         data[i * 4 + 2] = 118;
         data[i * 4 + 3] = 255;
       }
-      // ?mesh converts the slab to a mesh plane (capture/demo aid)
-      const shapes = goldenShapes().map((s) => (q.has("mesh") && s.id === "slab" ? convertToMesh(s) : s));
-      const doc = { ...emptyDoc("demo.png", w, h), shapes };
+      const doc = { ...emptyDoc("demo.png", w, h), shapes: goldenShapes() };
       store.reset(doc, null);
       setDiffuse({ bytes: encode({ width: w, height: h, data }), dir: null });
       const mode = q.get("mode");
@@ -215,21 +210,7 @@ export function App(): React.JSX.Element {
       if (key in TOOL_KEYS) {
         setTool(TOOL_KEYS[key]!);
       } else if ((e.key === "Delete" || e.key === "Backspace") && id) {
-        // on a mesh with vertices selected, Delete removes those vertices; otherwise the shape
-        const shape = store.state.doc.shapes.find((s) => s.id === id);
-        const verts = selVertsRef.current;
-        if (shape?.mesh && verts.length > 0) {
-          store.update((d) =>
-            updateShape(d, id, (s) => {
-              if (!s.mesh) return s;
-              const r = deleteVerts(s.controlPoints, s.mesh, verts);
-              return r ? { ...s, controlPoints: r.controlPoints, mesh: r.mesh } : s;
-            }),
-          );
-          setSelVerts([]);
-        } else {
-          store.update((d) => removeShape(d, id));
-        }
+        store.update((d) => removeShape(d, id));
         store.endGesture();
       } else if (key === "v") {
         setView((s) => ({ ...s, mode: VIEW_MODES[(VIEW_MODES.indexOf(s.mode) + 1) % VIEW_MODES.length]! }));
@@ -275,7 +256,7 @@ export function App(): React.JSX.Element {
         </main>
         <Sash onDrag={(dx) => setRightWidth((w) => clampPanel(w - dx))} />
         <aside className="shrink-0 overflow-y-auto bg-bg p-3" style={{ width: rightWidth }}>
-          <Inspector store={store} state={state} selVerts={selVerts} setSelVerts={setSelVerts} />
+          <Inspector store={store} state={state} />
         </aside>
       </div>
       <StatusBar

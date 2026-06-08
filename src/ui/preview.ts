@@ -1,7 +1,6 @@
 import { decode } from "fast-png";
 import { COMPOSITE_WGSL } from "../field/gpu/composite";
 import { GpuFieldRenderer } from "../field/gpu/pipeline";
-import { GRID, Orbit, orbitMvp, PREVIEW3D_WGSL } from "../field/gpu/preview3d";
 import type { ShapeInstance } from "../field/types";
 import type { Viewport } from "./viewport";
 
@@ -20,8 +19,6 @@ export interface PreviewParams {
   heightRange: [number, number];
   /** Project channel signs for the normal-view encode (normalSigns(doc.normalDirs)). */
   normalSigns: { red: number; green: number };
-  /** Orbit camera for the attached 3D inspection canvas; null/undefined skips the pass. */
-  orbit3d?: Orbit | null;
 }
 
 /** Owns the WebGPU canvas: doc-res field/normal textures + screen composite. */
@@ -38,11 +35,6 @@ export class PreviewRenderer {
   private diffuseTex: GPUTexture | null = null;
   private frame: number | null = null;
   private pending: { docW: number; docH: number; params: PreviewParams } | null = null;
-  private pipeline3d!: GPURenderPipeline;
-  private uniforms3d!: GPUBuffer;
-  private canvas3d: HTMLCanvasElement | null = null;
-  private ctx3d: GPUCanvasContext | null = null;
-  private depth3d: GPUTexture | null = null;
 
   private constructor(
     private readonly device: GPUDevice,
@@ -67,82 +59,7 @@ export class PreviewRenderer {
       fragment: { module, entryPoint: "fs", targets: [{ format }] },
     });
     p.uniforms = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    const module3d = device.createShaderModule({ code: PREVIEW3D_WGSL });
-    p.pipeline3d = await device.createRenderPipelineAsync({
-      layout: "auto",
-      vertex: { module: module3d, entryPoint: "vs" },
-      fragment: { module: module3d, entryPoint: "fs", targets: [{ format: navigator.gpu.getPreferredCanvasFormat() }] },
-      primitive: { topology: "triangle-list", cullMode: "none" },
-      depthStencil: { format: "depth24plus", depthWriteEnabled: true, depthCompare: "less" },
-    });
-    p.uniforms3d = device.createBuffer({ size: 96, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     return p;
-  }
-
-  /** Attach/detach the 3D inspection canvas (the orbit pass renders only while attached). */
-  attach3D(canvas: HTMLCanvasElement | null): void {
-    if (canvas === this.canvas3d) return;
-    this.canvas3d = canvas;
-    this.depth3d?.destroy();
-    this.depth3d = null;
-    if (!canvas) {
-      this.ctx3d = null;
-      return;
-    }
-    this.ctx3d = canvas.getContext("webgpu")!;
-    this.ctx3d.configure({ device: this.device, format: navigator.gpu.getPreferredCanvasFormat() });
-  }
-
-  private render3D(docW: number, docH: number, p: PreviewParams): void {
-    if (!this.ctx3d || !this.canvas3d || !p.orbit3d || !this.fieldTex || !this.normalTex || !this.diffuseTex) return;
-    const w = this.canvas3d.width;
-    const h = this.canvas3d.height;
-    if (!this.depth3d || this.depth3d.width !== w || this.depth3d.height !== h) {
-      this.depth3d?.destroy();
-      this.depth3d = this.device.createTexture({
-        size: [w, h],
-        format: "depth24plus",
-        usage: GPUTextureUsage.RENDER_ATTACHMENT,
-      });
-    }
-    const ub = new ArrayBuffer(96);
-    new Float32Array(ub).set(orbitMvp(p.orbit3d, docW, docH, w / h), 0);
-    new Float32Array(ub).set(
-      [GRID, GRID, docW, docH, p.lightDir[0], p.lightDir[1], p.lightDir[2], 1],
-      16,
-    );
-    this.device.queue.writeBuffer(this.uniforms3d, 0, ub);
-    const bind = this.device.createBindGroup({
-      layout: this.pipeline3d.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: this.uniforms3d } },
-        { binding: 1, resource: this.fieldTex.createView() },
-        { binding: 2, resource: this.normalTex.createView() },
-        { binding: 3, resource: this.diffuseTex.createView() },
-      ],
-    });
-    const enc = this.device.createCommandEncoder();
-    const pass = enc.beginRenderPass({
-      colorAttachments: [
-        {
-          view: this.ctx3d.getCurrentTexture().createView(),
-          loadOp: "clear",
-          storeOp: "store",
-          clearValue: { r: 0.024, g: 0.024, b: 0.047, a: 1 },
-        },
-      ],
-      depthStencilAttachment: {
-        view: this.depth3d.createView(),
-        depthLoadOp: "clear",
-        depthStoreOp: "discard",
-        depthClearValue: 1,
-      },
-    });
-    pass.setPipeline(this.pipeline3d);
-    pass.setBindGroup(0, bind);
-    pass.draw(GRID * GRID * 6);
-    pass.end();
-    this.device.queue.submit([enc.finish()]);
   }
 
   /** The exporter path shares this device/pipelines. */
@@ -194,9 +111,9 @@ export class PreviewRenderer {
       this.lastShapes = null;
       this.sizeKey = key;
     }
-    // orbit/light/zoom/mode changes must not re-fold the whole field — only re-run the
-    // cheap composite + 3D passes. The store's doc is immutable, so reference equality
-    // on the shape list is an exact dirty check.
+    // light/zoom/mode changes must not re-fold the whole field — only re-run the cheap
+    // composite pass. The store's doc is immutable, so reference equality on the shape
+    // list is an exact dirty check.
     if (!this.fieldTex || !this.normalTex || p.shapes !== this.lastShapes) {
       const existing =
         this.fieldTex && this.normalTex ? { fieldTex: this.fieldTex, normalTex: this.normalTex } : undefined;
@@ -252,7 +169,6 @@ export class PreviewRenderer {
     pass.draw(3);
     pass.end();
     this.device.queue.submit([enc.finish()]);
-    this.render3D(docW, docH, p);
     // capture-readiness flag: the window has presented real content at least once
     (globalThis as unknown as { __flatlandFrameReady?: boolean }).__flatlandFrameReady = true;
   }

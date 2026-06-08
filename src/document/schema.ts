@@ -20,13 +20,6 @@ const shapeSchema = z.object({
   }),
   params: z.record(z.string(), z.union([z.number(), z.string(), z.boolean()])),
   controlPoints: z.array(vec2Schema),
-  /** Mesh-plane topology (typeId "mesh" only): per-vertex height + triangle indices. */
-  mesh: z
-    .object({
-      z: z.array(z.number()),
-      tris: z.array(z.tuple([z.number(), z.number(), z.number()])),
-    })
-    .optional(),
   /** Legacy combine settings (op/blend); behavior now derives from the shape type. */
   combine: z.unknown().optional(),
   /** Legacy height multiplier; folded into scale.z on load. */

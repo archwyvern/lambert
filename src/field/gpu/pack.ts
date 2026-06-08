@@ -9,8 +9,6 @@ export interface PackedShapes {
   records: Float32Array;
   /** Flattened vec2 control points (x,y pairs). */
   points: Float32Array;
-  /** Mesh triangles as vec4 (local x,y,z,pad), 3 per triangle, for the mesh shape. */
-  meshTris: Float32Array;
   count: number;
 }
 
@@ -22,13 +20,10 @@ export interface PackedShapes {
 export function packShapes(shapes: ShapeInstance[]): PackedShapes {
   const visible = shapes.filter((s) => s.visible);
   const totalPoints = visible.reduce((n, s) => n + s.controlPoints.length, 0);
-  const totalTris = visible.reduce((n, s) => n + (s.mesh?.tris.length ?? 0), 0);
   const records = new Float32Array(Math.max(visible.length, 1) * RECORD_F32);
   const points = new Float32Array(Math.max(totalPoints, 1) * 2);
-  const meshTris = new Float32Array(Math.max(totalTris * 3, 1) * 4); // 3 verts/tri, vec4/vert
 
   let cpStart = 0;
-  let triVec4 = 0; // running vec4 index into meshTris
   visible.forEach((s, si) => {
     const type = getShapeType(s.typeId);
     const base = si * RECORD_F32;
@@ -63,19 +58,6 @@ export function packShapes(shapes: ShapeInstance[]): PackedShapes {
       points[cpStart * 2 + 1] = cp.y;
       cpStart++;
     }
-    if (s.mesh) {
-      records[base + 22] = triVec4; // first vertex (vec4 index) of this mesh's triangles
-      records[base + 23] = s.mesh.tris.length;
-      for (const tri of s.mesh.tris) {
-        for (const idx of tri) {
-          const cp = s.controlPoints[idx]!;
-          meshTris[triVec4 * 4] = cp.x;
-          meshTris[triVec4 * 4 + 1] = cp.y;
-          meshTris[triVec4 * 4 + 2] = s.mesh.z[idx]!;
-          triVec4++;
-        }
-      }
-    }
   });
-  return { records, points, meshTris, count: visible.length };
+  return { records, points, count: visible.length };
 }
