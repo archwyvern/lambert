@@ -25,6 +25,18 @@ export interface ControlPointSpec {
   default: Vec2[];
 }
 
+/** A filled region of a Surface shape: a closed loop of controlPoint indices + a fill color. */
+export interface SurfaceFace {
+  loop: number[];
+  /** Hex fill color "#rrggbb" (direct paint — written straight to the output, no derivation). */
+  color: string;
+}
+
+/** Direct-paint surface: faces over the shape's controlPoints (vertices). No height. */
+export interface SurfaceData {
+  faces: SurfaceFace[];
+}
+
 export interface ShapeInstance {
   id: string;
   typeId: string;
@@ -33,6 +45,8 @@ export interface ShapeInstance {
   transform: Transform2D;
   params: Record<string, number | string | boolean>;
   controlPoints: Vec2[];
+  /** Present only for Surface shapes (typeId "surface"); faces index controlPoints. */
+  surface?: SurfaceData;
   visible: boolean;
   locked: boolean;
 }

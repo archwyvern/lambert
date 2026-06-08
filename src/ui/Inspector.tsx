@@ -48,6 +48,39 @@ export function Inspector(props: { store: DocumentStore; state: EditorState }): 
     store.update((d) => updateShape(d, shape.id, fn), { coalesce: `${key}:${shape.id}` });
   const commit = (): void => store.endGesture();
 
+  if (shape.surface) {
+    const color = shape.surface.faces[0]?.color ?? "#8080ff";
+    return (
+      <div>
+        <div className="mb-2 border-b border-border pb-1.5 text-md font-semibold text-fg">Surface</div>
+        <SectionLabel>Fill</SectionLabel>
+        <label className="flex items-center justify-between gap-2 py-0.5 text-base text-fg-mid">
+          <span>color</span>
+          <input
+            type="color"
+            value={color}
+            className="h-[22px] w-1/2 cursor-pointer border border-border bg-surface2"
+            onChange={(e) => {
+              const c = e.target.value;
+              store.update((d) =>
+                updateShape(d, shape.id, (s) =>
+                  s.surface ? { ...s, surface: { faces: s.surface.faces.map((f) => ({ ...f, color: c })) } } : s,
+                ),
+              );
+              store.endGesture();
+            }}
+          />
+        </label>
+        <div className="my-3 border-t border-border" />
+        <div className="flex gap-1">
+          <Button variant="danger" className="flex-1" onClick={() => { store.update((d) => removeShape(d, shape.id)); commit(); }}>
+            Delete
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
       <div className="mb-2 border-b border-border pb-1.5 text-md font-semibold text-fg">{type.name}</div>

@@ -6,6 +6,7 @@ import {
   ArrowUndoRegular,
   BezierCurveSquareRegular,
   CursorRegular,
+  PenRegular,
 } from "@fluentui/react-icons";
 import type { DocumentStore, EditorState } from "../document/store";
 import type { ViewState } from "./App";
@@ -21,6 +22,7 @@ const TOOLS: Array<{ id: ToolMode; key: string; label: string; Icon: typeof Curs
   { id: "rotate", key: "E", label: "Rotate", Icon: ArrowRotateClockwiseRegular },
   { id: "scale", key: "R", label: "Scale", Icon: ArrowExpandRegular },
   { id: "vertex", key: "T", label: "Edit Vertices", Icon: BezierCurveSquareRegular },
+  { id: "pen", key: "P", label: "Pen (draw surface)", Icon: PenRegular },
 ];
 
 export function Toolbar(props: {

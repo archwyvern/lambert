@@ -18,7 +18,8 @@ export interface PackedShapes {
  * bindings, so empty lists still allocate one zeroed record/point.
  */
 export function packShapes(shapes: ShapeInstance[]): PackedShapes {
-  const visible = shapes.filter((s) => s.visible);
+  // only height shapes (those with WGSL) go through the fold; direct-paint surfaces are skipped
+  const visible = shapes.filter((s) => s.visible && getShapeType(s.typeId).wgsl);
   const totalPoints = visible.reduce((n, s) => n + s.controlPoints.length, 0);
   const records = new Float32Array(Math.max(visible.length, 1) * RECORD_F32);
   const points = new Float32Array(Math.max(totalPoints, 1) * 2);

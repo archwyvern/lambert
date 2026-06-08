@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { DocumentStore, EditorState } from "../document/store";
 import { addShape, updateShape } from "../document/docOps";
 import { getShapeType } from "../field/registry";
+import { createSurface } from "../field/surfaceOps";
 import { fromLocal } from "../field/transform";
 import { normalSigns } from "../document/schema";
 import { v2, Vec2 } from "../field/vec";
@@ -9,6 +10,7 @@ import { Gizmos } from "./Gizmos";
 import { LightPad } from "./LightPad";
 import { axisScaleFromDrag, constrainAxis, pickShape, pointsInBox, rotationFromDrag, snapAngle } from "./picking";
 import { PreviewRenderer } from "./preview";
+import { Surfaces } from "./Surfaces";
 import { canvasToScreen, fitViewport, screenToCanvas, Viewport, zoomAt } from "./viewport";
 import type { ToolMode } from "./tools";
 import type { ViewState } from "./App";
@@ -50,6 +52,8 @@ export function CanvasView(props: {
   const dragRef = useRef<Drag | null>(null);
   const spaceRef = useRef(false);
   const [marquee, setMarquee] = useState<{ a: Vec2; b: Vec2 } | null>(null);
+  const [penDraft, setPenDraft] = useState<Vec2[] | null>(null); // in-progress pen loop (canvas px)
+  const [penCursor, setPenCursor] = useState<Vec2 | null>(null);
 
   const doc = state.doc;
 
@@ -73,6 +77,18 @@ export function CanvasView(props: {
       .catch((err: unknown) => setGpuError(err instanceof Error ? err.message : String(err)));
     return () => ro.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // leaving the pen tool (or pressing Escape) abandons any in-progress loop
+  useEffect(() => {
+    if (tool !== "pen") setPenDraft(null);
+  }, [tool]);
+  useEffect(() => {
+    const esc = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") setPenDraft(null);
+    };
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
   }, []);
 
   // space = temporary pan (godot-style); tracked outside react state for the drag handlers
@@ -155,6 +171,22 @@ export function CanvasView(props: {
     if (e.button !== 0) return;
     const p = toCanvasPoint(e);
 
+    if (tool === "pen") {
+      // click drops vertices; clicking near the first one (>=3 verts) closes the loop into a
+      // filled surface. Stays in pen mode so you can draw the next one.
+      const draft = penDraft ?? [];
+      if (draft.length >= 3 && Math.hypot(p.x - draft[0]!.x, p.y - draft[0]!.y) * viewport.zoom < 10) {
+        const surf = createSurface(draft);
+        store.update((d) => ({ ...d, shapes: [...d.shapes, surf] }));
+        store.endGesture();
+        store.select(surf.id);
+        setPenDraft(null);
+      } else {
+        setPenDraft([...draft, p]);
+      }
+      return;
+    }
+
     // godot select-mode modifier overrides: alt=move, ctrl=rotate, ctrl+alt=scale
     const override =
       tool === "select"
@@ -236,6 +268,7 @@ export function CanvasView(props: {
   const onPointerMove = (e: React.PointerEvent): void => {
     const cp = toCanvasPoint(e);
     setCursor(v2(Math.floor(cp.x), Math.floor(cp.y)));
+    if (tool === "pen") setPenCursor(penDraft ? cp : null);
     const drag = dragRef.current;
     if (!drag) return;
     if (drag.kind === "pan") {
@@ -343,6 +376,37 @@ export function CanvasView(props: {
           </div>
         </div>
       ) : null}
+      {diffuseBytes ? <Surfaces doc={doc} viewport={viewport} /> : null}
+      {penDraft && penDraft.length > 0
+        ? (() => {
+            const sp = penDraft.map((v) => canvasToScreen(viewport, v));
+            const cur = penCursor ? canvasToScreen(viewport, penCursor) : sp[sp.length - 1]!;
+            const first = sp[0]!;
+            const closing = penDraft.length >= 3 && Math.hypot(cur.x - first.x, cur.y - first.y) < 10;
+            return (
+              <svg className="pointer-events-none absolute inset-0 h-full w-full">
+                <polyline
+                  points={[...sp, cur].map((p) => `${p.x},${p.y}`).join(" ")}
+                  fill="none"
+                  stroke="var(--color-accent)"
+                  strokeWidth={1.5}
+                  strokeDasharray="4 3"
+                />
+                {sp.map((p, i) => (
+                  <circle
+                    key={i}
+                    cx={p.x}
+                    cy={p.y}
+                    r={i === 0 && closing ? 6 : 4}
+                    fill={i === 0 && closing ? "var(--color-accent)" : "#ffffff"}
+                    stroke="var(--color-accent)"
+                    strokeWidth={1.5}
+                  />
+                ))}
+              </svg>
+            );
+          })()
+        : null}
       <Gizmos
         doc={doc}
         selectedId={state.selectedId}

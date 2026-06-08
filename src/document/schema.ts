@@ -20,6 +20,12 @@ const shapeSchema = z.object({
   }),
   params: z.record(z.string(), z.union([z.number(), z.string(), z.boolean()])),
   controlPoints: z.array(vec2Schema),
+  /** Surface-shape faces (typeId "surface"): loops of controlPoint indices + fill colors. */
+  surface: z
+    .object({
+      faces: z.array(z.object({ loop: z.array(z.number()), color: z.string() })),
+    })
+    .optional(),
   /** Legacy combine settings (op/blend); behavior now derives from the shape type. */
   combine: z.unknown().optional(),
   /** Legacy height multiplier; folded into scale.z on load. */

@@ -174,8 +174,8 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     const q = new URLSearchParams(location.search);
     if (!q.has("demo")) return;
-    void Promise.all([import("fast-png"), import("../field/fixtures")])
-      .then(([{ encode }, { goldenShapes }]) => {
+    void Promise.all([import("fast-png"), import("../field/fixtures"), import("../field/surfaceOps")])
+      .then(([{ encode }, { goldenShapes }, { createSurface }]) => {
       const w = 96;
       const h = 96;
       const data = new Uint8Array(w * h * 4);
@@ -185,7 +185,11 @@ export function App(): React.JSX.Element {
         data[i * 4 + 2] = 118;
         data[i * 4 + 3] = 255;
       }
-      const doc = { ...emptyDoc("demo.png", w, h), shapes: goldenShapes() };
+      // ?surface adds a demo painted triangle (capture aid)
+      const extra = q.has("surface")
+        ? [createSurface([v2(10, 10), v2(60, 16), v2(24, 58)])]
+        : [];
+      const doc = { ...emptyDoc("demo.png", w, h), shapes: [...goldenShapes(), ...extra] };
       store.reset(doc, null);
       setDiffuse({ bytes: encode({ width: w, height: h, data }), dir: null });
       const mode = q.get("mode");
