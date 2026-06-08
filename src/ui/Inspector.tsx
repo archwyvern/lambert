@@ -2,7 +2,7 @@ import type { DocumentStore, EditorState } from "../document/store";
 import { removeShape, reorderShape, updateShape } from "../document/docOps";
 import { polygonStats, regularPolygon, resamplePolyline } from "../field/controlPoints";
 import { canConvertToMesh, convertToMesh } from "../field/meshConvert";
-import { connectVerts } from "../field/meshOps";
+import { connectVerts, deleteVerts } from "../field/meshOps";
 import { getShapeType } from "../field/registry";
 import type { ShapeInstance } from "../field/types";
 import { Button, humanizeLabel, SectionLabel, SelectRow, SpinBox } from "./kit";
@@ -15,8 +15,9 @@ export function Inspector(props: {
   store: DocumentStore;
   state: EditorState;
   selVerts: number[];
+  setSelVerts: (v: number[]) => void;
 }): React.JSX.Element {
-  const { store, state, selVerts } = props;
+  const { store, state, selVerts, setSelVerts } = props;
   const shape = state.doc.shapes.find((s) => s.id === state.selectedId);
   if (!shape) {
     const doc = state.doc;
@@ -157,6 +158,23 @@ export function Inspector(props: {
               Connect Vertices
             </Button>
           ) : null}
+          <Button
+            variant="danger"
+            className="mt-1 w-full"
+            onClick={() => {
+              store.update((d) =>
+                updateShape(d, shape.id, (s) => {
+                  if (!s.mesh) return s;
+                  const r = deleteVerts(s.controlPoints, s.mesh, selVerts);
+                  return r ? { ...s, controlPoints: r.controlPoints, mesh: r.mesh } : s;
+                }),
+              );
+              commit();
+              setSelVerts([]);
+            }}
+          >
+            Delete {selVerts.length === 1 ? "Vertex" : "Vertices"}
+          </Button>
           <p className="mt-1 text-sm leading-snug text-fg-mid">Click an edge to add a vertex.</p>
         </>
       ) : null}

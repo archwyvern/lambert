@@ -52,6 +52,36 @@ export function splitEdge(
 }
 
 /**
+ * Delete a set of vertices: drop them, drop every triangle that referenced any of them, and
+ * re-index the survivors. Leaves a hole rather than re-triangulating (predictable). Returns
+ * null if nothing would remain to render (no surviving triangles) — caller should delete the
+ * whole shape instead.
+ */
+export function deleteVerts(
+  controlPoints: Vec2[],
+  mesh: MeshData,
+  remove: number[],
+): { controlPoints: Vec2[]; mesh: MeshData } | null {
+  const del = new Set(remove);
+  const remap = new Map<number, number>();
+  const keep: number[] = [];
+  controlPoints.forEach((_, i) => {
+    if (!del.has(i)) {
+      remap.set(i, keep.length);
+      keep.push(i);
+    }
+  });
+  const tris = mesh.tris
+    .filter((tri) => tri.every((v) => !del.has(v)))
+    .map((tri) => tri.map((v) => remap.get(v)!) as [number, number, number]);
+  if (tris.length === 0) return null;
+  return {
+    controlPoints: keep.map((i) => controlPoints[i]!),
+    mesh: { z: keep.map((i) => mesh.z[i]!), tris },
+  };
+}
+
+/**
  * Connect two vertices that are the opposite corners of a quad (two triangles sharing an
  * edge): flip the shared diagonal so the new edge runs between a and b. Returns null if the
  * two vertices don't form such a quad (e.g. they're already an edge, or unrelated). Winding

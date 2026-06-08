@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { connectVerts, meshEdges, splitEdge } from "../../src/field/meshOps";
+import { connectVerts, deleteVerts, meshEdges, splitEdge } from "../../src/field/meshOps";
 import type { MeshData } from "../../src/field/types";
 import { v2 } from "../../src/field/vec";
 
@@ -41,4 +41,17 @@ test("connectVerts: flips the quad diagonal from 0-2 to 1-3", () => {
 test("connectVerts: returns null when the verts don't form a flippable quad", () => {
   expect(connectVerts(quad, 0, 2)).toBeNull(); // 0-2 is already the shared edge
   expect(connectVerts(quad, 0, 0)).toBeNull();
+});
+
+test("deleteVerts: drops the vertex + its triangles and re-indexes survivors", () => {
+  // delete vertex 3 -> only tri [0,2,3] used it; tri [0,1,2] survives, re-indexed
+  const r = deleteVerts(quadCps, quad, [3]);
+  expect(r).not.toBeNull();
+  expect(r!.controlPoints).toEqual([v2(0, 0), v2(10, 0), v2(10, 10)]);
+  expect(r!.mesh.z).toEqual([0, 0, 10]);
+  expect(r!.mesh.tris).toEqual([[0, 1, 2]]);
+});
+
+test("deleteVerts: returns null when no triangle would survive", () => {
+  expect(deleteVerts(quadCps, quad, [0])).toBeNull(); // vertex 0 is in both triangles
 });
