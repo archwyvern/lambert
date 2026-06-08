@@ -2,6 +2,7 @@ import type { DocumentStore, EditorState } from "../document/store";
 import { removeShape, reorderShape, updateShape } from "../document/docOps";
 import { polygonStats, regularPolygon, resamplePolyline } from "../field/controlPoints";
 import { canConvertToMesh, convertToMesh } from "../field/meshConvert";
+import { connectVerts } from "../field/meshOps";
 import { getShapeType } from "../field/registry";
 import type { ShapeInstance } from "../field/types";
 import { Button, humanizeLabel, SectionLabel, SelectRow, SpinBox } from "./kit";
@@ -140,6 +141,23 @@ export function Inspector(props: {
             }
             onCommit={commit}
           />
+          {selVerts.length === 2 ? (
+            <Button
+              className="mt-1 w-full"
+              onClick={() => {
+                store.update((d) =>
+                  updateShape(d, shape.id, (s) => {
+                    const t = s.mesh && connectVerts(s.mesh, selVerts[0]!, selVerts[1]!);
+                    return t ? { ...s, mesh: t } : s;
+                  }),
+                );
+                commit();
+              }}
+            >
+              Connect Vertices
+            </Button>
+          ) : null}
+          <p className="mt-1 text-sm leading-snug text-fg-mid">Click an edge to add a vertex.</p>
         </>
       ) : null}
       <div className="my-3 border-t border-border" />

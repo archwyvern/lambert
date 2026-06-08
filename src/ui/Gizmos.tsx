@@ -6,6 +6,7 @@ import type { FlatlandDoc } from "../document/schema";
 import { fromLocal, toLocal } from "../field/transform";
 import type { ShapeInstance } from "../field/types";
 import { v2, Vec2 } from "../field/vec";
+import { meshEdges, splitEdge } from "../field/meshOps";
 import { axisScaleFromDrag, groupScaleFactor, pointsBounds, scalePointsAbout } from "./picking";
 import type { ToolMode } from "./tools";
 import { canvasToScreen, screenToCanvas, Viewport } from "./viewport";
@@ -180,6 +181,27 @@ export function Gizmos(props: {
     },
   };
 
+  // click a mesh edge -> insert a vertex at the projected point, splitting adjacent triangles
+  const edgeSplit = (ia: number, ib: number) => (e: React.PointerEvent): void => {
+    e.stopPropagation();
+    const p = toLocal(shape.transform, eventCanvasPoint(e));
+    const a = shape.controlPoints[ia]!;
+    const b = shape.controlPoints[ib]!;
+    const abx = b.x - a.x;
+    const aby = b.y - a.y;
+    const t = Math.max(0, Math.min(1, ((p.x - a.x) * abx + (p.y - a.y) * aby) / (abx * abx + aby * aby || 1)));
+    const newIndex = shape.controlPoints.length;
+    store.update((d) =>
+      updateShape(d, shape.id, (s) => {
+        if (!s.mesh) return s;
+        const r = splitEdge(s.controlPoints, s.mesh, ia, ib, t);
+        return { ...s, controlPoints: r.controlPoints, mesh: r.mesh };
+      }),
+    );
+    store.endGesture();
+    setSelVerts([newIndex]);
+  };
+
   // a vertex dot: shift-click toggles it in the selection; plain drag moves the selection
   // (selecting just this one first if it wasn't already selected)
   const vertexHandle = (i: number) => ({
@@ -276,6 +298,28 @@ export function Gizmos(props: {
                 className={`pointer-events-auto ${nwse ? "cursor-nwse-resize" : "cursor-nesw-resize"}`}
                 {...cornerScale(i)}
               />
+            );
+          })
+        : null}
+      {/* mesh edges: faint lines + fat transparent hit-lines (click to insert a vertex) */}
+      {vertHandles && shape.mesh
+        ? meshEdges(shape.mesh).map(([ia, ib], k) => {
+            const a = canvasToScreen(viewport, localToCanvas(shape, shape.controlPoints[ia]!));
+            const b = canvasToScreen(viewport, localToCanvas(shape, shape.controlPoints[ib]!));
+            return (
+              <g key={`edge${k}`}>
+                <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="var(--color-accent)" strokeWidth={1} opacity={0.45} />
+                <line
+                  x1={a.x}
+                  y1={a.y}
+                  x2={b.x}
+                  y2={b.y}
+                  stroke="transparent"
+                  strokeWidth={9}
+                  className="pointer-events-auto cursor-copy"
+                  onPointerDown={edgeSplit(ia, ib)}
+                />
+              </g>
             );
           })
         : null}
