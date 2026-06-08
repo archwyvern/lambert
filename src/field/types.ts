@@ -18,11 +18,20 @@ export interface ParamSpecEnum {
 export type ParamSpec = ParamSpecPx | ParamSpecEnum;
 
 export interface ControlPointSpec {
-  /** rings = two equal-count polygon rings in one array (first half base, second half top). */
-  kind: "none" | "polygon" | "polyline" | "rings";
+  /** rings = two equal-count polygon rings in one array (first half base, second half top).
+   *  mesh = free triangulated surface; topology in ShapeInstance.mesh, xy in controlPoints. */
+  kind: "none" | "polygon" | "polyline" | "rings" | "mesh";
   min?: number;
   /** Default control points in shape-local px. */
   default: Vec2[];
+}
+
+/** A mesh-plane's topology: per-vertex height (index-aligned with controlPoints) + triangles. */
+export interface MeshData {
+  /** Height in px at each vertex (scale.z multiplies, pos.z elevates — like every shape). */
+  z: number[];
+  /** Triangles as triples of vertex indices into controlPoints. */
+  tris: [number, number, number][];
 }
 
 export interface ShapeInstance {
@@ -33,6 +42,8 @@ export interface ShapeInstance {
   transform: Transform2D;
   params: Record<string, number | string | boolean>;
   controlPoints: Vec2[];
+  /** Present only for mesh-plane shapes (typeId "mesh"); aligns with controlPoints. */
+  mesh?: MeshData;
   visible: boolean;
   locked: boolean;
 }

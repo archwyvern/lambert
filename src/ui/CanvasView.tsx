@@ -2,7 +2,7 @@ import { CubeRegular } from "@fluentui/react-icons";
 import { useEffect, useRef, useState } from "react";
 import type { DocumentStore, EditorState } from "../document/store";
 import { addShape, updateShape } from "../document/docOps";
-import { getShapeType } from "../field/registry";
+import { getShapeType, shapeMaxHeight } from "../field/registry";
 import { fromLocal } from "../field/transform";
 import { normalSigns } from "../document/schema";
 import { v2, Vec2 } from "../field/vec";
@@ -168,11 +168,7 @@ export function CanvasView(props: {
     const r = rendererRef.current;
     if (!r || !diffuseBytes || !ready) return;
     const maxH = doc.shapes.reduce(
-      (m, s) =>
-        Math.max(
-          m,
-          Math.abs(s.transform.pos.z) + (getShapeType(s.typeId).nominalHeight ?? 0) * Math.abs(s.transform.scale.z),
-        ),
+      (m, s) => Math.max(m, Math.abs(s.transform.pos.z) + shapeMaxHeight(s) * Math.abs(s.transform.scale.z)),
       8,
     );
     r.requestRender(doc.source.width, doc.source.height, {

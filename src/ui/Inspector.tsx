@@ -1,6 +1,7 @@
 import type { DocumentStore, EditorState } from "../document/store";
 import { removeShape, reorderShape, updateShape } from "../document/docOps";
 import { polygonStats, regularPolygon, resamplePolyline } from "../field/controlPoints";
+import { canConvertToMesh, convertToMesh } from "../field/meshConvert";
 import { getShapeType } from "../field/registry";
 import type { ShapeInstance } from "../field/types";
 import { Button, humanizeLabel, SectionLabel, SelectRow, SpinBox } from "./kit";
@@ -51,10 +52,12 @@ export function Inspector(props: { store: DocumentStore; state: EditorState }): 
   return (
     <div>
       <div className="mb-2 border-b border-border pb-1.5 text-md font-semibold text-fg">{type.name}</div>
-      {type.controlPoints.kind !== "none" || Object.keys(type.params).length > 0 ? (
+      {type.controlPoints.kind !== "none" && type.controlPoints.kind !== "mesh" ? (
+        <SectionLabel>Parameters</SectionLabel>
+      ) : Object.keys(type.params).length > 0 ? (
         <SectionLabel>Parameters</SectionLabel>
       ) : null}
-      {type.controlPoints.kind !== "none" ? (
+      {type.controlPoints.kind !== "none" && type.controlPoints.kind !== "mesh" ? (
         <SpinBox
           label={type.controlPoints.kind === "rings" ? "vertices / ring" : "vertices"}
           value={
@@ -183,6 +186,22 @@ export function Inspector(props: { store: DocumentStore; state: EditorState }): 
         }
         onCommit={commit}
       />
+      {canConvertToMesh(shape) ? (
+        <>
+          <div className="my-3 border-t border-border" />
+          <Button
+            className="w-full"
+            onClick={() => {
+              const m = convertToMesh(shape);
+              store.update((d) => ({ ...d, shapes: d.shapes.map((s) => (s.id === shape.id ? m : s)) }));
+              commit();
+              store.select(m.id);
+            }}
+          >
+            Convert to Mesh
+          </Button>
+        </>
+      ) : null}
       <div className="my-3 border-t border-border" />
       <div className="flex gap-1">
         <Button
