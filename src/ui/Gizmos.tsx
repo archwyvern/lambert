@@ -3,6 +3,7 @@ import type { DocumentStore } from "../document/store";
 import { updateShape } from "../document/docOps";
 import type { FlatlandDoc } from "../document/schema";
 
+import { insertVertOnEdge, surfaceEdges } from "../field/surfaceOps";
 import { fromLocal, toLocal } from "../field/transform";
 import type { ShapeInstance } from "../field/types";
 import { v2, Vec2 } from "../field/vec";
@@ -180,6 +181,27 @@ export function Gizmos(props: {
     },
   };
 
+  // click a surface edge -> insert a vertex at the projected point (splits that loop segment)
+  const surfaceInsert = (va: number, vb: number) => (e: React.PointerEvent): void => {
+    e.stopPropagation();
+    const p = toLocal(shape.transform, eventCanvasPoint(e));
+    const a = shape.controlPoints[va]!;
+    const b = shape.controlPoints[vb]!;
+    const abx = b.x - a.x;
+    const aby = b.y - a.y;
+    const t = Math.max(0, Math.min(1, ((p.x - a.x) * abx + (p.y - a.y) * aby) / (abx * abx + aby * aby || 1)));
+    const newIndex = shape.controlPoints.length;
+    store.update((d) =>
+      updateShape(d, shape.id, (s) => {
+        if (!s.surface) return s;
+        const r = insertVertOnEdge(s.controlPoints, s.surface, va, vb, t);
+        return { ...s, controlPoints: r.controlPoints, surface: r.surface };
+      }),
+    );
+    store.endGesture();
+    setSelVerts([newIndex]);
+  };
+
   // a vertex dot: shift-click toggles it in the selection; plain drag moves the selection
   // (selecting just this one first if it wasn't already selected)
   const vertexHandle = (i: number) => ({
@@ -276,6 +298,28 @@ export function Gizmos(props: {
                 className={`pointer-events-auto ${nwse ? "cursor-nwse-resize" : "cursor-nesw-resize"}`}
                 {...cornerScale(i)}
               />
+            );
+          })
+        : null}
+      {/* surface edges: faint lines + fat transparent hit-lines (click to insert a vertex) */}
+      {vertHandles && shape.surface
+        ? surfaceEdges(shape.surface).map(({ a: va, b: vb }, k) => {
+            const a = canvasToScreen(viewport, localToCanvas(shape, shape.controlPoints[va]!));
+            const b = canvasToScreen(viewport, localToCanvas(shape, shape.controlPoints[vb]!));
+            return (
+              <g key={`se${k}`}>
+                <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="var(--color-accent)" strokeWidth={1} opacity={0.5} />
+                <line
+                  x1={a.x}
+                  y1={a.y}
+                  x2={b.x}
+                  y2={b.y}
+                  stroke="transparent"
+                  strokeWidth={9}
+                  className="pointer-events-auto cursor-copy"
+                  onPointerDown={surfaceInsert(va, vb)}
+                />
+              </g>
             );
           })
         : null}

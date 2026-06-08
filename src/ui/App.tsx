@@ -2,6 +2,7 @@ import "./styles.css";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { DocumentStore } from "../document/store";
 import { duplicateShape, removeShape, updateShape } from "../document/docOps";
+import { deleteSurfaceVerts } from "../field/surfaceOps";
 import { emptyDoc } from "../document/schema";
 import { diffusePathByStore, exportNx, openImageFlow, openProjectFlow, saveFlow } from "../document/io";
 import { dirname } from "../document/paths";
@@ -37,9 +38,11 @@ export function App(): React.JSX.Element {
   );
   const [view, setView] = useState<ViewState>({ mode: "lit", opacity: 1, lightDir: [-0.5, -0.5, 0.7] });
   const [tool, setTool] = useState<ToolMode>("select");
-  // selected control-point indices (shared: the canvas marquee/handles drive it, the
-  // inspector edits vertex height); cleared whenever the selected shape changes
+  // selected control-point indices (shared: the canvas marquee/handles drive it); cleared
+  // whenever the selected shape changes
   const [selVerts, setSelVerts] = useState<number[]>([]);
+  const selVertsRef = useRef(selVerts); // live read inside the stable keydown listener
+  selVertsRef.current = selVerts;
   const [diffuse, setDiffuse] = useState<{ bytes: Uint8Array; dir: string | null } | null>(null);
   const [leftWidth, setLeftWidth] = usePersistentState("panel:left", 208);
   const [rightWidth, setRightWidth] = usePersistentState("panel:right", 288);
@@ -195,7 +198,8 @@ export function App(): React.JSX.Element {
       const mode = q.get("mode");
       if (mode && (VIEW_MODES as string[]).includes(mode)) setView((v) => ({ ...v, mode: mode as ViewMode }));
       const select = q.get("select");
-      if (select) store.select(doc.shapes.find((s) => s.id === select)?.id ?? doc.shapes[0]?.id ?? null);
+      if (select === "surface") store.select(doc.shapes.find((s) => s.surface)?.id ?? null);
+      else if (select) store.select(doc.shapes.find((s) => s.id === select)?.id ?? doc.shapes[0]?.id ?? null);
       const t = q.get("tool");
       if (t && t in TOOL_KEYS) setTool(TOOL_KEYS[t]!);
       (window as unknown as { __flatlandDemoReady?: boolean }).__flatlandDemoReady = true;
@@ -214,7 +218,23 @@ export function App(): React.JSX.Element {
       if (key in TOOL_KEYS) {
         setTool(TOOL_KEYS[key]!);
       } else if ((e.key === "Delete" || e.key === "Backspace") && id) {
-        store.update((d) => removeShape(d, id));
+        // on a surface with vertices selected, Delete removes those vertices (dropping the
+        // shape if its last face dies); otherwise it deletes the whole shape
+        const shape = store.state.doc.shapes.find((s) => s.id === id);
+        const verts = selVertsRef.current;
+        if (shape?.surface && verts.length > 0) {
+          const r = deleteSurfaceVerts(shape.controlPoints, shape.surface, verts);
+          if (r) {
+            store.update((d) =>
+              updateShape(d, id, (s) => ({ ...s, controlPoints: r.controlPoints, surface: r.surface })),
+            );
+          } else {
+            store.update((d) => removeShape(d, id));
+          }
+          setSelVerts([]);
+        } else {
+          store.update((d) => removeShape(d, id));
+        }
         store.endGesture();
       } else if (key === "v") {
         setView((s) => ({ ...s, mode: VIEW_MODES[(VIEW_MODES.indexOf(s.mode) + 1) % VIEW_MODES.length]! }));
