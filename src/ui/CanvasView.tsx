@@ -39,9 +39,11 @@ export function CanvasView(props: {
   view: ViewState;
   tool: ToolMode;
   diffuseBytes: Uint8Array | null;
+  selVerts: number[];
+  setSelVerts: (v: number[] | ((p: number[]) => number[])) => void;
   onLightChange: (dir: [number, number, number]) => void;
 }): React.JSX.Element {
-  const { store, state, view, tool, diffuseBytes, onLightChange } = props;
+  const { store, state, view, tool, diffuseBytes, selVerts, setSelVerts, onLightChange } = props;
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<PreviewRenderer | null>(null);
@@ -50,7 +52,6 @@ export function CanvasView(props: {
   const [ready, setReady] = useState(false);
   const [cursor, setCursor] = useState<Vec2 | null>(null);
   const dragRef = useRef<Drag | null>(null);
-  const [selVerts, setSelVerts] = useState<number[]>([]);
   const [marquee, setMarquee] = useState<{ a: Vec2; b: Vec2 } | null>(null);
   const [show3d, setShow3d] = usePersistentState("panel:3d", false);
   const [dock3d, setDock3d] = usePersistentState<Dock3D>("panel:3d:dock", "docked");
@@ -106,9 +107,6 @@ export function CanvasView(props: {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // vertex selection is per-shape: clear it whenever the selected shape changes
-  useEffect(() => setSelVerts([]), [state.selectedId]);
 
   // menu-driven zoom (accelerators are owned by the application menu)
   useEffect(() => {

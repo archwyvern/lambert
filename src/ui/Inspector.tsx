@@ -10,8 +10,12 @@ const toDeg = (rad: number): number => Number(((rad * 180) / Math.PI).toFixed(1)
 const toRad = (deg: number): number => (deg * Math.PI) / 180;
 const safeScale = (v: number): number => Math.max(0.05, v); // no negative/mirrored scale
 
-export function Inspector(props: { store: DocumentStore; state: EditorState }): React.JSX.Element {
-  const { store, state } = props;
+export function Inspector(props: {
+  store: DocumentStore;
+  state: EditorState;
+  selVerts: number[];
+}): React.JSX.Element {
+  const { store, state, selVerts } = props;
   const shape = state.doc.shapes.find((s) => s.id === state.selectedId);
   if (!shape) {
     const doc = state.doc;
@@ -117,6 +121,27 @@ export function Inspector(props: { store: DocumentStore; state: EditorState }): 
           />
         ),
       )}
+      {shape.mesh && selVerts.length > 0 ? (
+        <>
+          <div className="my-3 border-t border-border" />
+          <SectionLabel>{selVerts.length === 1 ? "Vertex" : `${selVerts.length} Vertices`}</SectionLabel>
+          <SpinBox
+            label="height"
+            value={Number((shape.mesh.z[selVerts[0]!] ?? 0).toFixed(1))}
+            step={1}
+            onChange={(v) =>
+              live(
+                (s) => ({
+                  ...s,
+                  mesh: s.mesh ? { ...s.mesh, z: s.mesh.z.map((z, i) => (selVerts.includes(i) ? v : z)) } : s.mesh,
+                }),
+                "vz",
+              )
+            }
+            onCommit={commit}
+          />
+        </>
+      ) : null}
       <div className="my-3 border-t border-border" />
       <SectionLabel>Transform</SectionLabel>
       <SpinBox

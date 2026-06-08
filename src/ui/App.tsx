@@ -37,6 +37,9 @@ export function App(): React.JSX.Element {
   );
   const [view, setView] = useState<ViewState>({ mode: "lit", opacity: 1, lightDir: [-0.5, -0.5, 0.7] });
   const [tool, setTool] = useState<ToolMode>("select");
+  // selected control-point indices (shared: the canvas marquee/handles drive it, the
+  // inspector edits vertex height); cleared whenever the selected shape changes
+  const [selVerts, setSelVerts] = useState<number[]>([]);
   const [diffuse, setDiffuse] = useState<{ bytes: Uint8Array; dir: string | null } | null>(null);
   const [leftWidth, setLeftWidth] = usePersistentState("panel:left", 208);
   const [rightWidth, setRightWidth] = usePersistentState("panel:right", 288);
@@ -44,6 +47,8 @@ export function App(): React.JSX.Element {
 
   // status messages land in the bottom bar (not a popup); the last one persists until replaced
   const notify = (msg: string, tone: ToastState["tone"] = "info"): void => setToast({ msg, tone });
+
+  useEffect(() => setSelVerts([]), [state.selectedId]);
 
   const run = (p: Promise<unknown>): void =>
     void p
@@ -246,12 +251,14 @@ export function App(): React.JSX.Element {
             view={view}
             tool={tool}
             diffuseBytes={diffuse?.bytes ?? null}
+            selVerts={selVerts}
+            setSelVerts={setSelVerts}
             onLightChange={(d) => setView((v) => ({ ...v, lightDir: d }))}
           />
         </main>
         <Sash onDrag={(dx) => setRightWidth((w) => clampPanel(w - dx))} />
         <aside className="shrink-0 overflow-y-auto bg-bg p-3" style={{ width: rightWidth }}>
-          <Inspector store={store} state={state} />
+          <Inspector store={store} state={state} selVerts={selVerts} />
         </aside>
       </div>
       <StatusBar
