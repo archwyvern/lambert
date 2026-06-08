@@ -64,6 +64,8 @@ export interface ShapeType {
   defaultCombine?: CombineOp;
   /** Intrinsic tallness in px at scale.z = 1 (extrude basis). */
   nominalHeight?: number;
+  /** Hidden from the library palette even though it has WGSL (created by conversion). */
+  libraryHidden?: boolean;
   /**
    * WGSL mirror of eval: `fn shape_<id>(p: vec2f, base: u32) -> vec2f` returning
    * (height, sd). Params read at base+13+declarationIndex; enums as option index.

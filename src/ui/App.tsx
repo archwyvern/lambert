@@ -169,8 +169,8 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     const q = new URLSearchParams(location.search);
     if (!q.has("demo")) return;
-    void Promise.all([import("fast-png"), import("../field/fixtures")])
-      .then(([{ encode }, { goldenShapes }]) => {
+    void Promise.all([import("fast-png"), import("../field/fixtures"), import("../field/meshConvert")])
+      .then(([{ encode }, { goldenShapes }, { convertToMesh }]) => {
       const w = 96;
       const h = 96;
       const data = new Uint8Array(w * h * 4);
@@ -180,7 +180,9 @@ export function App(): React.JSX.Element {
         data[i * 4 + 2] = 118;
         data[i * 4 + 3] = 255;
       }
-      const doc = { ...emptyDoc("demo.png", w, h), shapes: goldenShapes() };
+      // ?mesh converts the slab to a mesh plane (capture/demo aid)
+      const shapes = goldenShapes().map((s) => (q.has("mesh") && s.id === "slab" ? convertToMesh(s) : s));
+      const doc = { ...emptyDoc("demo.png", w, h), shapes };
       store.reset(doc, null);
       setDiffuse({ bytes: encode({ width: w, height: h, data }), dir: null });
       const mode = q.get("mode");

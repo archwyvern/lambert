@@ -14,6 +14,38 @@ export const Mesh = defineShapeType({
   name: "Mesh",
   params: {},
   controlPoints: { kind: "mesh", default: [] },
+  libraryHidden: true, // created by conversion, never dragged from the palette
+  // record slots: 22 = meshTriStart (vec4 index), 23 = meshTriCount; verts from meshTris
+  wgsl: /* wgsl */ `
+fn shape_mesh(p: vec2f, base: u32) -> vec2f {
+  let triStart = u32(rec(base, 22u));
+  let triCount = u32(rec(base, 23u));
+  for (var t = 0u; t < triCount; t = t + 1u) {
+    let o = triStart + t * 3u;
+    let a = meshTris[o];
+    let b = meshTris[o + 1u];
+    let c = meshTris[o + 2u];
+    let det = (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
+    if (abs(det) < 1e-9) { continue; }
+    let uu = ((p.x - a.x) * (c.y - a.y) - (c.x - a.x) * (p.y - a.y)) / det;
+    let vv = ((b.x - a.x) * (p.y - a.y) - (p.x - a.x) * (b.y - a.y)) / det;
+    if (uu >= -1e-4 && vv >= -1e-4 && uu + vv <= 1.0001) {
+      return vec2f(a.z + uu * (b.z - a.z) + vv * (c.z - a.z), -1.0);
+    }
+  }
+  var d = 1e9;
+  for (var t = 0u; t < triCount; t = t + 1u) {
+    let o = triStart + t * 3u;
+    let a = meshTris[o].xy;
+    let b = meshTris[o + 1u].xy;
+    let c = meshTris[o + 2u].xy;
+    d = min(d, sd_segment(p, a, b));
+    d = min(d, sd_segment(p, b, c));
+    d = min(d, sd_segment(p, c, a));
+  }
+  return vec2f(0.0, d);
+}
+`,
   eval(p, shape) {
     const m = shape.mesh;
     const cps = shape.controlPoints;

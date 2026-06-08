@@ -21,7 +21,7 @@ export function Library(props: { enabled: boolean }): React.JSX.Element {
       <SectionLabel>Shapes</SectionLabel>
       <div className="grid grid-cols-2 gap-1.5">
         {allShapeTypes()
-          .filter((t) => t.wgsl)
+          .filter((t) => t.wgsl && !t.libraryHidden)
           .map((t) => (
             <button
               key={t.id}
