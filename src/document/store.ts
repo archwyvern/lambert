@@ -1,7 +1,7 @@
-import type { FlatlandDoc } from "./schema";
+import type { LambertDoc } from "./schema";
 
 export interface EditorState {
-  doc: FlatlandDoc;
+  doc: LambertDoc;
   selectedId: string | null;
   dirty: boolean;
   docPath: string | null;
@@ -15,12 +15,12 @@ export interface UpdateOptions {
 /** Snapshot-undo document store. Framework-agnostic; React binds via useSyncExternalStore. */
 export class DocumentStore {
   private listeners = new Set<() => void>();
-  private undoStack: FlatlandDoc[] = [];
-  private redoStack: FlatlandDoc[] = [];
+  private undoStack: LambertDoc[] = [];
+  private redoStack: LambertDoc[] = [];
   private gestureKey: string | null = null;
   private current: EditorState;
 
-  constructor(doc: FlatlandDoc, docPath: string | null) {
+  constructor(doc: LambertDoc, docPath: string | null) {
     this.current = { doc, selectedId: null, dirty: false, docPath };
   }
 
@@ -46,12 +46,12 @@ export class DocumentStore {
     for (const fn of this.listeners) fn();
   }
 
-  private survivingSelection(doc: FlatlandDoc): string | null {
+  private survivingSelection(doc: LambertDoc): string | null {
     const id = this.current.selectedId;
     return id && doc.shapes.some((s) => s.id === id) ? id : null;
   }
 
-  update(mutate: (doc: FlatlandDoc) => FlatlandDoc, opts: UpdateOptions = {}): void {
+  update(mutate: (doc: LambertDoc) => LambertDoc, opts: UpdateOptions = {}): void {
     const prev = this.current.doc;
     const next = mutate(prev);
     if (next === prev) return;
@@ -90,7 +90,7 @@ export class DocumentStore {
   }
 
   /** Replace the whole document (open/new/session-restore). Clears history. */
-  reset(doc: FlatlandDoc, docPath: string | null, opts: { dirty?: boolean } = {}): void {
+  reset(doc: LambertDoc, docPath: string | null, opts: { dirty?: boolean } = {}): void {
     this.undoStack = [];
     this.redoStack = [];
     this.gestureKey = null;

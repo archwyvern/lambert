@@ -113,9 +113,9 @@ test("store: selection, dirty, markSaved, subscribe", () => {
   const id = store.state.doc.shapes[0]!.id;
   store.select(id);
   expect(store.state.selectedId).toBe(id);
-  store.markSaved("/tmp/x.flatland");
+  store.markSaved("/tmp/x.lambert");
   expect(store.state.dirty).toBe(false);
-  expect(store.state.docPath).toBe("/tmp/x.flatland");
+  expect(store.state.docPath).toBe("/tmp/x.lambert");
   expect(notified).toBeGreaterThanOrEqual(3);
   unsub();
 });
@@ -132,9 +132,9 @@ test("store: deleting the selected shape deselects", () => {
 test("store: reset clears history and selection", () => {
   const store = mkStore();
   store.update((d) => addShape(d, "dome", v2(0, 0)));
-  store.reset(emptyDoc("other.png", 32, 32), "/p/other.flatland");
+  store.reset(emptyDoc("other.png", 32, 32), "/p/other.lambert");
   expect(store.canUndo).toBe(false);
-  expect(store.state.docPath).toBe("/p/other.flatland");
+  expect(store.state.docPath).toBe("/p/other.lambert");
   expect(store.state.dirty).toBe(false);
 });
 

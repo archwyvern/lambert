@@ -2,13 +2,13 @@ import "./styles.css";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { DocumentStore } from "../document/store";
 import { duplicateShape, removeShape, updateShape } from "../document/docOps";
-import { deleteSurfaceVerts } from "../field/surfaceOps";
+import { deleteVerts } from "../field/meshOps";
 import { emptyDoc } from "../document/schema";
 import { diffusePathByStore, exportNx, openImageFlow, openProjectFlow, saveFlow } from "../document/io";
 import { dirname } from "../document/paths";
 import { buildSessionJson, parseSessionJson } from "../document/session";
-import { v2 } from "../field/vec";
 import { CanvasView } from "./CanvasView";
+import { ToolPalette } from "./ToolPalette";
 import { getHost } from "./host";
 import { Inspector } from "./Inspector";
 import { Layers } from "./Layers";
@@ -25,9 +25,11 @@ const clampPanel = (w: number): number => Math.min(480, Math.max(160, w));
 
 export interface ViewState {
   mode: ViewMode;
-  /** Overlay opacity for height/normal views (1 = 100%). */
+  /** Overlay opacity for the normal view (1 = 100%). */
   opacity: number;
   lightDir: [number, number, number];
+  /** Raster view: the pixelated exported output instead of the crisp display-res vector view. */
+  raster: boolean;
 }
 
 export function App(): React.JSX.Element {
@@ -36,7 +38,7 @@ export function App(): React.JSX.Element {
     (fn) => store.subscribe(fn),
     () => store.state,
   );
-  const [view, setView] = useState<ViewState>({ mode: "lit", opacity: 1, lightDir: [-0.5, -0.5, 0.7] });
+  const [view, setView] = useState<ViewState>({ mode: "lit", opacity: 1, lightDir: [-0.5, -0.5, 0.7], raster: false });
   const [tool, setTool] = useState<ToolMode>("select");
   // selected control-point indices (shared: the canvas marquee/handles drive it); cleared
   // whenever the selected shape changes
@@ -111,7 +113,7 @@ export function App(): React.JSX.Element {
           return;
         case "zoom-fit":
         case "zoom-100":
-          window.dispatchEvent(new CustomEvent("flatland-zoom", { detail: action }));
+          window.dispatchEvent(new CustomEvent("lambert-zoom", { detail: action }));
           return;
       }
     });
@@ -177,8 +179,8 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     const q = new URLSearchParams(location.search);
     if (!q.has("demo")) return;
-    void Promise.all([import("fast-png"), import("../field/fixtures"), import("../field/surfaceOps")])
-      .then(([{ encode }, { goldenShapes }, { createSurface }]) => {
+    void Promise.all([import("fast-png"), import("../field/fixtures"), import("../field/meshConvert")])
+      .then(([{ encode }, { goldenShapes }, { convertToMesh }]) => {
       const w = 96;
       const h = 96;
       const data = new Uint8Array(w * h * 4);
@@ -188,21 +190,43 @@ export function App(): React.JSX.Element {
         data[i * 4 + 2] = 118;
         data[i * 4 + 3] = 255;
       }
-      // ?surface adds a demo painted triangle (capture aid)
-      const extra = q.has("surface")
-        ? [createSurface([v2(10, 10), v2(60, 16), v2(24, 58)])]
-        : [];
-      const doc = { ...emptyDoc("demo.png", w, h), shapes: [...goldenShapes(), ...extra] };
+      // ?mesh converts the slab to a mesh plane (capture/demo aid)
+      const shapes = goldenShapes().map((s) => (q.has("mesh") && s.id === "slab" ? convertToMesh(s) : s));
+      const doc = { ...emptyDoc("demo.png", w, h), shapes };
       store.reset(doc, null);
       setDiffuse({ bytes: encode({ width: w, height: h, data }), dir: null });
       const mode = q.get("mode");
       if (mode && (VIEW_MODES as string[]).includes(mode)) setView((v) => ({ ...v, mode: mode as ViewMode }));
+      if (q.has("raster")) setView((v) => ({ ...v, raster: true }));
       const select = q.get("select");
-      if (select === "surface") store.select(doc.shapes.find((s) => s.surface)?.id ?? null);
-      else if (select) store.select(doc.shapes.find((s) => s.id === select)?.id ?? doc.shapes[0]?.id ?? null);
+      if (select) store.select(doc.shapes.find((s) => s.id === select)?.id ?? doc.shapes[0]?.id ?? null);
       const t = q.get("tool");
       if (t && t in TOOL_KEYS) setTool(TOOL_KEYS[t]!);
-      (window as unknown as { __flatlandDemoReady?: boolean }).__flatlandDemoReady = true;
+      const markReady = (): void => {
+        (window as unknown as { __lambertDemoReady?: boolean }).__lambertDemoReady = true;
+      };
+      // ?cmenu: select two verts and pop the vertex context menu (capture aid for the menu)
+      if (q.has("cmenu")) {
+        const onEdge = q.get("cmenu") === "edge";
+        // stage 1: select two verts (after the shape-select effect has cleared the vertex selection)
+        setTimeout(() => {
+          if (!onEdge) setSelVerts([0, 2]);
+          // stage 2: once committed + re-rendered the handles, synthesize the right-click
+          setTimeout(() => {
+            const sel = onEdge ? "svg line.cursor-context-menu" : "svg circle.cursor-move";
+            const c = document.querySelector<SVGElement>(sel);
+            if (c) {
+              const r = c.getBoundingClientRect();
+              c.dispatchEvent(
+                new MouseEvent("contextmenu", { bubbles: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 }),
+              );
+            }
+            markReady();
+          }, 150);
+        }, 150);
+      } else {
+        markReady();
+      }
     })
       .catch((err: unknown) => console.error("demo bootstrap failed", err));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -218,19 +242,17 @@ export function App(): React.JSX.Element {
       if (key in TOOL_KEYS) {
         setTool(TOOL_KEYS[key]!);
       } else if ((e.key === "Delete" || e.key === "Backspace") && id) {
-        // on a surface with vertices selected, Delete removes those vertices (dropping the
-        // shape if its last face dies); otherwise it deletes the whole shape
+        // on a mesh with vertices selected, Delete removes those vertices; otherwise the shape
         const shape = store.state.doc.shapes.find((s) => s.id === id);
         const verts = selVertsRef.current;
-        if (shape?.surface && verts.length > 0) {
-          const r = deleteSurfaceVerts(shape.controlPoints, shape.surface, verts);
-          if (r) {
-            store.update((d) =>
-              updateShape(d, id, (s) => ({ ...s, controlPoints: r.controlPoints, surface: r.surface })),
-            );
-          } else {
-            store.update((d) => removeShape(d, id));
-          }
+        if (shape?.mesh && verts.length > 0) {
+          store.update((d) =>
+            updateShape(d, id, (s) => {
+              if (!s.mesh) return s;
+              const r = deleteVerts(s.controlPoints, s.mesh, verts);
+              return r ? { ...s, controlPoints: r.controlPoints, mesh: r.mesh } : s;
+            }),
+          );
           setSelVerts([]);
         } else {
           store.update((d) => removeShape(d, id));
@@ -259,12 +281,13 @@ export function App(): React.JSX.Element {
 
   return (
     <div className="flex h-screen flex-col bg-bg text-base text-fg">
-      <Toolbar store={store} state={state} view={view} setView={setView} tool={tool} setTool={setTool} />
+      <Toolbar store={store} state={state} view={view} setView={setView} />
       <div className="flex min-h-0 flex-1">
         <aside className="flex shrink-0 flex-col gap-4 bg-bg p-3" style={{ width: leftWidth }}>
           <Library enabled={!!diffuse} />
           <Layers store={store} state={state} />
         </aside>
+        <ToolPalette tool={tool} setTool={setTool} />
         <Sash onDrag={(dx) => setLeftWidth((w) => clampPanel(w + dx))} />
         <main className="relative min-w-0 flex-1 bg-[var(--color-viewport-bg)]">
           <CanvasView
@@ -280,7 +303,7 @@ export function App(): React.JSX.Element {
         </main>
         <Sash onDrag={(dx) => setRightWidth((w) => clampPanel(w - dx))} />
         <aside className="shrink-0 overflow-y-auto bg-bg p-3" style={{ width: rightWidth }}>
-          <Inspector store={store} state={state} />
+          <Inspector store={store} state={state} selVerts={selVerts} />
         </aside>
       </div>
       <StatusBar

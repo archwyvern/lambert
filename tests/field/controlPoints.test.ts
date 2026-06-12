@@ -1,5 +1,12 @@
 import { expect, test } from "vitest";
-import { polygonStats, regularPolygon, resamplePolyline } from "../../src/field/controlPoints";
+import {
+  frustumStrip,
+  polygonStats,
+  regularPolygon,
+  regularPolygonAligned,
+  resamplePolyline,
+  ringPhase,
+} from "../../src/field/controlPoints";
 import { v2 } from "../../src/field/vec";
 
 test("regularPolygon: n=4 is an axis-aligned square", () => {
@@ -34,4 +41,43 @@ test("resamplePolyline spaces points evenly by arc length", () => {
   expect(bent[1]!.x).toBeCloseTo(10);
   expect(bent[1]!.y).toBeCloseTo(0);
   expect(bent[2]).toEqual(v2(10, 10));
+});
+
+test("regularPolygonAligned: vertex 0 points along the reference angle, all on the radius", () => {
+  const ring = regularPolygonAligned(v2(0, 0), 10, 5, Math.PI / 2);
+  expect(ring[0]!.x).toBeCloseTo(0);
+  expect(ring[0]!.y).toBeCloseTo(10);
+  for (const p of ring) expect(Math.hypot(p.x, p.y)).toBeCloseTo(10);
+});
+
+test("ringPhase + regularPolygonAligned keep two rings index-aligned (no twist)", () => {
+  const outer = regularPolygon(v2(0, 0), 30, 4);
+  const inner = regularPolygonAligned(v2(0, 0), 15, 4, ringPhase(outer));
+  for (let i = 0; i < 4; i++) {
+    const ao = Math.atan2(outer[i]!.y, outer[i]!.x);
+    const ai = Math.atan2(inner[i]!.y, inner[i]!.x);
+    expect(Math.cos(ao - ai)).toBeCloseTo(1); // base[i] over top[i]
+  }
+});
+
+test("frustumStrip: one triangle per step, every vertex referenced (any counts)", () => {
+  for (const [nB, nT] of [[4, 4], [4, 5], [5, 4], [3, 7], [8, 3]] as const) {
+    const { tris } = frustumStrip(nB, nT);
+    expect(tris.length).toBe(nB + nT);
+    const outerSeen = new Set<number>();
+    const innerSeen = new Set<number>();
+    for (const tri of tris) {
+      const outerCount = tri.filter(([r]) => r === 0).length;
+      expect(outerCount === 1 || outerCount === 2).toBe(true); // a valid strip step
+      for (const [r, idx] of tri) (r === 0 ? outerSeen : innerSeen).add(idx);
+    }
+    expect(outerSeen.size).toBe(nB);
+    expect(innerSeen.size).toBe(nT);
+  }
+});
+
+test("frustumStrip: connectors pair each step, indices in range", () => {
+  const { connectors } = frustumStrip(4, 5);
+  expect(connectors.length).toBe(9);
+  expect(connectors.every(([o, i]) => o >= 0 && o < 4 && i >= 0 && i < 5)).toBe(true);
 });

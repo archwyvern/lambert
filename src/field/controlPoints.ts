@@ -45,3 +45,65 @@ export function resamplePolyline(points: Vec2[], n: number): Vec2[] {
   }
   return out;
 }
+
+/**
+ * Regular n-gon whose first vertex points along refAngle (radians), the rest stepping by 2π/n
+ * in regularPolygon's winding. Use when regenerating one frustum ring so its vertices stay
+ * phase-locked to the sibling ring (vertex 0 over vertex 0) — otherwise the slope twists.
+ */
+export function regularPolygonAligned(centroid: Vec2, radius: number, n: number, refAngle: number): Vec2[] {
+  const out: Vec2[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = refAngle + (i * 2 * Math.PI) / n;
+    out.push(v2(centroid.x + radius * Math.cos(a), centroid.y + radius * Math.sin(a)));
+  }
+  return out;
+}
+
+/** Direction (radians) from a ring's centroid to its first vertex — the phase a sibling aligns to. */
+export function ringPhase(points: Vec2[]): number {
+  const { centroid } = polygonStats(points);
+  return Math.atan2(points[0]!.y - centroid.y, points[0]!.x - centroid.x);
+}
+
+/** One slope-band triangle: three [ring, index] corners (ring 0 = outer/h0, ring 1 = inner/h1). */
+export type FrustumTri = [[number, number], [number, number], [number, number]];
+export interface FrustumStrip {
+  tris: FrustumTri[];
+  /** Outer<->inner connector edges (the strip diagonals) as [outerIndex, innerIndex]. */
+  connectors: Array<[number, number]>;
+}
+
+const stripCache = new Map<string, FrustumStrip>();
+
+/**
+ * Triangulate the slope band between an outer ring (nB verts) and inner ring (nT verts) as a
+ * two-pointer strip: walk both loops by normalized position, advancing whichever ring's next
+ * vertex comes first and emitting one triangle per step. Handles ANY counts — equal counts give
+ * the quad-per-side split, unequal counts fan the extra vertices (4 outer + 5 inner is fine).
+ * Rings must be phase-aligned and wound the same way for clean triangles. Cached + shared by
+ * count pair, so callers must treat the result as read-only.
+ */
+export function frustumStrip(nB: number, nT: number): FrustumStrip {
+  const key = `${nB},${nT}`;
+  const hit = stripCache.get(key);
+  if (hit) return hit;
+  const tris: FrustumTri[] = [];
+  const connectors: Array<[number, number]> = [];
+  let i = 0;
+  let j = 0;
+  while (i < nB || j < nT) {
+    connectors.push([i % nB, j % nT]);
+    const advanceOuter = j >= nT || (i < nB && (i + 1) / nB <= (j + 1) / nT);
+    if (advanceOuter) {
+      tris.push([[0, i % nB], [0, (i + 1) % nB], [1, j % nT]]);
+      i++;
+    } else {
+      tris.push([[0, i % nB], [1, j % nT], [1, (j + 1) % nT]]);
+      j++;
+    }
+  }
+  const strip = { tris, connectors };
+  stripCache.set(key, strip);
+  return strip;
+}

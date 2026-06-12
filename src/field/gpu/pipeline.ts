@@ -76,7 +76,7 @@ export class GpuFieldRenderer {
    * conceptual canvas, returning dense arrays. slopeScale feeds the normal pass.
    */
   private async evaluateTile(
-    packed: { records: Float32Array; points: Float32Array; count: number },
+    packed: { records: Float32Array; points: Float32Array; meshTris: Float32Array; count: number },
     originX: number,
     originY: number,
     width: number,
@@ -104,6 +104,7 @@ export class GpuFieldRenderer {
     u32[2] = packed.count;
     f32[3] = originX;
     f32[4] = originY;
+    f32[5] = 1; // step: doc-res tiles sample 1 doc px per output px
     d.queue.writeBuffer(uniforms, 0, uniformData);
 
     const recordsBuf = d.createBuffer({
@@ -116,6 +117,11 @@ export class GpuFieldRenderer {
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
     d.queue.writeBuffer(pointsBuf, 0, packed.points);
+    const meshBuf = d.createBuffer({
+      size: packed.meshTris.byteLength,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+    d.queue.writeBuffer(meshBuf, 0, packed.meshTris);
 
     const normalUniforms = d.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     const nu = new ArrayBuffer(16);
@@ -130,6 +136,7 @@ export class GpuFieldRenderer {
         { binding: 1, resource: { buffer: recordsBuf } },
         { binding: 2, resource: { buffer: pointsBuf } },
         { binding: 3, resource: fieldTex.createView() },
+        { binding: 4, resource: { buffer: meshBuf } },
       ],
     });
     const normalBind = d.createBindGroup({
@@ -182,11 +189,11 @@ export class GpuFieldRenderer {
     normalRead.unmap();
     fieldTex.destroy();
     normalTex.destroy();
-    for (const b of [uniforms, recordsBuf, pointsBuf, normalUniforms, fieldRead, normalRead]) b.destroy();
+    for (const b of [uniforms, recordsBuf, pointsBuf, meshBuf, normalUniforms, fieldRead, normalRead]) b.destroy();
     return { width, height, heightMap, mask, normals };
   }
 
-  /** Live-preview path: fold + normals at full resolution into GPU textures, no readback. */
+  /** Doc-res fold + normals into GPU textures, no readback. Consumed by the 3D preview pass. */
   renderToTextures(
     shapes: ShapeInstance[],
     width: number,
@@ -213,6 +220,7 @@ export class GpuFieldRenderer {
     const uniforms = d.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     const ub = new ArrayBuffer(32);
     new Uint32Array(ub).set([width, height, packed.count], 0);
+    new Float32Array(ub)[5] = 1; // step = 1: doc-res sampling (origin stays 0)
     d.queue.writeBuffer(uniforms, 0, ub);
     const recordsBuf = d.createBuffer({
       size: packed.records.byteLength,
@@ -224,10 +232,15 @@ export class GpuFieldRenderer {
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
     d.queue.writeBuffer(pointsBuf, 0, packed.points);
+    const meshBuf = d.createBuffer({
+      size: packed.meshTris.byteLength,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+    d.queue.writeBuffer(meshBuf, 0, packed.meshTris);
     const normalUniforms = d.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     const nb = new ArrayBuffer(16);
     new Uint32Array(nb).set([width, height], 0);
-    new Float32Array(nb)[2] = 1;
+    new Float32Array(nb)[2] = 1; // slopeScale
     d.queue.writeBuffer(normalUniforms, 0, nb);
 
     const foldBind = d.createBindGroup({
@@ -237,6 +250,7 @@ export class GpuFieldRenderer {
         { binding: 1, resource: { buffer: recordsBuf } },
         { binding: 2, resource: { buffer: pointsBuf } },
         { binding: 3, resource: fieldTex.createView() },
+        { binding: 4, resource: { buffer: meshBuf } },
       ],
     });
     const normalBind = d.createBindGroup({
@@ -257,7 +271,7 @@ export class GpuFieldRenderer {
     pass.dispatchWorkgroups(Math.ceil(width / 8), Math.ceil(height / 8));
     pass.end();
     d.queue.submit([enc.finish()]);
-    for (const b of [uniforms, recordsBuf, pointsBuf, normalUniforms]) b.destroy();
+    for (const b of [uniforms, recordsBuf, pointsBuf, meshBuf, normalUniforms]) b.destroy();
     return { fieldTex, normalTex };
   }
 

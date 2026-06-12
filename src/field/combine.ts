@@ -11,12 +11,12 @@ export function combineHeight(op: CombineOp, H: number, h: number): number {
 }
 
 /**
- * Per-shape spatial influence: 1 inside the footprint (sd <= 0), smoothstep falloff to 0
- * over 1 px outside — the anti-aliased edge, doubling as the authored-mask contribution
- * (NX alpha).
+ * Per-shape spatial influence = box-filter edge coverage CENTERED on the footprint boundary:
+ * 1 a half-pixel inside, ~0.5 at the edge, 0 a half-pixel outside. Smoothstep falloff over that
+ * ±0.5px window so the effect (and the NX mask) doesn't bleed a full pixel past the edge — an
+ * axis-aligned edge on a pixel boundary lands pixel-sharp. Doubles as the authored-mask (NX alpha).
  */
 export function influence(sdCanvas: number): number {
-  if (sdCanvas <= 0) return 1;
-  const t = clamp(1 - sdCanvas, 0, 1);
+  const t = clamp(0.5 - sdCanvas, 0, 1);
   return t * t * (3 - 2 * t);
 }

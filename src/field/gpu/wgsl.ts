@@ -4,24 +4,35 @@ export const RECORD_F32 = 24;
 export const PARAMS_OFFSET = 13;
 export const MAX_PARAMS = 8;
 
-/** Record layout (f32 slots): see pack.ts — typeIndex, op, (free), scaleZ, posXY,
- *  cos/sin(-rot), invScaleXY, distScale, cpStart, cpCount, params[8], elevation, pad[2]. */
-const COMMON = /* wgsl */ `
+/** Record layout (f32 slots): see pack.ts — typeIndex, op, ringSplit, scaleZ, posXY,
+ *  cos/sin(-rot), invScaleXY, distScale, cpStart, cpCount, params[8], elevation,
+ *  meshTriStart, meshTriCount. */
+
+// Fold-compute-only bindings: the per-tile uniforms and the storage-texture output. The composite
+// fragment does NOT include these (it has its own uniforms + a diffuse texture instead).
+const FOLD_IO = /* wgsl */ `
 struct Uniforms {
   width: u32,
   height: u32,
   shapeCount: u32,
   originX: f32,
   originY: f32,
-  _pad0: f32,
+  step: f32, // doc px per output px (1 for doc-res + tiling)
   _pad1: f32,
   _pad2: f32,
 }
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
+@group(0) @binding(3) var outField: texture_storage_2d<rg32float, write>;
+`;
+
+// Shared field library: shape buffers + all eval functions + fold_at(). Included by BOTH the fold
+// compute shader and the 2D composite fragment so the editor evaluates the exact same field math.
+const FIELD_LIB = /* wgsl */ `
 @group(0) @binding(1) var<storage, read> records: array<f32>;
 @group(0) @binding(2) var<storage, read> points: array<vec2f>;
-@group(0) @binding(3) var outField: texture_storage_2d<rg32float, write>;
+// mesh-plane triangles: 2 vec4 per vertex (pos x,y,height,gradX then gradY,_,_,_), 3 verts/triangle
+@group(0) @binding(4) var<storage, read> meshTris: array<vec4f>;
 
 const RECORD: u32 = ${RECORD_F32}u;
 
@@ -41,8 +52,7 @@ fn combine_height(op: u32, bigH: f32, h: f32) -> f32 {
 }
 
 fn influence(sd: f32) -> f32 {
-  if (sd <= 0.0) { return 1.0; }
-  let t = clamp(1.0 - sd, 0.0, 1.0);
+  let t = clamp(0.5 - sd, 0.0, 1.0); // box-filter coverage centered on the edge (no 1px bleed)
   return t * t * (3.0 - 2.0 * t);
 }
 
@@ -65,6 +75,8 @@ fn sd_segment(p: vec2f, a: vec2f, b: vec2f) -> f32 {
 }
 
 fn sd_polygon(p: vec2f, start: u32, count: u32) -> f32 {
+  if (count == 1u) { return length(p - points[start]); }                        // point (cone apex)
+  if (count == 2u) { return sd_segment(p, points[start], points[start + 1u]); } // segment (ridge top)
   var d = dot(p - points[start], p - points[start]);
   var s = 1.0;
   var j = count - 1u;
@@ -104,6 +116,26 @@ fn shape_spine(p: vec2f, base: u32, h: f32, halfW: f32, prof: u32) -> vec2f {
 }
 `;
 
+// The ordered fold over all shapes at one point -> vec2f(height, mask). Shared by fold + composite.
+const FOLD_AT = /* wgsl */ `
+fn fold_at(p: vec2f, count: u32) -> vec2f {
+  var bigH = 0.0;
+  var bigM = 0.0;
+  for (var s = 0u; s < count; s = s + 1u) {
+    let base = s * RECORD;
+    let smp = eval_shape(u32(rec(base, 0u)), to_local(base, p), base);
+    let inf = influence(smp.y * rec(base, 10u));
+    if (inf <= 0.0) { continue; }
+    let h = rec(base, 21u) + smp.x * rec(base, 3u); // elevation + extrude
+    let next = mix(bigH, combine_height(u32(rec(base, 1u)), bigH, h), inf);
+    // mask only where the shape actually changed the surface (sunk shapes leave none)
+    bigM = max(bigM, min(1.0, abs(next - bigH) * 2.0));
+    bigH = next;
+  }
+  return vec2f(bigH, bigM);
+}
+`;
+
 function dispatchSwitch(): string {
   const cases = allShapeTypes()
     .filter((t) => t.wgsl)
@@ -128,31 +160,24 @@ const FOLD_MAIN = /* wgsl */ `
 @compute @workgroup_size(8, 8)
 fn fold(@builtin(global_invocation_id) gid: vec3u) {
   if (gid.x >= u.width || gid.y >= u.height) { return; }
-  let p = vec2f(f32(gid.x) + 0.5 + u.originX, f32(gid.y) + 0.5 + u.originY);
-  var bigH = 0.0;
-  var bigM = 0.0;
-  for (var s = 0u; s < u.shapeCount; s = s + 1u) {
-    let base = s * RECORD;
-    let smp = eval_shape(u32(rec(base, 0u)), to_local(base, p), base);
-    let inf = influence(smp.y * rec(base, 10u));
-    if (inf <= 0.0) { continue; }
-    let h = rec(base, 21u) + smp.x * rec(base, 3u); // elevation + extrude
-    let next = mix(bigH, combine_height(u32(rec(base, 1u)), bigH, h), inf);
-    // mask only where the shape actually changed the surface (sunk shapes leave none)
-    bigM = max(bigM, min(1.0, abs(next - bigH) * 2.0));
-    bigH = next;
-  }
-  textureStore(outField, vec2u(gid.xy), vec4f(bigH, bigM, 0.0, 0.0));
+  let p = vec2f((f32(gid.x) + 0.5) * u.step + u.originX, (f32(gid.y) + 0.5) * u.step + u.originY);
+  let r = fold_at(p, u.shapeCount);
+  textureStore(outField, vec2u(gid.xy), vec4f(r.x, r.y, 0.0, 0.0));
 }
 `;
 
-/** Assemble the fold compute module from the registry. Deterministic given import order. */
-export function buildFoldWgsl(): string {
+/** Shared field-eval library (buffers + shape fns + fold_at), included by fold + composite. */
+export function buildFieldLibWgsl(): string {
   const shapeFns = allShapeTypes()
     .filter((t) => t.wgsl)
     .map((t) => t.wgsl!)
     .join("\n");
-  return COMMON + shapeFns + dispatchSwitch() + FOLD_MAIN;
+  return FIELD_LIB + shapeFns + dispatchSwitch() + FOLD_AT;
+}
+
+/** Assemble the fold compute module from the registry. Deterministic given import order. */
+export function buildFoldWgsl(): string {
+  return FOLD_IO + buildFieldLibWgsl() + FOLD_MAIN;
 }
 
 /** typeIndex assignment used by pack.ts — must match dispatchSwitch ordering. */

@@ -43,10 +43,10 @@ function fakeHost(files: Record<string, Uint8Array>): Host {
 test("loadProject resolves the diffuse relative to the doc and checks dims", async () => {
   const doc = emptyDoc("hull.df.png", 32, 16);
   const files: Record<string, Uint8Array> = {
-    "/proj/hull.flatland": new TextEncoder().encode(serializeDoc(doc)),
+    "/proj/hull.lambert": new TextEncoder().encode(serializeDoc(doc)),
     "/proj/hull.df.png": gray(32, 16),
   };
-  const loaded = await loadProject(fakeHost(files), "/proj/hull.flatland");
+  const loaded = await loadProject(fakeHost(files), "/proj/hull.lambert");
   expect(loaded.doc.source.width).toBe(32);
   expect(loaded.diffuseBytes.length).toBeGreaterThan(0);
   expect(loaded.diffuseDir).toBe("/proj");
@@ -55,10 +55,10 @@ test("loadProject resolves the diffuse relative to the doc and checks dims", asy
 test("loadProject rejects on dimension mismatch (NX contract)", async () => {
   const doc = emptyDoc("hull.df.png", 64, 64);
   const files = {
-    "/p/hull.flatland": new TextEncoder().encode(serializeDoc(doc)),
+    "/p/hull.lambert": new TextEncoder().encode(serializeDoc(doc)),
     "/p/hull.df.png": gray(32, 32),
   };
-  await expect(loadProject(fakeHost(files), "/p/hull.flatland")).rejects.toThrow(/64x64/);
+  await expect(loadProject(fakeHost(files), "/p/hull.lambert")).rejects.toThrow(/64x64/);
 });
 
 test("buildNxExport: nx bytes + sibling path + empty-mask warning", () => {

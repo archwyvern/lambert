@@ -7,6 +7,8 @@ export interface ParamSpecPx {
   default: number;
   min?: number;
   max?: number;
+  /** Inspector scrub/step increment (default 1). Use a fraction for 0..1 sliders. */
+  step?: number;
 }
 
 export interface ParamSpecEnum {
@@ -18,23 +20,24 @@ export interface ParamSpecEnum {
 export type ParamSpec = ParamSpecPx | ParamSpecEnum;
 
 export interface ControlPointSpec {
-  /** rings = two equal-count polygon rings in one array (first half base, second half top). */
-  kind: "none" | "polygon" | "polyline" | "rings";
+  /** rings = two polygon rings in one array (base then top; counts differ via ringSplit).
+   *  mesh = free triangulated surface; topology in ShapeInstance.mesh, xy in controlPoints. */
+  kind: "none" | "polygon" | "polyline" | "rings" | "mesh";
   min?: number;
   /** Default control points in shape-local px. */
   default: Vec2[];
 }
 
-/** A filled region of a Surface shape: a closed loop of controlPoint indices + a fill color. */
-export interface SurfaceFace {
-  loop: number[];
-  /** Hex fill color "#rrggbb" (direct paint — written straight to the output, no derivation). */
-  color: string;
-}
-
-/** Direct-paint surface: faces over the shape's controlPoints (vertices). No height. */
-export interface SurfaceData {
-  faces: SurfaceFace[];
+/** A mesh-plane's topology: per-vertex height (index-aligned with controlPoints) + triangles. */
+export interface MeshData {
+  /** Height in px at each vertex (scale.z multiplies, pos.z elevates — like every shape). */
+  z: number[];
+  /** Triangular FACES as triples of vertex indices into controlPoints. */
+  tris: [number, number, number][];
+  /** All connectivity edges (faces + loose) as undirected [lo,hi] pairs. Absent = derive from tris. */
+  edges?: [number, number][];
+  /** Transient per-vertex height gradient for the smoothness pass; computed per render, never stored. */
+  grad?: [number, number][];
 }
 
 export interface ShapeInstance {
@@ -45,8 +48,13 @@ export interface ShapeInstance {
   transform: Transform2D;
   params: Record<string, number | string | boolean>;
   controlPoints: Vec2[];
-  /** Present only for Surface shapes (typeId "surface"); faces index controlPoints. */
-  surface?: SurfaceData;
+  /** "rings" shapes (plateau): index where the top ring begins = base-ring vertex count.
+   *  Absent = equal split (controlPoints.length / 2); lets inner/outer counts differ. */
+  ringSplit?: number;
+  /** When true, this shape's vertices + position snap to the ½-pixel grid on every edit. */
+  gridSnap?: boolean;
+  /** Present only for mesh-plane shapes (typeId "mesh"); aligns with controlPoints. */
+  mesh?: MeshData;
   visible: boolean;
   locked: boolean;
 }
@@ -67,6 +75,8 @@ export interface ShapeType {
   defaultCombine?: CombineOp;
   /** Intrinsic tallness in px at scale.z = 1 (extrude basis). */
   nominalHeight?: number;
+  /** Hidden from the library palette even though it has WGSL (created by conversion). */
+  libraryHidden?: boolean;
   /**
    * WGSL mirror of eval: `fn shape_<id>(p: vec2f, base: u32) -> vec2f` returning
    * (height, sd). Params read at base+13+declarationIndex; enums as option index.

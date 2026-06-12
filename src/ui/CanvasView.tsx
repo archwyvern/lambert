@@ -1,16 +1,19 @@
+import { CubeRegular } from "@fluentui/react-icons";
 import { useEffect, useRef, useState } from "react";
 import type { DocumentStore, EditorState } from "../document/store";
 import { addShape, updateShape } from "../document/docOps";
 import { getShapeType } from "../field/registry";
-import { createSurface } from "../field/surfaceOps";
+import { snapHalf } from "../field/snap";
 import { fromLocal } from "../field/transform";
 import { normalSigns } from "../document/schema";
 import { v2, Vec2 } from "../field/vec";
 import { Gizmos } from "./Gizmos";
 import { LightPad } from "./LightPad";
+import { usePersistentState } from "./persist";
 import { axisScaleFromDrag, constrainAxis, pickShape, pointsInBox, rotationFromDrag, snapAngle } from "./picking";
 import { PreviewRenderer } from "./preview";
-import { Surfaces } from "./Surfaces";
+import { Dock3D, DOCKED_SIZE, HEADER3D, Preview3DPanel } from "./Preview3DPanel";
+import { use3DCamera } from "./use3DCamera";
 import { canvasToScreen, fitViewport, screenToCanvas, Viewport, zoomAt } from "./viewport";
 import type { ToolMode } from "./tools";
 import type { ViewState } from "./App";
@@ -52,10 +55,14 @@ export function CanvasView(props: {
   const dragRef = useRef<Drag | null>(null);
   const spaceRef = useRef(false);
   const [marquee, setMarquee] = useState<{ a: Vec2; b: Vec2 } | null>(null);
-  const [penDraft, setPenDraft] = useState<Vec2[] | null>(null); // in-progress pen loop (canvas px)
-  const [penCursor, setPenCursor] = useState<Vec2 | null>(null);
+  const [show3d, setShow3d] = usePersistentState("panel:3d", false);
+  const [dock3d, setDock3d] = usePersistentState<Dock3D>("panel:3d:dock", "docked");
+  const [hostSize, setHostSize] = useState({ w: 1, h: 1 });
+  const canvas3dRef = useRef<HTMLCanvasElement>(null);
+  const cam3d = use3DCamera();
 
   const doc = state.doc;
+  const full = show3d && dock3d === "full";
 
   // init renderer + canvas sizing
   useEffect(() => {
@@ -63,6 +70,7 @@ export function CanvasView(props: {
     const canvas = canvasRef.current!;
     const resize = (): void => {
       const r = host.getBoundingClientRect();
+      setHostSize({ w: Math.max(1, Math.floor(r.width)), h: Math.max(1, Math.floor(r.height)) });
       canvas.width = Math.max(1, Math.floor(r.width * devicePixelRatio));
       canvas.height = Math.max(1, Math.floor(r.height * devicePixelRatio));
     };
@@ -77,18 +85,6 @@ export function CanvasView(props: {
       .catch((err: unknown) => setGpuError(err instanceof Error ? err.message : String(err)));
     return () => ro.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // leaving the pen tool (or pressing Escape) abandons any in-progress loop
-  useEffect(() => {
-    if (tool !== "pen") setPenDraft(null);
-  }, [tool]);
-  useEffect(() => {
-    const esc = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") setPenDraft(null);
-    };
-    window.addEventListener("keydown", esc);
-    return () => window.removeEventListener("keydown", esc);
   }, []);
 
   // space = temporary pan (godot-style); tracked outside react state for the drag handlers
@@ -122,9 +118,38 @@ export function CanvasView(props: {
         });
       }
     };
-    window.addEventListener("flatland-zoom", onZoom);
-    return () => window.removeEventListener("flatland-zoom", onZoom);
+    window.addEventListener("lambert-zoom", onZoom);
+    return () => window.removeEventListener("lambert-zoom", onZoom);
   }, [doc.source.width, doc.source.height]);
+
+  // demo/capture hook: ?p3d opens the 3D view (docked, or filling the editor with &full3d);
+  // in demo mode without it, force the 2D view (persisted panel state must not leak into captures)
+  useEffect(() => {
+    const q = new URLSearchParams(location.search);
+    if (q.has("p3d")) {
+      setShow3d(true);
+      setDock3d(q.has("full3d") ? "full" : "docked");
+    } else if (q.has("demo")) {
+      setShow3d(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 3D canvas CSS size: docked = fixed mini-view; full = fills the editor area
+  const c3w = full ? hostSize.w : DOCKED_SIZE;
+  const c3h = full ? hostSize.h - HEADER3D : DOCKED_SIZE;
+  const focal3d = cam3d.focal(doc.source.width, doc.source.height, c3w, c3h);
+
+  // attach the embedded 3D canvas while open; resize the backing store to the current mode
+  useEffect(() => {
+    const r = rendererRef.current;
+    const canvas = canvas3dRef.current;
+    if (!ready || !r || !show3d || !canvas) return;
+    canvas.width = Math.max(1, Math.floor(c3w * devicePixelRatio));
+    canvas.height = Math.max(1, Math.floor(c3h * devicePixelRatio));
+    r.attach3D(canvas);
+    return () => r.attach3D(null);
+  }, [ready, show3d, diffuseBytes, c3w, c3h]);
 
   // upload diffuse when it changes; refit the view to the (possibly new) doc dims
   useEffect(() => {
@@ -138,22 +163,15 @@ export function CanvasView(props: {
   useEffect(() => {
     const r = rendererRef.current;
     if (!r || !diffuseBytes || !ready) return;
-    const maxH = doc.shapes.reduce(
-      (m, s) =>
-        Math.max(
-          m,
-          Math.abs(s.transform.pos.z) + (getShapeType(s.typeId).nominalHeight ?? 0) * Math.abs(s.transform.scale.z),
-        ),
-      8,
-    );
     r.requestRender(doc.source.width, doc.source.height, {
       shapes: doc.shapes,
       viewport,
       mode: view.mode,
       opacity: view.opacity,
       lightDir: view.lightDir,
-      heightRange: [-maxH, maxH],
       normalSigns: normalSigns(doc.normalDirs),
+      raster: view.raster,
+      orbit3d: show3d ? cam3d.orbit : null,
     });
   });
 
@@ -170,22 +188,6 @@ export function CanvasView(props: {
     }
     if (e.button !== 0) return;
     const p = toCanvasPoint(e);
-
-    if (tool === "pen") {
-      // click drops vertices; clicking near the first one (>=3 verts) closes the loop into a
-      // filled surface. Stays in pen mode so you can draw the next one.
-      const draft = penDraft ?? [];
-      if (draft.length >= 3 && Math.hypot(p.x - draft[0]!.x, p.y - draft[0]!.y) * viewport.zoom < 10) {
-        const surf = createSurface(draft);
-        store.update((d) => ({ ...d, shapes: [...d.shapes, surf] }));
-        store.endGesture();
-        store.select(surf.id);
-        setPenDraft(null);
-      } else {
-        setPenDraft([...draft, p]);
-      }
-      return;
-    }
 
     // godot select-mode modifier overrides: alt=move, ctrl=rotate, ctrl+alt=scale
     const override =
@@ -268,7 +270,6 @@ export function CanvasView(props: {
   const onPointerMove = (e: React.PointerEvent): void => {
     const cp = toCanvasPoint(e);
     setCursor(v2(Math.floor(cp.x), Math.floor(cp.y)));
-    if (tool === "pen") setPenCursor(penDraft ? cp : null);
     const drag = dragRef.current;
     if (!drag) return;
     if (drag.kind === "pan") {
@@ -295,10 +296,14 @@ export function CanvasView(props: {
       if (e.shiftKey) ({ dx, dy } = constrainAxis(dx, dy)); // godot move-mode axis lock
       store.update(
         (d) =>
-          updateShape(d, drag.id, (s) => ({
-            ...s,
-            transform: { ...s.transform, pos: { ...s.transform.pos, x: drag.startPos.x + dx, y: drag.startPos.y + dy } },
-          })),
+          updateShape(d, drag.id, (s) => {
+            const x = drag.startPos.x + dx;
+            const y = drag.startPos.y + dy;
+            const pos = s.gridSnap
+              ? { ...s.transform.pos, x: snapHalf(x), y: snapHalf(y) }
+              : { ...s.transform.pos, x, y };
+            return { ...s, transform: { ...s.transform, pos } };
+          }),
         { coalesce: `move:${drag.id}` },
       );
       return;
@@ -339,7 +344,7 @@ export function CanvasView(props: {
   const onDrop = (e: React.DragEvent): void => {
     e.preventDefault();
     if (!diffuseBytes) return; // no document: nothing to author against
-    const typeId = e.dataTransfer.getData("application/x-flatland-shape");
+    const typeId = e.dataTransfer.getData("application/x-lambert-shape");
     if (!typeId) return;
     const rect = hostRef.current!.getBoundingClientRect();
     const p = screenToCanvas(viewport, v2(e.clientX - rect.left, e.clientY - rect.top));
@@ -376,37 +381,6 @@ export function CanvasView(props: {
           </div>
         </div>
       ) : null}
-      {diffuseBytes ? <Surfaces doc={doc} viewport={viewport} /> : null}
-      {penDraft && penDraft.length > 0
-        ? (() => {
-            const sp = penDraft.map((v) => canvasToScreen(viewport, v));
-            const cur = penCursor ? canvasToScreen(viewport, penCursor) : sp[sp.length - 1]!;
-            const first = sp[0]!;
-            const closing = penDraft.length >= 3 && Math.hypot(cur.x - first.x, cur.y - first.y) < 10;
-            return (
-              <svg className="pointer-events-none absolute inset-0 h-full w-full">
-                <polyline
-                  points={[...sp, cur].map((p) => `${p.x},${p.y}`).join(" ")}
-                  fill="none"
-                  stroke="var(--color-accent)"
-                  strokeWidth={1.5}
-                  strokeDasharray="4 3"
-                />
-                {sp.map((p, i) => (
-                  <circle
-                    key={i}
-                    cx={p.x}
-                    cy={p.y}
-                    r={i === 0 && closing ? 6 : 4}
-                    fill={i === 0 && closing ? "var(--color-accent)" : "#ffffff"}
-                    stroke="var(--color-accent)"
-                    strokeWidth={1.5}
-                  />
-                ))}
-              </svg>
-            );
-          })()
-        : null}
       <Gizmos
         doc={doc}
         selectedId={state.selectedId}
@@ -441,6 +415,29 @@ export function CanvasView(props: {
           <LightPad lightDir={view.lightDir} onChange={onLightChange} radius={34} />
           <span className="text-sm uppercase tracking-[var(--tracking-tight)] text-fg-mid">light</span>
         </div>
+      ) : null}
+      {diffuseBytes && show3d ? (
+        <Preview3DPanel
+          mode={dock3d}
+          canvasRef={canvas3dRef}
+          canvasW={c3w}
+          canvasH={c3h}
+          onToggleSize={() => setDock3d(full ? "docked" : "full")}
+          onClose={() => setShow3d(false)}
+          onCanvasDown={cam3d.onCanvasDown(doc.source.width, doc.source.height, c3w)}
+          onWheel={cam3d.onWheel(doc.source.width, doc.source.height)}
+          zoomBy={cam3d.zoomBy}
+          focal={focal3d}
+        />
+      ) : null}
+      {diffuseBytes && !show3d ? (
+        <button
+          title="3D preview"
+          className="absolute right-3 bottom-8 flex h-[26px] w-[30px] items-center justify-center border border-border bg-surface2/90 text-fg-mid hover:bg-hover hover:text-fg"
+          onClick={() => setShow3d(true)}
+        >
+          <CubeRegular style={{ fontSize: 15 }} />
+        </button>
       ) : null}
       {diffuseBytes ? (
         <div className="pointer-events-none absolute bottom-2 left-2 flex gap-3 border border-border bg-surface2/90 px-2 py-0.5 text-sm tabular-nums text-fg-mid">

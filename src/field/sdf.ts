@@ -8,9 +8,12 @@ export function sdSegment(p: Vec2, a: Vec2, b: Vec2): number {
   return len(sub(pa, scale(ba, h)));
 }
 
-/** Exact signed distance to a simple polygon (negative inside). Winding-independent. */
+/** Exact signed distance to a simple polygon (negative inside). Winding-independent. A
+ *  degenerate ring has no interior: 1 point -> distance to it (cone apex), 2 -> to the segment. */
 export function sdPolygon(p: Vec2, v: Vec2[]): number {
   const n = v.length;
+  if (n === 1) return len(sub(p, v[0]!));
+  if (n === 2) return sdSegment(p, v[0]!, v[1]!);
   let d = dot2(sub(p, v[0]!));
   let s = 1.0;
   for (let i = 0, j = n - 1; i < n; j = i++) {

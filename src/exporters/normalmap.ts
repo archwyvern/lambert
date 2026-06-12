@@ -3,6 +3,7 @@ import { NormalDirs, normalSigns } from "../document/schema";
 import { clamp } from "../field/vec";
 
 export const q8 = (v: number): number => Math.round(clamp(v, 0, 1) * 255);
+export const q16 = (v: number): number => Math.round(clamp(v, 0, 1) * 65535);
 
 /**
  * Generic tangent-space normal map. Input normals are image-space (y-down); channel

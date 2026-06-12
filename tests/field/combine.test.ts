@@ -8,10 +8,10 @@ test("combineHeight ops", () => {
   expect(combineHeight("carve", 10, -2)).toBe(10); // negative cut never raises
 });
 
-test("influence: 1 inside, smoothstep over 1px outside, 0 beyond", () => {
-  expect(influence(-5)).toBe(1);
-  expect(influence(0)).toBe(1);
-  expect(influence(0.5)).toBeCloseTo(0.5);
-  expect(influence(1)).toBe(0);
+test("influence: box-filter coverage centered on the edge (no 1px bleed)", () => {
+  expect(influence(-5)).toBe(1); // deep inside
+  expect(influence(-0.5)).toBe(1); // a half-pixel inside = fully covered
+  expect(influence(0)).toBeCloseTo(0.5); // exactly on the edge = half coverage
+  expect(influence(0.5)).toBe(0); // a half-pixel outside = nothing
   expect(influence(3)).toBe(0);
 });

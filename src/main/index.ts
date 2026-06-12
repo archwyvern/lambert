@@ -4,14 +4,14 @@ import os from "node:os";
 import path from "node:path";
 
 // unpackaged dev runs report the app name as "Electron"; pin it so userData
-// (session memory) lands in ~/.config/flatland instead of the shared Electron dir
-app.setName("flatland");
+// (session memory) lands in ~/.config/lambert instead of the shared Electron dir
+app.setName("lambert");
 
 const isAutomation = process.argv.includes("--selftest") || process.argv.includes("--capture");
 if (isAutomation) {
   // automated runs must not share the live instance's profile: LevelDB/Dawn cache
   // locks make captures flaky-black and stall GPU init when an editor is open
-  app.setPath("userData", path.join(os.tmpdir(), "flatland-automation"));
+  app.setPath("userData", path.join(os.tmpdir(), "lambert-automation"));
 }
 
 // WebGPU is default-on for Windows/macOS Chromium but flag-gated on Linux; we own the
@@ -150,7 +150,7 @@ app.whenReady().then(() => {
         const editor = r !== null && r.childElementCount > 0;
         const harness = document.getElementById("views")?.childElementCount ?? 0;
         const demo = new URLSearchParams(location.search).has("demo");
-        const demoReady = !demo || (window.__flatlandDemoReady === true && window.__flatlandFrameReady === true);
+        const demoReady = !demo || (window.__lambertDemoReady === true && window.__lambertFrameReady === true);
         return (editor || harness > 0) && demoReady;
       })()`;
       const tryCapture = async (): Promise<void> => {

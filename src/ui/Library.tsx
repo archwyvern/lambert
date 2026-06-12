@@ -21,7 +21,7 @@ export function Library(props: { enabled: boolean }): React.JSX.Element {
       <SectionLabel>Shapes</SectionLabel>
       <div className="grid grid-cols-2 gap-1.5">
         {allShapeTypes()
-          .filter((t) => t.wgsl)
+          .filter((t) => t.wgsl && !t.libraryHidden)
           .map((t) => (
             <button
               key={t.id}
@@ -30,7 +30,7 @@ export function Library(props: { enabled: boolean }): React.JSX.Element {
               className="aspect-square cursor-grab border border-border bg-surface2 p-1 transition hover:border-accent/50 hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border disabled:hover:bg-surface2"
               data-shape-type={t.id}
               draggable={enabled}
-              onDragStart={(e) => e.dataTransfer.setData("application/x-flatland-shape", t.id)}
+              onDragStart={(e) => e.dataTransfer.setData("application/x-lambert-shape", t.id)}
             >
               {SHAPE_ICONS[t.id] ? (
                 <img src={SHAPE_ICONS[t.id]} alt={t.name} className="h-full w-full" draggable={false} />

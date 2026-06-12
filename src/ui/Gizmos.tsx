@@ -1,12 +1,25 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import type { DocumentStore } from "../document/store";
 import { updateShape } from "../document/docOps";
-import type { FlatlandDoc } from "../document/schema";
+import type { LambertDoc } from "../document/schema";
 
-import { insertVertOnEdge, surfaceEdges } from "../field/surfaceOps";
+import { frustumStrip } from "../field/controlPoints";
+import {
+  alignVertToPlane,
+  connectVerts,
+  deleteEdge,
+  deleteVerts,
+  mergeVerts,
+  meshEdges,
+  neighborsOf,
+  splitEdge,
+} from "../field/meshOps";
+import { getShapeType } from "../field/registry";
+import { alignedToAxis, snapVec } from "../field/snap";
 import { fromLocal, toLocal } from "../field/transform";
 import type { ShapeInstance } from "../field/types";
 import { v2, Vec2 } from "../field/vec";
+import { ContextMenu, MenuEntry } from "./kit";
 import { axisScaleFromDrag, groupScaleFactor, pointsBounds, scalePointsAbout } from "./picking";
 import type { ToolMode } from "./tools";
 import { canvasToScreen, screenToCanvas, Viewport } from "./viewport";
@@ -35,7 +48,7 @@ const localToCanvas = (s: ShapeInstance, cp: Vec2): Vec2 => fromLocal(s.transfor
 const PAD = 6; // local-px breathing room around the footprint
 
 export function Gizmos(props: {
-  doc: FlatlandDoc;
+  doc: LambertDoc;
   selectedId: string | null;
   viewport: Viewport;
   store: DocumentStore;
@@ -60,6 +73,18 @@ export function Gizmos(props: {
   } | null>(null);
   // multi-vertex selection lives in CanvasView; this is the move/scale drag state
   const vertDrag = useRef<{ startCanvas: Vec2; starts: { i: number; p: Vec2 }[]; pivot: Vec2 } | null>(null);
+  // true while a vertex is held/dragged — gates the octant alignment guide on the edge lines
+  const [draggingVert, setDraggingVert] = useState(false);
+  // right-click context menu: `verts` = the set Connect/Merge/Delete act on; `zalign` = align a 4th
+  // vertex onto the plane of 3 selected; `edge` = add a vertex on that edge
+  const [menu, setMenu] = useState<{
+    x: number;
+    y: number;
+    verts: number[];
+    target: number | null; // the right-clicked vertex (merge welds onto this one)
+    zalign: { target: number; plane: number[] } | null;
+    edge: { ia: number; ib: number; t: number } | null;
+  } | null>(null);
   const shape = doc.shapes.find((s) => s.id === selectedId);
   if (!shape) return null;
 
@@ -80,7 +105,7 @@ export function Gizmos(props: {
     v2(bounds.min.x, bounds.max.y),
   ];
 
-  const eventCanvasPoint = (e: React.PointerEvent): Vec2 => {
+  const eventCanvasPoint = (e: React.MouseEvent): Vec2 => {
     const svg = (e.currentTarget as SVGGraphicsElement).ownerSVGElement!;
     const rect = svg.getBoundingClientRect();
     return screenToCanvas(viewport, v2(e.clientX - rect.left, e.clientY - rect.top));
@@ -150,13 +175,18 @@ export function Gizmos(props: {
   const applyVertDrag = (transformLocal: (start: Vec2) => Vec2): void => {
     const d = vertDrag.current!;
     const byIndex = new Map(d.starts.map((s) => [s.i, s.p]));
+    // snap the vertex's CANVAS position to the ½px grid (not its local coord), so it lands on
+    // the grid the user sees regardless of the shape's scale/rotation
+    const place = shape.gridSnap
+      ? (local: Vec2): Vec2 => toLocal(shape.transform, snapVec(fromLocal(shape.transform, local)))
+      : (local: Vec2): Vec2 => local;
     store.update(
       (doc2) =>
         updateShape(doc2, shape.id, (s) => ({
           ...s,
           controlPoints: s.controlPoints.map((cp, ci) => {
             const start = byIndex.get(ci);
-            return start ? transformLocal(start) : cp;
+            return start ? place(transformLocal(start)) : cp;
           }),
         })),
       { coalesce: `vgrp:${shape.id}` },
@@ -171,35 +201,16 @@ export function Gizmos(props: {
       starts: indices.map((i) => ({ i, p: shape.controlPoints[i]! })),
       pivot,
     };
+    setDraggingVert(true);
   };
 
   const vertEndProps = {
     onPointerUp: (e: React.PointerEvent) => {
       e.stopPropagation();
       vertDrag.current = null;
+      setDraggingVert(false);
       store.endGesture();
     },
-  };
-
-  // click a surface edge -> insert a vertex at the projected point (splits that loop segment)
-  const surfaceInsert = (va: number, vb: number) => (e: React.PointerEvent): void => {
-    e.stopPropagation();
-    const p = toLocal(shape.transform, eventCanvasPoint(e));
-    const a = shape.controlPoints[va]!;
-    const b = shape.controlPoints[vb]!;
-    const abx = b.x - a.x;
-    const aby = b.y - a.y;
-    const t = Math.max(0, Math.min(1, ((p.x - a.x) * abx + (p.y - a.y) * aby) / (abx * abx + aby * aby || 1)));
-    const newIndex = shape.controlPoints.length;
-    store.update((d) =>
-      updateShape(d, shape.id, (s) => {
-        if (!s.surface) return s;
-        const r = insertVertOnEdge(s.controlPoints, s.surface, va, vb, t);
-        return { ...s, controlPoints: r.controlPoints, surface: r.surface };
-      }),
-    );
-    store.endGesture();
-    setSelVerts([newIndex]);
   };
 
   // a vertex dot: shift-click toggles it in the selection; plain drag moves the selection
@@ -207,6 +218,7 @@ export function Gizmos(props: {
   const vertexHandle = (i: number) => ({
     ...vertEndProps,
     onPointerDown: (e: React.PointerEvent) => {
+      if (e.button !== 0) return; // right-click handled by onContextMenu
       if (e.shiftKey) {
         e.stopPropagation();
         setSelVerts((s) => (s.includes(i) ? s.filter((x) => x !== i) : [...s, i]));
@@ -240,8 +252,114 @@ export function Gizmos(props: {
     },
   });
 
+  // --- context-menu operations (mirror the canvas verbs; all mesh-only) ---
+  const opAddVertex = (ia: number, ib: number, t: number): void => {
+    const newIndex = shape.controlPoints.length;
+    store.update((d) =>
+      updateShape(d, shape.id, (s) => {
+        if (!s.mesh) return s;
+        const r = splitEdge(s.controlPoints, s.mesh, ia, ib, t);
+        return { ...s, controlPoints: r.controlPoints, mesh: r.mesh };
+      }),
+    );
+    store.endGesture();
+    setSelVerts([newIndex]);
+  };
+  const opConnect = (a: number, b: number): void => {
+    store.update((d) =>
+      updateShape(d, shape.id, (s) => {
+        const t = s.mesh && connectVerts(s.controlPoints, s.mesh, a, b);
+        return t ? { ...s, mesh: t } : s;
+      }),
+    );
+    store.endGesture();
+  };
+  const opMerge = (verts: number[], keep: number): void => {
+    store.update((d) =>
+      updateShape(d, shape.id, (s) => {
+        const r = s.mesh && mergeVerts(s.controlPoints, s.mesh, verts, keep);
+        return r ? { ...s, controlPoints: r.controlPoints, mesh: r.mesh } : s;
+      }),
+    );
+    store.endGesture();
+    setSelVerts([]);
+  };
+  const opDeleteEdge = (ia: number, ib: number): void => {
+    store.update((d) => updateShape(d, shape.id, (s) => (s.mesh ? { ...s, mesh: deleteEdge(s.mesh, ia, ib) } : s)));
+    store.endGesture();
+  };
+  const opDelete = (verts: number[]): void => {
+    store.update((d) =>
+      updateShape(d, shape.id, (s) => {
+        const r = s.mesh && deleteVerts(s.controlPoints, s.mesh, verts);
+        return r ? { ...s, controlPoints: r.controlPoints, mesh: r.mesh } : s;
+      }),
+    );
+    store.endGesture();
+    setSelVerts([]);
+  };
+  const opZAlign = (target: number, plane: number[]): void => {
+    store.update((d) =>
+      updateShape(d, shape.id, (s) => {
+        if (!s.mesh) return s;
+        const z = alignVertToPlane(s.controlPoints, s.mesh.z, [plane[0]!, plane[1]!, plane[2]!], target);
+        return z ? { ...s, mesh: { ...s.mesh, z } } : s;
+      }),
+    );
+    store.endGesture();
+  };
+
+  const openVertexMenu = (i: number) => (e: React.MouseEvent): void => {
+    if (!shape.mesh) return; // vertex verbs are mesh-only
+    e.preventDefault();
+    e.stopPropagation();
+    // Z align: 3 selected (a face) + a connected 4th -> flatten both triangles onto one plane
+    const neigh = neighborsOf(shape.mesh, i);
+    if (selVerts.length === 3 && !selVerts.includes(i) && selVerts.filter((v) => neigh.has(v)).length >= 2) {
+      setMenu({ x: e.clientX, y: e.clientY, verts: [i], target: i, zalign: { target: i, plane: selVerts }, edge: null });
+      return;
+    }
+    const verts = selVerts.includes(i) ? selVerts : [i];
+    if (!selVerts.includes(i)) setSelVerts(verts);
+    setMenu({ x: e.clientX, y: e.clientY, verts, target: i, zalign: null, edge: null });
+  };
+  const openEdgeMenu = (ia: number, ib: number) => (e: React.MouseEvent): void => {
+    e.preventDefault();
+    e.stopPropagation();
+    const p = toLocal(shape.transform, eventCanvasPoint(e));
+    const a = shape.controlPoints[ia]!;
+    const b = shape.controlPoints[ib]!;
+    const abx = b.x - a.x;
+    const aby = b.y - a.y;
+    const t = Math.max(0, Math.min(1, ((p.x - a.x) * abx + (p.y - a.y) * aby) / (abx * abx + aby * aby || 1)));
+    setMenu({ x: e.clientX, y: e.clientY, verts: [], target: null, zalign: null, edge: { ia, ib, t } });
+  };
+
+  const menuItems = (m: NonNullable<typeof menu>): MenuEntry[] => {
+    if (m.edge) {
+      return [
+        { label: "Add Vertex", onClick: () => opAddVertex(m.edge!.ia, m.edge!.ib, m.edge!.t) },
+        "separator",
+        { label: "Delete Edge", danger: true, onClick: () => opDeleteEdge(m.edge!.ia, m.edge!.ib) },
+      ];
+    }
+    const items: MenuEntry[] = [];
+    if (m.zalign) items.push({ label: "Z Align to Face", onClick: () => opZAlign(m.zalign!.target, m.zalign!.plane) });
+    const v = m.verts;
+    if (shape.mesh && v.length === 2) items.push({ label: "Connect Vertices", onClick: () => opConnect(v[0]!, v[1]!) });
+    if (shape.mesh && v.length >= 2 && m.target !== null) {
+      items.push({ label: "Merge Vertices", onClick: () => opMerge(v, m.target!) });
+    }
+    if (v.length >= 1) {
+      if (items.length > 0) items.push("separator");
+      items.push({ label: v.length === 1 ? "Delete Vertex" : "Delete Vertices", danger: true, onClick: () => opDelete(v) });
+    }
+    return items;
+  };
+
   return (
-    <svg className="pointer-events-none absolute inset-0 h-full w-full">
+    <>
+      <svg className="pointer-events-none absolute inset-0 h-full w-full">
       <defs>
         {/* dark halo so handles survive white height maps and saturated normal maps */}
         <filter id="gizmo-halo" x="-50%" y="-50%" width="200%" height="200%">
@@ -301,28 +419,6 @@ export function Gizmos(props: {
             );
           })
         : null}
-      {/* surface edges: faint lines + fat transparent hit-lines (click to insert a vertex) */}
-      {vertHandles && shape.surface
-        ? surfaceEdges(shape.surface).map(({ a: va, b: vb }, k) => {
-            const a = canvasToScreen(viewport, localToCanvas(shape, shape.controlPoints[va]!));
-            const b = canvasToScreen(viewport, localToCanvas(shape, shape.controlPoints[vb]!));
-            return (
-              <g key={`se${k}`}>
-                <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="var(--color-accent)" strokeWidth={1} opacity={0.5} />
-                <line
-                  x1={a.x}
-                  y1={a.y}
-                  x2={b.x}
-                  y2={b.y}
-                  stroke="transparent"
-                  strokeWidth={9}
-                  className="pointer-events-auto cursor-copy"
-                  onPointerDown={surfaceInsert(va, vb)}
-                />
-              </g>
-            );
-          })
-        : null}
       {/* group-scale frame: bbox of the selected vertices with corner handles (>=2 selected) */}
       {vertHandles && selVerts.length >= 2
         ? (() => {
@@ -364,6 +460,68 @@ export function Gizmos(props: {
             );
           })()
         : null}
+      {vertHandles && getShapeType(shape.typeId).controlPoints.kind !== "none"
+        ? (() => {
+            const kind = getShapeType(shape.typeId).controlPoints.kind;
+            const pts = shape.controlPoints.map((cp) => canvasToScreen(viewport, localToCanvas(shape, cp)));
+            // while dragging a vertex, an edge aligned to a 45° axis (within ¼px on the canvas
+            // grid — points are screen-space, so scale the tol by zoom) lights bright white + thick
+            const alignTol = 0.25 * viewport.zoom;
+            const seg = (a: Vec2, b: Vec2, key: string, dashed?: boolean): React.JSX.Element => {
+              const on = draggingVert && alignedToAxis(a, b, alignTol);
+              return (
+                <line
+                  key={key}
+                  x1={a.x}
+                  y1={a.y}
+                  x2={b.x}
+                  y2={b.y}
+                  stroke={on ? "#ffffff" : "var(--color-accent)"}
+                  strokeWidth={on ? 3 : 1}
+                  opacity={on ? 1 : 0.6}
+                  strokeDasharray={dashed ? "3 3" : undefined}
+                />
+              );
+            };
+            const lines: React.JSX.Element[] = [];
+            if (kind === "rings") {
+              const split = shape.ringSplit ?? (pts.length >> 1);
+              const outer = pts.slice(0, split);
+              const inner = pts.slice(split);
+              outer.forEach((p, i) => lines.push(seg(p, outer[(i + 1) % outer.length]!, `o${i}`)));
+              inner.forEach((p, i) => lines.push(seg(p, inner[(i + 1) % inner.length]!, `i${i}`)));
+              // the actual strip diagonals — what the slope is triangulated along (any counts)
+              frustumStrip(outer.length, inner.length).connectors.forEach(([oi, ii], k) =>
+                lines.push(seg(outer[oi]!, inner[ii]!, `c${k}`, true)),
+              );
+            } else if (kind === "polygon") {
+              pts.forEach((p, i) => lines.push(seg(p, pts[(i + 1) % pts.length]!, `p${i}`)));
+            } else if (kind === "mesh" && shape.mesh) {
+              // mesh edges: the octant-lit line + a fat transparent hit-line (click to add a vertex)
+              for (const [ia, ib] of meshEdges(shape.mesh)) {
+                const a = pts[ia]!;
+                const b = pts[ib]!;
+                lines.push(seg(a, b, `m${ia}_${ib}`));
+                lines.push(
+                  <line
+                    key={`mh${ia}_${ib}`}
+                    x1={a.x}
+                    y1={a.y}
+                    x2={b.x}
+                    y2={b.y}
+                    stroke="transparent"
+                    strokeWidth={9}
+                    className="pointer-events-auto cursor-context-menu"
+                    onContextMenu={openEdgeMenu(ia, ib)}
+                  />,
+                );
+              }
+            } else {
+              for (let i = 0; i + 1 < pts.length; i++) lines.push(seg(pts[i]!, pts[i + 1]!, `l${i}`));
+            }
+            return <g className="pointer-events-none">{lines}</g>;
+          })()
+        : null}
       {vertHandles &&
         shape.controlPoints.map((cp, i) => {
           const sp = canvasToScreen(viewport, localToCanvas(shape, cp));
@@ -379,10 +537,13 @@ export function Gizmos(props: {
               strokeWidth={1.5}
               className="pointer-events-auto cursor-move"
               {...vertexHandle(i)}
+              onContextMenu={openVertexMenu(i)}
             />
           );
         })}
       </g>
-    </svg>
+      </svg>
+      {menu ? <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu)} onClose={() => setMenu(null)} /> : null}
+    </>
   );
 }

@@ -1,7 +1,21 @@
 import "./shapes";
+import { convertToMesh } from "./meshConvert";
 import { createShapeInstance } from "./registry";
 import type { ShapeInstance } from "./types";
 import { v2 } from "./vec";
+
+/** A converted, vertex-tweaked plateau — exercises the mesh GPU path in the drift selftest. */
+export function meshShapes(): ShapeInstance[] {
+  const plateau = createShapeInstance("plateau", v2(48, 48));
+  plateau.transform.rotation = 0.3;
+  plateau.transform.scale = { x: 1.2, y: 0.9, z: 1.1 };
+  const mesh = convertToMesh(plateau);
+  mesh.id = "stress-mesh";
+  mesh.mesh!.z[4] = 34; // skew one top corner so the surface isn't a flat prism
+  mesh.controlPoints[6] = v2(14, 26); // nudge a top vertex in xy
+  mesh.params.smoothness = 0.7; // exercise the Phong smoothness path (GPU vs CPU) in the selftest
+  return [mesh];
+}
 
 /** Deterministic fixture exercising all four v1 shapes and blending. */
 export function goldenShapes(): ShapeInstance[] {

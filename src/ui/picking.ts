@@ -1,5 +1,4 @@
 import { getShapeType } from "../field/registry";
-import { sdPolygon } from "../field/sdf";
 import { distanceScale, toLocal } from "../field/transform";
 import type { ShapeInstance } from "../field/types";
 import { v2, Vec2 } from "../field/vec";
@@ -12,13 +11,6 @@ export function pickShape(shapes: ShapeInstance[], canvasPoint: Vec2): ShapeInst
     const s = shapes[i]!;
     if (!s.visible || s.locked) continue;
     const local = toLocal(s.transform, canvasPoint);
-    if (s.surface) {
-      // surfaces have no height footprint — hit-test the painted face polygons directly
-      if (s.surface.faces.some((f) => sdPolygon(local, f.loop.map((j) => s.controlPoints[j]!)) <= PICK_SLOP_PX)) {
-        return s;
-      }
-      continue;
-    }
     const sample = getShapeType(s.typeId).eval(local, s);
     if (sample.sd * distanceScale(s.transform) <= PICK_SLOP_PX) return s;
   }

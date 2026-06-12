@@ -20,9 +20,9 @@ export interface Host {
 }
 
 interface HostWindow {
-  flatlandHost: Host & { sendSelftestResult(report: unknown): void };
+  lambertHost: Host & { sendSelftestResult(report: unknown): void };
 }
 
 export function getHost(): Host {
-  return (window as unknown as HostWindow).flatlandHost;
+  return (window as unknown as HostWindow).lambertHost;
 }

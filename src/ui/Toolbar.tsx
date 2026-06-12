@@ -1,60 +1,23 @@
-import {
-  ArrowExpandRegular,
-  ArrowMoveRegular,
-  ArrowRedoRegular,
-  ArrowRotateClockwiseRegular,
-  ArrowUndoRegular,
-  BezierCurveSquareRegular,
-  CursorRegular,
-  PenRegular,
-} from "@fluentui/react-icons";
+import { ArrowRedoRegular, ArrowUndoRegular } from "@fluentui/react-icons";
 import type { DocumentStore, EditorState } from "../document/store";
 import type { ViewState } from "./App";
 import { cx } from "./kit";
 import { VIEW_MODES, ViewMode } from "./preview";
-import type { ToolMode } from "./tools";
 
 const ICON = { fontSize: 16 } as const;
-
-const TOOLS: Array<{ id: ToolMode; key: string; label: string; Icon: typeof CursorRegular }> = [
-  { id: "select", key: "Q", label: "Select", Icon: CursorRegular },
-  { id: "move", key: "W", label: "Move", Icon: ArrowMoveRegular },
-  { id: "rotate", key: "E", label: "Rotate", Icon: ArrowRotateClockwiseRegular },
-  { id: "scale", key: "R", label: "Scale", Icon: ArrowExpandRegular },
-  { id: "vertex", key: "T", label: "Edit Vertices", Icon: BezierCurveSquareRegular },
-  { id: "pen", key: "P", label: "Pen (draw surface)", Icon: PenRegular },
-];
 
 export function Toolbar(props: {
   store: DocumentStore;
   state: EditorState;
   view: ViewState;
   setView: (fn: (v: ViewState) => ViewState) => void;
-  tool: ToolMode;
-  setTool: (t: ToolMode) => void;
 }): React.JSX.Element {
-  const { store, state, view, setView, tool, setTool } = props;
+  const { store, state, view, setView } = props;
   const pct = Math.round(view.opacity * 100);
 
   return (
     <header className="flex h-control shrink-0 items-center gap-2 border-b border-border bg-bg px-2">
-      <span className="mr-1 shrink-0 px-1 text-base font-semibold text-fg">Flatland</span>
-
-      <div className="flex shrink-0 items-stretch border border-border">
-        {TOOLS.map(({ id, key, label, Icon }) => (
-          <button
-            key={id}
-            title={`${label} (${key})`}
-            onClick={() => setTool(id)}
-            className={cx(
-              "flex h-[26px] w-[30px] items-center justify-center border-r border-border last:border-r-0",
-              tool === id ? "bg-list-active text-fg" : "text-fg-mid hover:bg-hover hover:text-fg",
-            )}
-          >
-            <Icon style={ICON} />
-          </button>
-        ))}
-      </div>
+      <span className="mr-1 shrink-0 px-1 text-base font-semibold text-fg">Lambert</span>
 
       <div className="flex shrink-0 items-stretch border border-border">
         <button
@@ -85,7 +48,7 @@ export function Toolbar(props: {
       ) : null}
 
       <div className="ml-2 flex shrink-0 items-center gap-2">
-        {view.mode === "height" || view.mode === "normal" ? (
+        {view.mode === "normal" ? (
           <label className="flex shrink-0 items-center gap-2 text-sm text-fg-mid">
             opacity
             <input
@@ -120,6 +83,17 @@ export function Toolbar(props: {
             </button>
           ))}
         </div>
+        <button
+          title="Vector view stays crisp at any zoom; raster view shows the pixelated exported output"
+          aria-pressed={view.raster}
+          onClick={() => setView((v) => ({ ...v, raster: !v.raster }))}
+          className={cx(
+            "h-[26px] shrink-0 border border-border px-3 text-base",
+            view.raster ? "bg-list-active text-fg" : "text-fg-mid hover:bg-hover hover:text-fg",
+          )}
+        >
+          {view.raster ? "raster" : "vector"}
+        </button>
       </div>
     </header>
   );

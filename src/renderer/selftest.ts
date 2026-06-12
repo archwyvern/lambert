@@ -1,12 +1,12 @@
 import { compareRenders, DriftReport } from "../field/compare";
-import { GOLDEN_H, GOLDEN_W, goldenShapes, stressShapes } from "../field/fixtures";
+import { GOLDEN_H, GOLDEN_W, goldenShapes, meshShapes, stressShapes } from "../field/fixtures";
 import { GpuFieldRenderer } from "../field/gpu/pipeline";
 import { renderField } from "../field/render";
 import type { ShapeInstance } from "../field/types";
 
 declare global {
   interface Window {
-    flatlandHost: { sendSelftestResult: (report: unknown) => void };
+    lambertHost: { sendSelftestResult: (report: unknown) => void };
   }
 }
 
@@ -43,10 +43,12 @@ export async function runSelftest(): Promise<void> {
     report.cases.push(await runCase(gpu, "golden ss2 tiled-32", goldenShapes(), 2, 32));
     report.cases.push(await runCase(gpu, "stress ss1", stressShapes(), 1));
     report.cases.push(await runCase(gpu, "stress ss2 tiled-48", stressShapes(), 2, 48));
+    report.cases.push(await runCase(gpu, "mesh ss1", meshShapes(), 1));
+    report.cases.push(await runCase(gpu, "mesh ss2 tiled-48", meshShapes(), 2, 48));
     report.pass = report.cases.every((c) => c.pass);
   } catch (err) {
     report.error = err instanceof Error ? `${err.message}\n${err.stack ?? ""}` : String(err);
   }
   document.getElementById("status")!.textContent = JSON.stringify(report, null, 2);
-  window.flatlandHost.sendSelftestResult(report);
+  window.lambertHost.sendSelftestResult(report);
 }

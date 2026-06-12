@@ -1,4 +1,5 @@
 import { combineHeight, influence } from "./combine";
+import { meshGradients } from "./meshOps";
 import { getShapeType } from "./registry";
 import { distanceScale, toLocal } from "./transform";
 import type { ShapeInstance } from "./types";
@@ -20,7 +21,8 @@ export function evaluateField(shapes: ShapeInstance[], width: number, height: nu
   const resolved = shapes
     .filter((s) => s.visible)
     .map((s) => ({
-      s,
+      // attach the transient per-vertex gradient a mesh needs for its smoothness pass
+      s: s.mesh ? { ...s, mesh: { ...s.mesh, grad: meshGradients(s.controlPoints, s.mesh.z, s.mesh.tris) } } : s,
       type: getShapeType(s.typeId),
       ds: distanceScale(s.transform),
       op: getShapeType(s.typeId).defaultCombine ?? ("max" as const),

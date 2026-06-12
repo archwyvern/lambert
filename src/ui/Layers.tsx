@@ -119,19 +119,19 @@ export function Layers(props: { store: DocumentStore; state: EditorState }): Rea
                     }
                   }}
                   onDragStart={(e) => {
-                    e.dataTransfer.setData("application/x-flatland-layer", s.id);
+                    e.dataTransfer.setData("application/x-lambert-layer", s.id);
                     e.dataTransfer.effectAllowed = "move";
                     store.select(s.id);
                   }}
                   onDragOver={(e) => {
-                    if (!e.dataTransfer.types.includes("application/x-flatland-layer")) return;
+                    if (!e.dataTransfer.types.includes("application/x-lambert-layer")) return;
                     e.preventDefault();
                     const rect = e.currentTarget.getBoundingClientRect();
                     const below = e.clientY > rect.top + rect.height / 2;
                     setDropGap(displayIndex + (below ? 1 : 0));
                   }}
                   onDrop={(e) => {
-                    const id = e.dataTransfer.getData("application/x-flatland-layer");
+                    const id = e.dataTransfer.getData("application/x-lambert-layer");
                     if (!id || dropGap === null) return;
                     e.preventDefault();
                     e.stopPropagation();

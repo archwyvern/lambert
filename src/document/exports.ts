@@ -1,6 +1,6 @@
 import { encodeNxPng, nxFileName } from "../exporters/nx";
 import type { RenderResult } from "../field/render";
-import type { FlatlandDoc } from "./schema";
+import type { LambertDoc } from "./schema";
 import { basename, dirname, joinPath } from "./paths";
 
 export interface ExportFile {
@@ -10,11 +10,16 @@ export interface ExportFile {
 }
 
 /** NX export next to the diffuse; warns (not errors) on an empty authored mask. */
-export function buildNxExport(doc: FlatlandDoc, render: RenderResult, diffusePath: string): ExportFile {
+export function buildNxExport(
+  doc: LambertDoc,
+  render: RenderResult,
+  diffusePath: string,
+  opaque?: Uint8Array | null,
+): ExportFile {
   if (render.width !== doc.source.width || render.height !== doc.source.height) {
     throw new Error(`render ${render.width}x${render.height} != doc ${doc.source.width}x${doc.source.height}`);
   }
-  const bytes = encodeNxPng(render.normals, render.mask, render.width, render.height, doc.normalDirs);
+  const bytes = encodeNxPng(render.normals, render.mask, render.width, render.height, doc.normalDirs, opaque);
   const empty = render.mask.every((m) => m === 0);
   return {
     path: joinPath(dirname(diffusePath), nxFileName(basename(diffusePath))),

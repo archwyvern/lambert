@@ -20,10 +20,16 @@ const shapeSchema = z.object({
   }),
   params: z.record(z.string(), z.union([z.number(), z.string(), z.boolean()])),
   controlPoints: z.array(vec2Schema),
-  /** Surface-shape faces (typeId "surface"): loops of controlPoint indices + fill colors. */
-  surface: z
+  /** "rings" shapes: base-ring vertex count (top ring is the rest). Absent = equal split. */
+  ringSplit: z.number().int().positive().optional(),
+  /** Per-shape ½px grid snap for vertices + position (authoring aid). */
+  gridSnap: z.boolean().optional(),
+  /** Mesh-plane topology (typeId "mesh" only): per-vertex height + triangle indices. */
+  mesh: z
     .object({
-      faces: z.array(z.object({ loop: z.array(z.number()), color: z.string() })),
+      z: z.array(z.number()),
+      tris: z.array(z.tuple([z.number(), z.number(), z.number()])),
+      edges: z.array(z.tuple([z.number(), z.number()])).optional(),
     })
     .optional(),
   /** Legacy combine settings (op/blend); behavior now derives from the shape type. */
@@ -65,13 +71,13 @@ export const docSchema = z.object({
   shapes: z.array(shapeSchema),
   preview: z.object({
     lightDir: z.tuple([z.number(), z.number(), z.number()]),
-    viewMode: z.enum(["diffuse", "height", "normal", "lit"]),
+    viewMode: z.enum(["diffuse", "normal", "lit"]).catch("lit"),
   }),
 });
 
-export type FlatlandDoc = z.infer<typeof docSchema> & { shapes: ShapeInstance[] };
+export type LambertDoc = z.infer<typeof docSchema> & { shapes: ShapeInstance[] };
 
-export function emptyDoc(sourcePath: string, width: number, height: number): FlatlandDoc {
+export function emptyDoc(sourcePath: string, width: number, height: number): LambertDoc {
   return {
     schemaVersion: 1,
     normalDirs: { ...DEFAULT_NORMAL_DIRS },
@@ -89,7 +95,16 @@ const LEGACY_TALLNESS: Record<string, { param: string; nominal: number }> = {
   groove: { param: "depth", nominal: 8 },
 };
 
-export function parseDoc(json: string): FlatlandDoc {
+/** Shape type ids removed from the engine. Legacy documents that still carry them drop the
+ *  orphaned shapes on load — their type is unregistered, so anything calling getShapeType on
+ *  them (pack, render, picking) would throw. Shared by .lambert load and session restore. */
+const REMOVED_TYPE_IDS = new Set(["surface"]);
+
+export function dropRemovedShapes(shapes: ShapeInstance[]): ShapeInstance[] {
+  return shapes.filter((s) => !REMOVED_TYPE_IDS.has(s.typeId));
+}
+
+export function parseDoc(json: string): LambertDoc {
   const doc = docSchema.parse(JSON.parse(json));
   for (const s of doc.shapes) {
     delete s.combine; // legacy combine settings: the shape type owns the behavior now
@@ -128,9 +143,11 @@ export function parseDoc(json: string): FlatlandDoc {
       delete s.params.slopeWidth;
     }
   }
-  return doc as unknown as FlatlandDoc;
+  const migrated = doc as unknown as LambertDoc;
+  migrated.shapes = dropRemovedShapes(migrated.shapes);
+  return migrated;
 }
 
-export function serializeDoc(doc: FlatlandDoc): string {
+export function serializeDoc(doc: LambertDoc): string {
   return JSON.stringify(doc, null, 2) + "\n";
 }

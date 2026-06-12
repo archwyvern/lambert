@@ -5,10 +5,11 @@ import { useState } from "react";
  * persistence, reduced to a hook. Survives restarts; bad/missing entries fall back.
  */
 export function usePersistentState<T>(key: string, initial: T): [T, (v: T | ((p: T) => T)) => void] {
-  const storageKey = `flatland:${key}`;
+  const storageKey = `lambert:${key}`;
   const [value, setValue] = useState<T>(() => {
     try {
-      const raw = localStorage.getItem(storageKey);
+      // fall back to the pre-rename "flatland:" key so migrated settings survive
+      const raw = localStorage.getItem(storageKey) ?? localStorage.getItem(`flatland:${key}`);
       return raw === null ? initial : (JSON.parse(raw) as T);
     } catch {
       return initial;

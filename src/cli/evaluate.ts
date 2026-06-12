@@ -6,11 +6,11 @@ import "../field/shapes";
 import { renderField } from "../field/render";
 import { encodeHeightmapPng } from "../exporters/heightmap";
 import { encodeNormalPng } from "../exporters/normalmap";
-import { encodeNxPng, nxFileName } from "../exporters/nx";
+import { diffuseOpacity, encodeNxPng, nxFileName } from "../exporters/nx";
 
 const [docPath, outDirArg] = process.argv.slice(2);
 if (!docPath) {
-  console.error("usage: pnpm eval <file.flatland> [outDir]");
+  console.error("usage: pnpm eval <file.lambert> [outDir]");
   process.exit(2);
 }
 
@@ -32,7 +32,7 @@ if (r.mask.every((m) => m === 0)) console.warn("warning: authored mask is empty 
 const outDir = outDirArg ? path.resolve(outDirArg) : docDir;
 const stem = path.basename(sourcePath);
 const nxPath = path.join(outDir, nxFileName(stem));
-writeFileSync(nxPath, encodeNxPng(r.normals, r.mask, r.width, r.height, doc.normalDirs));
+writeFileSync(nxPath, encodeNxPng(r.normals, r.mask, r.width, r.height, doc.normalDirs, diffuseOpacity(source)));
 writeFileSync(path.join(outDir, `${stem}.height.png`), encodeHeightmapPng(r));
 writeFileSync(
   path.join(outDir, `${stem}.normal.png`),

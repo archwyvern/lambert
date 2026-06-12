@@ -3,4 +3,4 @@ export { Dome } from "./dome";
 export { Plateau } from "./plateau";
 export { Ridge } from "./ridge";
 export { Groove } from "./groove";
-export { Surface } from "./surface";
+export { Mesh } from "./mesh";

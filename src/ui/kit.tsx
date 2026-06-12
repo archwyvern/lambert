@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export function cx(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(" ");
@@ -7,6 +7,55 @@ export function cx(...parts: Array<string | false | null | undefined>): string {
 /** camelCase identifier -> spaced label ("slopeWidth" -> "slope width"). */
 export function humanizeLabel(key: string): string {
   return key.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase();
+}
+
+export type MenuEntry = { label: string; onClick: () => void; danger?: boolean; disabled?: boolean } | "separator";
+
+/** Cursor-anchored popup menu. Closes on any outside pointer/scroll/resize/blur. */
+export function ContextMenu(props: { x: number; y: number; items: MenuEntry[]; onClose: () => void }): React.JSX.Element {
+  const { onClose } = props;
+  useEffect(() => {
+    const opts = { passive: true } as const;
+    window.addEventListener("pointerdown", onClose);
+    window.addEventListener("blur", onClose);
+    window.addEventListener("resize", onClose);
+    window.addEventListener("wheel", onClose, opts);
+    return () => {
+      window.removeEventListener("pointerdown", onClose);
+      window.removeEventListener("blur", onClose);
+      window.removeEventListener("resize", onClose);
+      window.removeEventListener("wheel", onClose);
+    };
+  }, [onClose]);
+  return (
+    <div
+      className="fixed z-50 min-w-[170px] border border-border-light bg-surface2 py-0.5 shadow-[var(--shadow-popover)]"
+      style={{ left: props.x, top: props.y }}
+      onPointerDown={(e) => e.stopPropagation()}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      {props.items.map((it, i) =>
+        it === "separator" ? (
+          <div key={i} className="my-0.5 border-t border-border" />
+        ) : (
+          <button
+            key={i}
+            disabled={it.disabled}
+            onClick={() => {
+              it.onClick();
+              onClose();
+            }}
+            className={cx(
+              "block w-full px-3 py-1 text-left text-base disabled:opacity-40",
+              it.danger ? "text-error hover:bg-error/10" : "text-fg-mid hover:bg-hover hover:text-fg",
+            )}
+          >
+            {it.label}
+          </button>
+        ),
+      )}
+    </div>
+  );
 }
 
 export type ButtonVariant = "primary" | "ghost" | "danger";
@@ -199,6 +248,28 @@ export function SelectRow(props: {
           </option>
         ))}
       </select>
+    </label>
+  );
+}
+
+/** Compact labeled checkbox toggle (row-aligned with SpinBox/SelectRow). */
+export function ToggleRow(props: {
+  label: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  title?: string;
+}): React.JSX.Element {
+  return (
+    <label className="flex min-h-[26px] cursor-pointer items-center gap-2 py-0.5" title={props.title}>
+      <span className="min-w-0 flex-1 truncate text-base text-fg-mid">{props.label}</span>
+      <span className="flex w-1/2 shrink-0 items-center">
+        <input
+          type="checkbox"
+          checked={props.checked}
+          onChange={(e) => props.onChange(e.target.checked)}
+          className="h-[14px] w-[14px] cursor-pointer accent-[var(--color-accent)]"
+        />
+      </span>
     </label>
   );
 }

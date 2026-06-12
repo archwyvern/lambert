@@ -1,11 +1,11 @@
 import { GpuFieldRenderer } from "../field/gpu/pipeline";
 import type { RenderResult } from "../field/render";
-import type { FlatlandDoc } from "../document/schema";
+import type { LambertDoc } from "../document/schema";
 
 let renderer: GpuFieldRenderer | null = null;
 
 /** ss2 export render on a lazily-created renderer (independent of the preview's). */
-export async function gpuExportRender(doc: FlatlandDoc): Promise<RenderResult> {
+export async function gpuExportRender(doc: LambertDoc): Promise<RenderResult> {
   if (!renderer) {
     const adapter = await navigator.gpu.requestAdapter();
     if (!adapter) throw new Error("no WebGPU adapter");

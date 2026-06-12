@@ -1,15 +1,18 @@
 import { decode } from "fast-png";
 import type { Host } from "../ui/host";
 import type { DocumentStore } from "./store";
-import { emptyDoc, FlatlandDoc, parseDoc, serializeDoc } from "./schema";
+import { emptyDoc, LambertDoc, parseDoc, serializeDoc } from "./schema";
 import { basename, dirname, joinPath } from "./paths";
 import { buildNxExport } from "./exports";
+import { diffuseOpacity } from "../exporters/nx";
 
 const PNG = [{ name: "PNG image", extensions: ["png"] }];
-const FLATLAND = [{ name: "Flatland project", extensions: ["flatland"] }];
+const LAMBERT = [{ name: "Lambert project", extensions: ["lambert"] }];
+// open also accepts the pre-rename .flatland extension so old projects still load
+const LAMBERT_OPEN = [{ name: "Lambert project", extensions: ["lambert", "flatland"] }];
 
 export interface LoadedProject {
-  doc: FlatlandDoc;
+  doc: LambertDoc;
   docPath: string;
   diffuseBytes: Uint8Array;
   diffuseDir: string;
@@ -18,7 +21,7 @@ export interface LoadedProject {
 /** The absolute diffuse path for the store's current doc (sidecar state, not in the doc). */
 export const diffusePathByStore = new WeakMap<DocumentStore, string>();
 
-/** Open a .flatland: parse, resolve + read the diffuse, enforce the dims contract. */
+/** Open a .lambert: parse, resolve + read the diffuse, enforce the dims contract. */
 export async function loadProject(host: Host, docPath: string): Promise<LoadedProject> {
   const doc = parseDoc(new TextDecoder().decode(await host.readFile(docPath)));
   const diffusePath = joinPath(dirname(docPath), doc.source.path);
@@ -47,7 +50,7 @@ export async function openImageFlow(host: Host, store: DocumentStore, setDiffuse
 }
 
 export async function openProjectFlow(host: Host, store: DocumentStore, setDiffuse: SetDiffuse): Promise<void> {
-  const path = await host.openDialog({ title: "Open project", filters: FLATLAND });
+  const path = await host.openDialog({ title: "Open project", filters: LAMBERT_OPEN });
   if (!path) return;
   const loaded = await loadProject(host, path);
   store.reset(loaded.doc, loaded.docPath);
@@ -63,8 +66,8 @@ export async function saveFlow(host: Host, store: DocumentStore, saveAs: boolean
     const stem = basename(diffusePath).replace(/(\.df)?\.png$/i, "");
     path = await host.saveDialog({
       title: "Save project",
-      defaultPath: joinPath(dirname(diffusePath), `${stem}.flatland`),
-      filters: FLATLAND,
+      defaultPath: joinPath(dirname(diffusePath), `${stem}.lambert`),
+      filters: LAMBERT,
     });
     if (!path) return;
   }
@@ -84,7 +87,8 @@ export async function exportNx(host: Host, store: DocumentStore): Promise<string
   if (!diffusePath) throw new Error("no document to export");
   const { gpuExportRender } = await import("../ui/exportRender");
   const render = await gpuExportRender(store.state.doc);
-  const file = buildNxExport(store.state.doc, render, diffusePath);
+  const diffuse = decode(await host.readFile(diffusePath));
+  const file = buildNxExport(store.state.doc, render, diffusePath, diffuseOpacity(diffuse));
   await host.writeFile(file.path, file.bytes);
   return file.warning ? `${file.path} written — WARNING: ${file.warning}` : `wrote ${file.path}`;
 }

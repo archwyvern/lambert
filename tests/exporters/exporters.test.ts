@@ -2,7 +2,7 @@ import { decode } from "fast-png";
 import { expect, test } from "vitest";
 import { encodeHeightmapPng } from "../../src/exporters/heightmap";
 import { encodeNormalPng } from "../../src/exporters/normalmap";
-import { encodeNxPng, nxFileName } from "../../src/exporters/nx";
+import { diffuseOpacity, encodeNxPng, nxFileName } from "../../src/exporters/nx";
 
 const flatNormals = (n: number) => {
   const a = new Float32Array(n * 3);
@@ -50,20 +50,34 @@ test("normal map: red direction setting flips the channel", () => {
   expect(left.data[0]!).toBeLessThan(128);
 });
 
-test("nx: default red-right green-up, full-range blue, mask alpha", () => {
+test("nx: 16-bit, default red-right green-up, full-range blue, mask alpha", () => {
   const flat = decode(encodeNxPng(flatNormals(2), new Float32Array([1, 0]), 2, 1, DIRS_UP));
-  expect([...flat.data.slice(0, 4)]).toEqual([128, 128, 255, 255]);
+  expect(flat.depth).toBe(16);
+  expect([...flat.data.slice(0, 4)]).toEqual([32768, 32768, 65535, 65535]);
   expect(flat.data[7]).toBe(0); // second pixel: mask 0 -> alpha 0
-  // x-ramp normal (-sqrt2/2, 0, sqrt2/2): r = q8(0.1464) = 37, b = q8(0.7071) = 180
+  // x-ramp normal (-sqrt2/2, 0, sqrt2/2): r ~ 0.1464, b ~ 0.7071 of full range
   const tilted = new Float32Array([-Math.SQRT1_2, 0, Math.SQRT1_2]);
   const px = decode(encodeNxPng(tilted, new Float32Array([1]), 1, 1, DIRS_UP));
-  expect(px.data[0]).toBe(37);
-  expect(px.data[1]).toBe(128);
-  expect(px.data[2]).toBe(180);
+  expect(px.data[0]! / 65535).toBeCloseTo(0.1464, 3);
+  expect(px.data[1]).toBe(32768);
+  expect(px.data[2]! / 65535).toBeCloseTo(0.7071, 3);
   // up-screen tilt (n.y < 0) brightens green under green-up
   const upTilt = new Float32Array([0, -Math.SQRT1_2, Math.SQRT1_2]);
   const gy = decode(encodeNxPng(upTilt, new Float32Array([1]), 1, 1, DIRS_UP));
-  expect(gy.data[1]!).toBeGreaterThan(128);
+  expect(gy.data[1]!).toBeGreaterThan(32768);
+});
+
+test("nx: diffuse opacity gates the mask alpha (transparent diffuse pixels -> 0)", () => {
+  const opaque = new Uint8Array([1, 0]); // pixel 0 visible, pixel 1 transparent
+  const px = decode(encodeNxPng(flatNormals(2), new Float32Array([1, 1]), 2, 1, DIRS_UP, opaque));
+  expect(px.data[3]).toBe(65535); // opaque + mask 1 -> full
+  expect(px.data[7]).toBe(0); // transparent -> alpha 0 despite mask 1
+});
+
+test("diffuseOpacity: flags A>0 per pixel, null when there's no alpha channel", () => {
+  const rgba = { width: 2, height: 1, channels: 4, data: [0, 0, 0, 255, 0, 0, 0, 0] };
+  expect(diffuseOpacity(rgba)).toEqual(new Uint8Array([1, 0]));
+  expect(diffuseOpacity({ width: 1, height: 1, channels: 3, data: [10, 20, 30] })).toBeNull();
 });
 
 test("nxFileName strips a .df tag and appends .nx", () => {

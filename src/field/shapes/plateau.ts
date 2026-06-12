@@ -1,15 +1,17 @@
+import { frustumStrip } from "../controlPoints";
 import { applyProfile, PROFILE_KINDS, ProfileKind } from "../profiles";
 import { defineShapeType, enumParam } from "../registry";
 import { sdPolygon } from "../sdf";
 import { clamp, Vec2, v2 } from "../vec";
 
 /**
- * Frustum: a base ring at ground level and an independently draggable top rim at full
- * height. The slope band is the actual lateral faces — quad (base i, base i+1, top i+1,
- * top i) per side, split into two triangles, height by barycentric interpolation — so
- * each base vertex connects to its top vertex with a sharp crease, exactly like a mesh.
- * The SDF ratio remains only as a fallback for degenerate configurations (top ring
- * dragged outside the base, coincident rings).
+ * Frustum: a base ring at ground level and an independently draggable top rim at full height.
+ * The slope band is triangulated as a two-pointer strip between the rings (see frustumStrip):
+ * walk both loops by normalized position, emitting a triangle per step — base verts at height
+ * 0, top verts at height 1, height inside a triangle by barycentric interpolation. This handles
+ * ANY inner/outer counts (equal counts give the quad-per-side split; e.g. 4 outer + 5 inner fans
+ * the extra vertex). The SDF distance ramp between the rings is the fallback for points no
+ * triangle covers (degenerate / non-convex rings, top dragged outside the base).
  */
 
 /** Barycentric height inside triangle abc with corner heights ha/hb/hc; null if outside. */
@@ -61,24 +63,37 @@ fn shape_plateau(p: vec2f, base: u32) -> vec2f {
   let h = 24.0;
   let prof = u32(rec(base, 13u));
   let cs = u32(rec(base, 11u));
-  let n = u32(rec(base, 12u)) / 2u;
-  let sdB = sd_polygon(p, cs, n);
-  let sdT = sd_polygon(p, cs + n, n);
+  let nB = u32(rec(base, 2u));
+  let nT = u32(rec(base, 12u)) - nB;
+  let sdB = sd_polygon(p, cs, nB);
+  let sdT = sd_polygon(p, cs + nB, nT);
   var t = 0.0;
   if (sdT <= 0.0) {
     t = 1.0; // inside the top rim
   } else if (sdB < 0.0) {
-    t = clamp(sdB / min(sdB - sdT, -1e-6), 0.0, 1.0); // fallback for degenerate faces
-    for (var i = 0u; i < n; i = i + 1u) {
-      let j = (i + 1u) % n;
-      let bi = points[cs + i];
-      let bj = points[cs + j];
-      let ti = points[cs + n + i];
-      let tj = points[cs + n + j];
-      let r1 = plateau_tri(p, bi, bj, ti, 0.0, 0.0, 1.0);
-      if (r1.y > 0.5) { t = r1.x; break; }
-      let r2 = plateau_tri(p, bj, tj, ti, 0.0, 1.0, 1.0);
-      if (r2.y > 0.5) { t = r2.x; break; }
+    // slope band: walk the two-ring strip triangulation (mirrors frustumStrip), barycentric
+    // height per triangle. SDF ramp is the fallback for points no triangle covers.
+    t = clamp(sdB / min(sdB - sdT, -1e-6), 0.0, 1.0);
+    var i = 0u;
+    var j = 0u;
+    let steps = nB + nT;
+    for (var k = 0u; k < steps; k = k + 1u) {
+      let advanceOuter = (j >= nT) || (i < nB && (f32(i + 1u) / f32(nB) <= f32(j + 1u) / f32(nT)));
+      if (advanceOuter) {
+        let oa = points[cs + (i % nB)];
+        let ob = points[cs + ((i + 1u) % nB)];
+        let ic = points[cs + nB + (j % nT)];
+        let r = plateau_tri(p, oa, ob, ic, 0.0, 0.0, 1.0);
+        if (r.y > 0.5) { t = r.x; break; }
+        i = i + 1u;
+      } else {
+        let oa = points[cs + (i % nB)];
+        let ia = points[cs + nB + (j % nT)];
+        let ib = points[cs + nB + ((j + 1u) % nT)];
+        let r = plateau_tri(p, oa, ia, ib, 0.0, 1.0, 1.0);
+        if (r.y > 0.5) { t = r.x; break; }
+        j = j + 1u;
+      }
     }
   }
   return vec2f(h * apply_profile(prof, t, 1.0), sdB);
@@ -88,24 +103,23 @@ fn shape_plateau(p: vec2f, base: u32) -> vec2f {
     const h = 24;
     const profile = enumParam(shape, "profile") as ProfileKind;
     const cps = shape.controlPoints;
-    const n = cps.length >> 1;
-    const sdB = sdPolygon(p, cps.slice(0, n));
-    const sdT = sdPolygon(p, cps.slice(n));
+    const nB = shape.ringSplit ?? (cps.length >> 1);
+    const outer = cps.slice(0, nB);
+    const inner = cps.slice(nB);
+    const sdB = sdPolygon(p, outer);
+    const sdT = sdPolygon(p, inner);
     let t = 0;
     if (sdT <= 0) {
       t = 1; // inside the top rim
     } else if (sdB < 0) {
-      t = clamp(sdB / Math.min(sdB - sdT, -1e-6), 0, 1); // fallback for degenerate faces
-      for (let i = 0; i < n; i++) {
-        const j = (i + 1) % n;
-        const r1 = triHeight(p, cps[i]!, cps[j]!, cps[n + i]!, 0, 0, 1);
-        if (r1 !== null) {
-          t = r1;
-          break;
-        }
-        const r2 = triHeight(p, cps[j]!, cps[n + j]!, cps[n + i]!, 0, 1, 1);
-        if (r2 !== null) {
-          t = r2;
+      // slope band: barycentric height inside the two-ring strip triangulation. The SDF ramp
+      // is the fallback for points no triangle covers (degenerate / non-convex rings).
+      t = clamp(sdB / Math.min(sdB - sdT, -1e-6), 0, 1);
+      const ring = (r: number, idx: number): Vec2 => (r === 0 ? outer[idx]! : inner[idx]!);
+      for (const [a, b, c] of frustumStrip(nB, inner.length).tris) {
+        const hit = triHeight(p, ring(a[0], a[1]), ring(b[0], b[1]), ring(c[0], c[1]), a[0], b[0], c[0]);
+        if (hit !== null) {
+          t = hit;
           break;
         }
       }

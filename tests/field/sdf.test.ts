@@ -23,6 +23,16 @@ test("sdPolygon: winding-independent sign", () => {
   expect(sdPolygon(v2(15, 0), reversed)).toBeCloseTo(5);
 });
 
+test("sdPolygon: degenerate rings degrade to point/segment distance (no NaN)", () => {
+  // 1 point = a cone apex: distance to the point, always positive (no interior)
+  const apex = sdPolygon(v2(3, 4), [v2(0, 0)]);
+  expect(apex).toBeCloseTo(5);
+  expect(Number.isNaN(sdPolygon(v2(0, 0), [v2(0, 0)]))).toBe(false);
+  // 2 points = a ridge top: distance to the segment
+  expect(sdPolygon(v2(0, 5), [v2(-10, 0), v2(10, 0)])).toBeCloseTo(5);
+  expect(Number.isNaN(sdPolygon(v2(0, 0), [v2(-10, 0), v2(10, 0)]))).toBe(false);
+});
+
 test("sdEllipse: exact for circles", () => {
   expect(sdEllipse(v2(15, 0), v2(10, 10))).toBeCloseTo(5);
   expect(sdEllipse(v2(0, 0), v2(10, 10))).toBeCloseTo(-10);

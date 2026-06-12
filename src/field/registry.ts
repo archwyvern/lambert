@@ -30,9 +30,16 @@ export function createShapeInstance(typeId: string, pos: Vec2): ShapeInstance {
     transform: { pos: { x: pos.x, y: pos.y, z: 0 }, rotation: 0, scale: { x: 1, y: 1, z: 1 } },
     params,
     controlPoints: t.controlPoints.default.map((p) => ({ ...p })),
+    gridSnap: t.controlPoints.kind !== "none", // vertex shapes snap to the ½px grid by default
     visible: true,
     locked: false,
   };
+}
+
+/** Peak |height| in px at scale.z = 1: the type's nominal, or the mesh's tallest vertex. */
+export function shapeMaxHeight(shape: ShapeInstance): number {
+  if (shape.mesh) return shape.mesh.z.reduce((m, z) => Math.max(m, Math.abs(z)), 0);
+  return getShapeType(shape.typeId).nominalHeight ?? 0;
 }
 
 export function numParam(shape: ShapeInstance, key: string): number {
