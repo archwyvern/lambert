@@ -2,3 +2,7 @@ node_modules/
 dist/
 out/
 *.actual.png
+
+# agentic planning docs — local-only, never tracked (kept out of the repo entirely)
+docs/plans/
+docs/specs/
