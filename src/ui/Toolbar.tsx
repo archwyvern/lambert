@@ -1,4 +1,5 @@
 import { ArrowRedoRegular, ArrowUndoRegular } from "@fluentui/react-icons";
+import { Badge } from "@carapace/shell";
 import type { DocumentStore, EditorState } from "../document/store";
 import type { ViewState } from "./App";
 import { cx } from "./kit";
@@ -42,9 +43,9 @@ export function Toolbar(props: {
         {state.docPath ?? "unsaved"}
       </span>
       {state.dirty ? (
-        <span className="shrink-0 border border-accent/50 bg-accent-dim px-1.5 py-0.5 text-sm text-accent">
+        <Badge tone="accent" className="shrink-0">
           unsaved
-        </span>
+        </Badge>
       ) : null}
 
       <div className="ml-2 flex shrink-0 items-center gap-2">

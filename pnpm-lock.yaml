@@ -4,10 +4,20 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  '@carapace/shell': link:../carapace/packages/shell
+  '@carapace/primitives': link:../carapace/packages/primitives
+
 importers:
 
   .:
     dependencies:
+      '@carapace/primitives':
+        specifier: link:../carapace/packages/primitives
+        version: link:../carapace/packages/primitives
+      '@carapace/shell':
+        specifier: link:../carapace/packages/shell
+        version: link:../carapace/packages/shell
       fast-png:
         specifier: ^8.0.0
         version: 8.0.0

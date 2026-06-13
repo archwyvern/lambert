@@ -6,7 +6,8 @@ import { getShapeType } from "../field/registry";
 import { snapShapeToGrid } from "../field/snap";
 import type { ShapeInstance } from "../field/types";
 import { v2 } from "../field/vec";
-import { Button, humanizeLabel, SectionLabel, SelectRow, SpinBox, ToggleRow } from "./kit";
+import { FormEnum, FormToggle } from "@carapace/shell";
+import { Button, humanizeLabel, NumberField, SectionLabel } from "./kit";
 
 const toDeg = (rad: number): number => Number(((rad * 180) / Math.PI).toFixed(1));
 const toRad = (deg: number): number => (deg * Math.PI) / 180;
@@ -32,17 +33,17 @@ export function Inspector(props: {
           {doc.source.path} · {doc.source.width}×{doc.source.height}
         </p>
         <SectionLabel>Normal Directions</SectionLabel>
-        <SelectRow
+        <FormEnum
           label="red"
-          value={doc.normalDirs.red}
+          value={doc.normalDirs.red === "left" ? 1 : 0}
           options={["right", "left"]}
-          onChange={(v) => setDirs({ red: v as "right" | "left" })}
+          onChange={(i) => setDirs({ red: i === 1 ? "left" : "right" })}
         />
-        <SelectRow
+        <FormEnum
           label="green"
-          value={doc.normalDirs.green}
+          value={doc.normalDirs.green === "down" ? 1 : 0}
           options={["up", "down"]}
-          onChange={(v) => setDirs({ green: v as "up" | "down" })}
+          onChange={(i) => setDirs({ green: i === 1 ? "down" : "up" })}
         />
         <p className="mt-2 text-sm leading-snug text-fg-mid">
           Applies to exports and the normal view. Select a shape to edit its parameters.
@@ -64,7 +65,7 @@ export function Inspector(props: {
       ) : null}
       {type.controlPoints.kind === "rings" ? (
         <>
-          <SpinBox
+          <NumberField
             label="outer vertices"
             value={shape.ringSplit ?? (shape.controlPoints.length >> 1)}
             min={type.controlPoints.min ?? 3}
@@ -84,7 +85,7 @@ export function Inspector(props: {
             }}
             onCommit={commit}
           />
-          <SpinBox
+          <NumberField
             label="inner vertices"
             value={shape.controlPoints.length - (shape.ringSplit ?? (shape.controlPoints.length >> 1))}
             min={1}
@@ -107,7 +108,7 @@ export function Inspector(props: {
           />
         </>
       ) : type.controlPoints.kind !== "none" && type.controlPoints.kind !== "mesh" ? (
-        <SpinBox
+        <NumberField
           label="vertices"
           value={shape.controlPoints.length}
           min={type.controlPoints.min ?? (type.controlPoints.kind === "polyline" ? 2 : 3)}
@@ -128,18 +129,19 @@ export function Inspector(props: {
       ) : null}
       {Object.entries(type.params).map(([key, spec]) =>
         spec.type === "enum" ? (
-          <SelectRow
+          <FormEnum
             key={key}
             label={humanizeLabel(key)}
-            value={String(shape.params[key])}
-            options={spec.options}
-            onChange={(v) => {
+            value={spec.options.indexOf(String(shape.params[key]))}
+            options={[...spec.options]}
+            onChange={(i) => {
+              const v = spec.options[i]!;
               live((s) => ({ ...s, params: { ...s.params, [key]: v } }), `param-${key}`);
               commit();
             }}
           />
         ) : (
-          <SpinBox
+          <NumberField
             key={key}
             label={humanizeLabel(key)}
             value={Number(shape.params[key])}
@@ -152,10 +154,9 @@ export function Inspector(props: {
         ),
       )}
       {type.controlPoints.kind !== "none" ? (
-        <ToggleRow
+        <FormToggle
           label="grid snap (½px)"
-          checked={shape.gridSnap ?? false}
-          title="Snap this shape's vertices and position to the ½-pixel grid"
+          value={shape.gridSnap ?? false}
           onChange={(on) => {
             store.update((d) =>
               updateShape(d, shape.id, (s) =>
@@ -173,7 +174,7 @@ export function Inspector(props: {
         <>
           {selVerts.length === 1 ? (
             <>
-              <SpinBox
+              <NumberField
                 label="x"
                 value={Number((shape.controlPoints[selVerts[0]!]?.x ?? 0).toFixed(1))}
                 step={shape.gridSnap ? 0.5 : 1}
@@ -185,7 +186,7 @@ export function Inspector(props: {
                 }
                 onCommit={commit}
               />
-              <SpinBox
+              <NumberField
                 label="y"
                 value={Number((shape.controlPoints[selVerts[0]!]?.y ?? 0).toFixed(1))}
                 step={shape.gridSnap ? 0.5 : 1}
@@ -199,7 +200,7 @@ export function Inspector(props: {
               />
             </>
           ) : null}
-          <SpinBox
+          <NumberField
             label="z"
             value={Number((shape.mesh.z[selVerts[0]!] ?? 0).toFixed(1))}
             step={1}
@@ -220,7 +221,7 @@ export function Inspector(props: {
         </>
       ) : (
         <>
-          <SpinBox
+          <NumberField
             label="x"
             value={Number(shape.transform.pos.x.toFixed(1))}
             step={shape.gridSnap ? 0.5 : 1}
@@ -229,7 +230,7 @@ export function Inspector(props: {
             }
             onCommit={commit}
           />
-          <SpinBox
+          <NumberField
             label="y"
             value={Number(shape.transform.pos.y.toFixed(1))}
             step={shape.gridSnap ? 0.5 : 1}
@@ -238,7 +239,7 @@ export function Inspector(props: {
             }
             onCommit={commit}
           />
-          <SpinBox
+          <NumberField
             label="z"
             value={Number(shape.transform.pos.z.toFixed(1))}
             step={shape.gridSnap ? 0.5 : 1}
@@ -247,14 +248,14 @@ export function Inspector(props: {
             }
             onCommit={commit}
           />
-          <SpinBox
+          <NumberField
             label="rotation"
             value={toDeg(shape.transform.rotation)}
             step={5}
             onChange={(v) => live((s) => ({ ...s, transform: { ...s.transform, rotation: toRad(v) } }), "trot")}
             onCommit={commit}
           />
-          <SpinBox
+          <NumberField
             label="scale x"
             value={Number(shape.transform.scale.x.toFixed(2))}
             step={0.1}
@@ -266,7 +267,7 @@ export function Inspector(props: {
             }
             onCommit={commit}
           />
-          <SpinBox
+          <NumberField
             label="scale y"
             value={Number(shape.transform.scale.y.toFixed(2))}
             step={0.1}
@@ -278,7 +279,7 @@ export function Inspector(props: {
             }
             onCommit={commit}
           />
-          <SpinBox
+          <NumberField
             label="scale z"
             value={Number(shape.transform.scale.z.toFixed(2))}
             step={0.1}

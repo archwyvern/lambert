@@ -1,5 +1,5 @@
 import "./styles.css";
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import { DocumentStore } from "../document/store";
 import { duplicateShape, removeShape, updateShape } from "../document/docOps";
 import { deleteVerts } from "../field/meshOps";
@@ -8,6 +8,8 @@ import { diffusePathByStore, exportNx, openImageFlow, openProjectFlow, saveFlow 
 import { dirname } from "../document/paths";
 import { buildSessionJson, parseSessionJson } from "../document/session";
 import { CanvasView } from "./CanvasView";
+import { Preview3D } from "./Preview3D";
+import { use3DCamera } from "./use3DCamera";
 import { ToolPalette } from "./ToolPalette";
 import { getHost } from "./host";
 import { Inspector } from "./Inspector";
@@ -49,6 +51,17 @@ export function App(): React.JSX.Element {
   const [leftWidth, setLeftWidth] = usePersistentState("panel:left", 208);
   const [rightWidth, setRightWidth] = usePersistentState("panel:right", 288);
   const [toast, setToast] = useState<ToastState | null>(null);
+  // 3D preview lives in the right column under the inspector; Space swaps it with the centre.
+  // Owned here (not CanvasView) so it can occupy either slot — CanvasView's renderer just
+  // attaches the canvas and feeds it the orbit.
+  const cam3d = use3DCamera();
+  const canvas3dRef = useRef<HTMLCanvasElement>(null);
+  const [swapped, setSwapped] = usePersistentState("panel:3d:swapped", false);
+  const cornerHeight = 300;
+  // bumped when the 3D canvas changes size (swap fullscreen <-> corner) so CanvasView's render
+  // effect re-fires and the orbit pass renders at the NEW resolution — otherwise the old, smaller
+  // framebuffer is shown stretched (pixelated) until the camera next moves
+  const [, bumpRender] = useReducer((x: number) => x + 1, 0);
 
   // status messages land in the bottom bar (not a popup); the last one persists until replaced
   const notify = (msg: string, tone: ToastState["tone"] = "info"): void => setToast({ msg, tone });
@@ -198,6 +211,7 @@ export function App(): React.JSX.Element {
       const mode = q.get("mode");
       if (mode && (VIEW_MODES as string[]).includes(mode)) setView((v) => ({ ...v, mode: mode as ViewMode }));
       if (q.has("raster")) setView((v) => ({ ...v, raster: true }));
+      if (q.has("swap")) setSwapped(true);
       const select = q.get("select");
       if (select) store.select(doc.shapes.find((s) => s.id === select)?.id ?? doc.shapes[0]?.id ?? null);
       const t = q.get("tool");
@@ -239,7 +253,10 @@ export function App(): React.JSX.Element {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       const id = store.state.selectedId;
       const key = e.key.toLowerCase();
-      if (key in TOOL_KEYS) {
+      if (e.code === "Space") {
+        e.preventDefault();
+        setSwapped((s) => !s);
+      } else if (key in TOOL_KEYS) {
         setTool(TOOL_KEYS[key]!);
       } else if ((e.key === "Delete" || e.key === "Backspace") && id) {
         // on a mesh with vertices selected, Delete removes those vertices; otherwise the shape
@@ -289,22 +306,56 @@ export function App(): React.JSX.Element {
         </aside>
         <ToolPalette tool={tool} setTool={setTool} />
         <Sash onDrag={(dx) => setLeftWidth((w) => clampPanel(w + dx))} />
-        <main className="relative min-w-0 flex-1 bg-[var(--color-viewport-bg)]">
-          <CanvasView
-            store={store}
-            state={state}
-            view={view}
-            tool={tool}
-            diffuseBytes={diffuse?.bytes ?? null}
-            selVerts={selVerts}
-            setSelVerts={setSelVerts}
-            onLightChange={(d) => setView((v) => ({ ...v, lightDir: d }))}
-          />
-        </main>
-        <Sash onDrag={(dx) => setRightWidth((w) => clampPanel(w - dx))} />
-        <aside className="shrink-0 overflow-y-auto bg-bg p-3" style={{ width: rightWidth }}>
-          <Inspector store={store} state={state} selVerts={selVerts} />
-        </aside>
+        {/* stage grid: a big slot (centre) + the right column (inspector over a corner slot).
+            Space swaps which view sits in `big` vs `corner` by flipping grid-area — both views
+            stay mounted so the WebGPU renderer is never torn down. */}
+        <div
+          className="grid min-w-0 flex-1"
+          style={{
+            gridTemplateColumns: `minmax(0, 1fr) auto ${rightWidth}px`,
+            gridTemplateRows: `minmax(0, 1fr) ${cornerHeight}px`,
+            gridTemplateAreas: '"big sash inspector" "big sash corner"',
+          }}
+        >
+          {/* 2D editor stays full-size in the centre always; when 3D is swapped to fullscreen
+              it just gets overlaid (Preview3D moves into "big" on top), so its camera is never
+              disturbed by a resize. */}
+          <main className="relative min-w-0 overflow-hidden bg-[var(--color-viewport-bg)]" style={{ gridArea: "big" }}>
+            <CanvasView
+              store={store}
+              state={state}
+              view={view}
+              tool={tool}
+              diffuseBytes={diffuse?.bytes ?? null}
+              selVerts={selVerts}
+              setSelVerts={setSelVerts}
+              onLightChange={(d) => setView((v) => ({ ...v, lightDir: d }))}
+              canvas3dRef={canvas3dRef}
+              orbit3d={cam3d.orbit}
+            />
+          </main>
+          <div className="flex" style={{ gridArea: "sash" }}>
+            <Sash onDrag={(dx) => setRightWidth((w) => clampPanel(w - dx))} />
+          </div>
+          <aside className="overflow-y-auto bg-bg p-3" style={{ gridArea: "inspector" }}>
+            <Inspector store={store} state={state} selVerts={selVerts} />
+          </aside>
+          {/* blank box left in the corner when the 3D is swapped out to fullscreen */}
+          <div className="border-t border-border bg-[var(--color-viewport-bg)]" style={{ gridArea: "corner" }} />
+          <div
+            className="relative overflow-hidden border-t border-border bg-[var(--color-viewport-bg)]"
+            style={{ gridArea: swapped ? "big" : "corner" }}
+          >
+            <Preview3D
+              cam={cam3d}
+              canvasRef={canvas3dRef}
+              docW={state.doc.source.width}
+              docH={state.doc.source.height}
+              enabled={!!diffuse}
+              onResize={bumpRender}
+            />
+          </div>
+        </div>
       </div>
       <StatusBar
         message={toast}

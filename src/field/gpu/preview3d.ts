@@ -78,11 +78,79 @@ fn fs(in: VOut) -> @location(0) vec4f {
     vec2i(i32(u.docW) - 1, i32(u.docH) - 1),
   );
   // lambert entirely in image space: identical shading to the 2D lit composite
+  let diffuse = textureLoad(diffuseTex, px, 0);
+  if (diffuse.a < 0.5) { discard; } // transparent diffuse -> see the floor grid through it
   let n = textureLoad(normalTex, px, 0).xyz;
-  let albedo = textureLoad(diffuseTex, px, 0).rgb;
+  let albedo = diffuse.rgb;
   let l = normalize(vec3f(u.lightX, u.lightY, u.lightZ));
   let shade = 0.25 + 0.75 * max(dot(n, l), 0.0);
   return vec4f(albedo * shade, 1.0);
+}
+`;
+
+/**
+ * Infinite floor grid: a big quad at y=0 centred on the look-at target. The grid lines are
+ * world-locked (so they read as a fixed ground) and fade out with distance to feel endless.
+ * Rendered after the mesh, depth-tested but not depth-writing, alpha-blended.
+ */
+export const GRID3D_WGSL = /* wgsl */ `
+struct GU {
+  mvp: mat4x4f,
+  centerX: f32,
+  centerZ: f32,
+  halfSize: f32,
+  cell: f32,
+  camX: f32,
+  camZ: f32,
+  fade: f32,
+  pad: f32,
+}
+@group(0) @binding(0) var<uniform> g: GU;
+
+struct GOut {
+  @builtin(position) pos: vec4f,
+  @location(0) world: vec2f,
+}
+
+@vertex
+fn vs(@builtin(vertex_index) vi: u32) -> GOut {
+  var q: vec2f;
+  switch vi {
+    case 0u: { q = vec2f(-1.0, -1.0); }
+    case 1u: { q = vec2f(1.0, -1.0); }
+    case 2u: { q = vec2f(-1.0, 1.0); }
+    case 3u: { q = vec2f(1.0, -1.0); }
+    case 4u: { q = vec2f(1.0, 1.0); }
+    default: { q = vec2f(-1.0, 1.0); }
+  }
+  let world = vec2f(g.centerX + q.x * g.halfSize, g.centerZ + q.y * g.halfSize);
+  var out: GOut;
+  out.pos = g.mvp * vec4f(world.x, 0.0, world.y, 1.0);
+  out.world = world;
+  return out;
+}
+
+fn lineAA(coord: vec2f) -> f32 {
+  let d = max(fwidth(coord), vec2f(1e-5));
+  let gv = abs(fract(coord - vec2f(0.5)) - vec2f(0.5)) / d;
+  return 1.0 - min(min(gv.x, gv.y), 1.0);
+}
+
+@fragment
+fn fs(in: GOut) -> @location(0) vec4f {
+  let minor = lineAA(in.world / g.cell);
+  let major = lineAA(in.world / (g.cell * 10.0));
+  let dist = distance(in.world, vec2f(g.camX, g.camZ));
+  let fade = clamp(1.0 - dist / g.fade, 0.0, 1.0);
+  var col = vec3f(0.34, 0.37, 0.42);
+  var a = minor * 0.45;
+  if (major > a) {
+    col = vec3f(0.46, 0.5, 0.57);
+    a = major;
+  }
+  a = a * fade;
+  if (a < 0.004) { discard; }
+  return vec4f(col, a);
 }
 `;
 

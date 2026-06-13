@@ -2,6 +2,9 @@
 /* electron-vite's renderer root is src/renderer; tailwind's auto-detection never sees
    src/ui without an explicit source (path is relative to this file) */
 @source "./";
+/* scan @carapace/shell's source so Tailwind emits the utility classes its
+   components use (github-declared, locally linked — see electron.vite.config.ts) */
+@source "../../../carapace/packages/shell/src";
 
 /* VSCode-like dark theme ported from the Space2D electron editor
    (Midian/Archwyvern.Games.Space2D/electron/editor/src/index.css).
@@ -28,6 +31,17 @@
   --color-hover: #262728;
   --color-list-active: rgba(200, 168, 78, 0.15);
   --color-viewport-bg: #121314;
+  /* --- @carapace/shell token aliases: map carapace's vocabulary onto this
+     grey+gold palette. Shared names (surface, border, fg, fg-mid, accent,
+     success, warning, error) are consumed directly; these fill the rest.
+     NOTE: carapace's base `surface` resolves to lambert's #121314 (darkest tier) —
+     eyeball the surface tiers once real carapace panels land. --- */
+  --color-surface-raised: var(--color-surface2);
+  --color-surface-sunken: var(--color-surface);
+  --color-accent-fg: #191a1b; /* dark text on the gold accent */
+  --color-info: var(--color-link);
+  --text-2xs: 0.625rem; /* 10px — chip micro-text only (sanctioned exception) */
+  --radius-control: 2px;
   --text-sm: 0.75rem; /* 12px floor */
   --text-base: 0.8125rem; /* 13px standard ui text */
   --text-md: 0.875rem;

@@ -2,7 +2,7 @@ import { decode } from "fast-png";
 import { buildCompositeWgsl } from "../field/gpu/composite";
 import { packShapes } from "../field/gpu/pack";
 import { GpuFieldRenderer } from "../field/gpu/pipeline";
-import { GRID, Orbit, orbitMvp, PREVIEW3D_WGSL } from "../field/gpu/preview3d";
+import { GRID, GRID3D_WGSL, Orbit, orbitMvp, PREVIEW3D_WGSL } from "../field/gpu/preview3d";
 import type { ShapeInstance } from "../field/types";
 import type { Viewport } from "./viewport";
 
@@ -47,6 +47,8 @@ export class PreviewRenderer {
   private pending: { docW: number; docH: number; params: PreviewParams } | null = null;
   private pipeline3d!: GPURenderPipeline;
   private uniforms3d!: GPUBuffer;
+  private pipelineGrid!: GPURenderPipeline;
+  private uniformsGrid!: GPUBuffer;
   private canvas3d: HTMLCanvasElement | null = null;
   private ctx3d: GPUCanvasContext | null = null;
   private depth3d: GPUTexture | null = null;
@@ -83,6 +85,35 @@ export class PreviewRenderer {
       depthStencil: { format: "depth24plus", depthWriteEnabled: true, depthCompare: "less" },
     });
     p.uniforms3d = device.createBuffer({ size: 96, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    const moduleGrid = device.createShaderModule({ code: GRID3D_WGSL });
+    p.pipelineGrid = await device.createRenderPipelineAsync({
+      layout: "auto",
+      vertex: { module: moduleGrid, entryPoint: "vs" },
+      fragment: {
+        module: moduleGrid,
+        entryPoint: "fs",
+        targets: [
+          {
+            format,
+            blend: {
+              color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
+              alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
+            },
+          },
+        ],
+      },
+      primitive: { topology: "triangle-list", cullMode: "none" },
+      depthStencil: {
+        format: "depth24plus",
+        depthWriteEnabled: false,
+        // strict + a small bias so the grid never ties/bleeds with the coplanar mesh base (y=0);
+        // it still shows through transparent diffuse (no depth written) and beyond the mesh
+        depthCompare: "less",
+        depthBias: 2,
+        depthBiasSlopeScale: 3,
+      },
+    });
+    p.uniformsGrid = device.createBuffer({ size: 96, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     return p;
   }
 
@@ -112,13 +143,26 @@ export class PreviewRenderer {
         usage: GPUTextureUsage.RENDER_ATTACHMENT,
       });
     }
+    const mvp = orbitMvp(p.orbit3d, docW, docH, w / h);
     const ub = new ArrayBuffer(96);
-    new Float32Array(ub).set(orbitMvp(p.orbit3d, docW, docH, w / h), 0);
-    new Float32Array(ub).set(
-      [GRID, GRID, docW, docH, p.lightDir[0], p.lightDir[1], p.lightDir[2], 1],
-      16,
-    );
+    new Float32Array(ub).set(mvp, 0);
+    new Float32Array(ub).set([GRID, GRID, docW, docH, p.lightDir[0], p.lightDir[1], p.lightDir[2], 1], 16);
     this.device.queue.writeBuffer(this.uniforms3d, 0, ub);
+
+    // floor grid: a big quad at y=0 centred on the look-at target (lines are world-locked + fade out)
+    const span = Math.max(docW, docH);
+    const halfSize = span * p.orbit3d.dist * 10 + span; // ~ the far plane, so the quad fills the view
+    const gub = new Float32Array(24);
+    gub.set(mvp, 0);
+    gub[16] = p.orbit3d.target.x;
+    gub[17] = p.orbit3d.target.z;
+    gub[18] = halfSize;
+    gub[19] = 16; // minor cell size (world px)
+    gub[20] = p.orbit3d.target.x;
+    gub[21] = p.orbit3d.target.z;
+    gub[22] = halfSize * 0.5; // distance at which the grid fully fades
+    this.device.queue.writeBuffer(this.uniformsGrid, 0, gub);
+
     const bind = this.device.createBindGroup({
       layout: this.pipeline3d.getBindGroupLayout(0),
       entries: [
@@ -127,6 +171,10 @@ export class PreviewRenderer {
         { binding: 2, resource: this.normalTex.createView() },
         { binding: 3, resource: this.diffuseTex.createView() },
       ],
+    });
+    const gridBind = this.device.createBindGroup({
+      layout: this.pipelineGrid.getBindGroupLayout(0),
+      entries: [{ binding: 0, resource: { buffer: this.uniformsGrid } }],
     });
     const enc = this.device.createCommandEncoder();
     const pass = enc.beginRenderPass({
@@ -148,6 +196,9 @@ export class PreviewRenderer {
     pass.setPipeline(this.pipeline3d);
     pass.setBindGroup(0, bind);
     pass.draw(GRID * GRID * 6);
+    pass.setPipeline(this.pipelineGrid);
+    pass.setBindGroup(0, gridBind);
+    pass.draw(6);
     pass.end();
     this.device.queue.submit([enc.finish()]);
   }

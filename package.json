@@ -19,7 +19,11 @@
     "onlyBuiltDependencies": [
       "electron",
       "esbuild"
-    ]
+    ],
+    "overrides": {
+      "@carapace/shell": "link:../carapace/packages/shell",
+      "@carapace/primitives": "link:../carapace/packages/primitives"
+    }
   },
   "devDependencies": {
     "@fluentui/react-icons": "^2.0.328",
@@ -36,6 +40,8 @@
     "vitest": "^4.1.8"
   },
   "dependencies": {
+    "@carapace/primitives": "github:archwyvern/carapace#main",
+    "@carapace/shell": "github:archwyvern/carapace#main",
     "fast-png": "^8.0.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
