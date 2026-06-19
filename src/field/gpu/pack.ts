@@ -1,3 +1,4 @@
+import { resolveHandles } from "../bezier";
 import { meshGradients } from "../meshOps";
 import { getShapeType } from "../registry";
 import { distanceScale } from "../transform";
@@ -22,7 +23,8 @@ export interface PackedShapes {
  */
 export function packShapes(shapes: ShapeInstance[]): PackedShapes {
   const visible = shapes.filter((s) => s.visible);
-  const totalPoints = visible.reduce((n, s) => n + s.controlPoints.length, 0);
+  // cable packs 3 vec2 per Bézier anchor (p, hIn, hOut); other shapes pack their control points
+  const totalPoints = visible.reduce((n, s) => n + (s.bezier ? s.bezier.length * 3 : s.controlPoints.length), 0);
   const totalTris = visible.reduce((n, s) => n + (s.mesh?.tris.length ?? 0), 0);
   const records = new Float32Array(Math.max(visible.length, 1) * RECORD_F32);
   const points = new Float32Array(Math.max(totalPoints, 1) * 2);
@@ -45,7 +47,7 @@ export function packShapes(shapes: ShapeInstance[]): PackedShapes {
     records[base + 9] = 1 / s.transform.scale.y;
     records[base + 10] = distanceScale(s.transform);
     records[base + 11] = cpStart;
-    records[base + 12] = s.controlPoints.length;
+    records[base + 12] = s.bezier ? s.bezier.length : s.controlPoints.length;
     records[base + 2] = s.ringSplit ?? (s.controlPoints.length >> 1); // base-ring count (rings shapes)
     const paramKeys = Object.entries(type.params);
     if (paramKeys.length > MAX_PARAMS) throw new Error(`${s.typeId}: too many params for record`);
@@ -60,10 +62,24 @@ export function packShapes(shapes: ShapeInstance[]): PackedShapes {
         records[base + PARAMS_OFFSET + pi] = value;
       }
     });
-    for (const cp of s.controlPoints) {
-      points[cpStart * 2] = cp.x;
-      points[cpStart * 2 + 1] = cp.y;
-      cpStart++;
+    if (s.bezier) {
+      // 3 vec2 per anchor: point, in-handle (offset), out-handle (offset) — the WGSL reads them as p/hIn/hOut.
+      // Resolve smooth (Catmull-Rom) tangents on the CPU so the GPU samples the exact same curve as eval().
+      for (const a of resolveHandles(s.bezier)) {
+        points[cpStart * 2] = a.p.x;
+        points[cpStart * 2 + 1] = a.p.y;
+        points[cpStart * 2 + 2] = a.hIn.x;
+        points[cpStart * 2 + 3] = a.hIn.y;
+        points[cpStart * 2 + 4] = a.hOut.x;
+        points[cpStart * 2 + 5] = a.hOut.y;
+        cpStart += 3;
+      }
+    } else {
+      for (const cp of s.controlPoints) {
+        points[cpStart * 2] = cp.x;
+        points[cpStart * 2 + 1] = cp.y;
+        cpStart++;
+      }
     }
     if (s.mesh) {
       const grad = meshGradients(s.controlPoints, s.mesh.z, s.mesh.tris);

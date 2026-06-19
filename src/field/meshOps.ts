@@ -1,5 +1,6 @@
 import type { MeshData } from "./types";
-import { Vec2, v2 } from "./vec";
+import { Vector2 } from "@carapace/primitives";
+import { v2 } from "./vec";
 
 const sameEdge = (p: number, q: number, x: number, y: number): boolean =>
   (p === x && q === y) || (p === y && q === x);
@@ -30,8 +31,8 @@ function edgesOf(mesh: MeshData): Array<[number, number]> {
 }
 
 /** Strict segment crossing (no shared endpoints, no collinear touch). */
-function segCross(p1: Vec2, p2: Vec2, p3: Vec2, p4: Vec2): boolean {
-  const side = (o: Vec2, x: Vec2, y: Vec2): number => (x.x - o.x) * (y.y - o.y) - (x.y - o.y) * (y.x - o.x);
+function segCross(p1: Vector2, p2: Vector2, p3: Vector2, p4: Vector2): boolean {
+  const side = (o: Vector2, x: Vector2, y: Vector2): number => (x.x - o.x) * (y.y - o.y) - (x.y - o.y) * (y.x - o.x);
   const opp = (a: number, b: number): boolean => (a > 0 && b < 0) || (a < 0 && b > 0);
   return (
     opp(side(p3, p4, p1), side(p3, p4, p2)) && opp(side(p1, p2, p3), side(p1, p2, p4))
@@ -48,7 +49,7 @@ export function meshEdges(mesh: MeshData): Array<[number, number]> {
  * adjacent face normals (in (x,y,height) space). Feeds the smoothness (Phong) interpolation —
  * each vertex's tangent plane. Vertices in no triangle get [0,0] (their gradient is never used).
  */
-export function meshGradients(cps: Vec2[], z: number[], tris: Array<[number, number, number]>): Array<[number, number]> {
+export function meshGradients(cps: Vector2[], z: number[], tris: Array<[number, number, number]>): Array<[number, number]> {
   const acc: Array<[number, number, number]> = cps.map(() => [0, 0, 0]); // accumulated face normals
   for (const [a, b, c] of tris) {
     const e1x = cps[b]!.x - cps[a]!.x, e1y = cps[b]!.y - cps[a]!.y, e1z = z[b]! - z[a]!;
@@ -76,12 +77,12 @@ export function meshGradients(cps: Vec2[], z: number[], tris: Array<[number, num
  * edges (no face). The new vertex's xy and height are linearly interpolated along the edge.
  */
 export function splitEdge(
-  controlPoints: Vec2[],
+  controlPoints: Vector2[],
   mesh: MeshData,
   ia: number,
   ib: number,
   t: number,
-): { controlPoints: Vec2[]; mesh: MeshData; newIndex: number } {
+): { controlPoints: Vector2[]; mesh: MeshData; newIndex: number } {
   const a = controlPoints[ia]!;
   const b = controlPoints[ib]!;
   const nv = v2(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
@@ -114,10 +115,10 @@ export function splitEdge(
  * delete the whole shape).
  */
 export function deleteVerts(
-  controlPoints: Vec2[],
+  controlPoints: Vector2[],
   mesh: MeshData,
   remove: number[],
-): { controlPoints: Vec2[]; mesh: MeshData } | null {
+): { controlPoints: Vector2[]; mesh: MeshData } | null {
   const del = new Set(remove);
   const remap = new Map<number, number>();
   const keep: number[] = [];
@@ -144,11 +145,11 @@ export function deleteVerts(
  * `keep` isn't among them, or nothing renderable remains.
  */
 export function mergeVerts(
-  cps: Vec2[],
+  cps: Vector2[],
   mesh: MeshData,
   verts: number[],
   keep: number,
-): { controlPoints: Vec2[]; mesh: MeshData } | null {
+): { controlPoints: Vector2[]; mesh: MeshData } | null {
   if (verts.length < 2 || !verts.includes(keep)) return null;
   const group = new Set(verts);
   const map = (i: number): number => (group.has(i) ? keep : i);
@@ -186,7 +187,7 @@ export function neighborsOf(mesh: MeshData, i: number): Set<number> {
  * moving the odd vertex out, leaving xy untouched.
  */
 export function alignVertToPlane(
-  cps: Vec2[],
+  cps: Vector2[],
   z: number[],
   plane: [number, number, number],
   target: number,
@@ -211,7 +212,7 @@ export function alignVertToPlane(
  * a quad's diagonal re-triangulates it instead of overlapping. Returns null if a===b or the two
  * are already connected.
  */
-export function connectVerts(cps: Vec2[], mesh: MeshData, a: number, b: number): MeshData | null {
+export function connectVerts(cps: Vector2[], mesh: MeshData, a: number, b: number): MeshData | null {
   if (a === b) return null;
   const edges = edgesOf(mesh);
   if (edges.some(([p, q]) => sameEdge(p, q, a, b))) return null; // already connected

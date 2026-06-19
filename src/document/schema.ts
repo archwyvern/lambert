@@ -1,8 +1,15 @@
+import { Vector2, Vector3 } from "@carapace/primitives";
 import { z } from "zod";
 import { polygonStats } from "../field/controlPoints";
 import type { ShapeInstance } from "../field/types";
 
 const vec2Schema = z.object({ x: z.number(), y: z.number() });
+const bezierAnchorSchema = z.object({
+  p: vec2Schema,
+  hIn: vec2Schema,
+  hOut: vec2Schema,
+  mode: z.enum(["smooth", "manual"]).optional(),
+});
 
 // pos.z = base elevation (default 0); scale.z = extrude multiplier (default 1).
 // Defaults keep pre-z documents loading unchanged.
@@ -20,6 +27,8 @@ const shapeSchema = z.object({
   }),
   params: z.record(z.string(), z.union([z.number(), z.string(), z.boolean()])),
   controlPoints: z.array(vec2Schema),
+  /** Cable only: the cubic-Bézier pen path (controlPoints is its dense sample). */
+  bezier: z.array(bezierAnchorSchema).optional(),
   /** "rings" shapes: base-ring vertex count (top ring is the rest). Absent = equal split. */
   ringSplit: z.number().int().positive().optional(),
   /** Per-shape ½px grid snap for vertices + position (authoring aid). */
@@ -60,8 +69,30 @@ const normalDirsSchema = z
   })
   .default(DEFAULT_NORMAL_DIRS);
 
-export const docSchema = z.object({
+// --- project file (project.lambert): folder-level config ---
+
+export const projectConfigSchema = z.object({
+  schemaVersion: z.literal(1),
   normalDirs: normalDirsSchema,
+});
+
+export type ProjectConfig = z.infer<typeof projectConfigSchema>;
+
+export function emptyProjectConfig(): ProjectConfig {
+  return { schemaVersion: 1, normalDirs: { ...DEFAULT_NORMAL_DIRS } };
+}
+
+export function parseProjectConfig(json: string): ProjectConfig {
+  return projectConfigSchema.parse(JSON.parse(json));
+}
+
+export function serializeProjectConfig(config: ProjectConfig): string {
+  return JSON.stringify(config, null, 2) + "\n";
+}
+
+// --- per-image document (.lnb): one image's shapes + view state ---
+
+export const docSchema = z.object({
   schemaVersion: z.literal(1),
   source: z.object({
     path: z.string().min(1),
@@ -75,12 +106,11 @@ export const docSchema = z.object({
   }),
 });
 
-export type LambertDoc = z.infer<typeof docSchema> & { shapes: ShapeInstance[] };
+export type LambertDoc = Omit<z.infer<typeof docSchema>, "shapes"> & { shapes: ShapeInstance[] };
 
 export function emptyDoc(sourcePath: string, width: number, height: number): LambertDoc {
   return {
     schemaVersion: 1,
-    normalDirs: { ...DEFAULT_NORMAL_DIRS },
     source: { path: sourcePath, width, height },
     shapes: [],
     preview: { lightDir: [-0.5, -0.5, 0.7071], viewMode: "lit" },
@@ -102,6 +132,30 @@ const REMOVED_TYPE_IDS = new Set(["surface"]);
 
 export function dropRemovedShapes(shapes: ShapeInstance[]): ShapeInstance[] {
   return shapes.filter((s) => !REMOVED_TYPE_IDS.has(s.typeId));
+}
+
+/**
+ * Convert a freshly-parsed document's plain {x,y}/{x,y,z} vectors into carapace Vector
+ * instances. JSON.parse yields prototype-less plain objects; the runtime model expects real
+ * Vector2/Vector3 (with methods), so every load boundary (.lambert and session restore) must
+ * run this. Reads .x/.y/.z, so it is idempotent — safe on already-hydrated shapes too.
+ */
+export function hydrateShapes(shapes: ShapeInstance[]): ShapeInstance[] {
+  return shapes.map((s) => ({
+    ...s,
+    transform: {
+      pos: new Vector3(s.transform.pos.x, s.transform.pos.y, s.transform.pos.z),
+      rotation: s.transform.rotation,
+      scale: new Vector3(s.transform.scale.x, s.transform.scale.y, s.transform.scale.z),
+    },
+    controlPoints: s.controlPoints.map((p) => new Vector2(p.x, p.y)),
+    bezier: s.bezier?.map((a) => ({
+      p: new Vector2(a.p.x, a.p.y),
+      hIn: new Vector2(a.hIn.x, a.hIn.y),
+      hOut: new Vector2(a.hOut.x, a.hOut.y),
+      mode: a.mode,
+    })),
+  }));
 }
 
 export function parseDoc(json: string): LambertDoc {
@@ -133,7 +187,7 @@ export function parseDoc(json: string): LambertDoc {
     // inset matches via the apothem; the old SDF inset rounded corners, this miters them)
     if (s.typeId === "plateau" && typeof s.params.slopeWidth === "number") {
       const base = s.controlPoints;
-      const { centroid, radius } = polygonStats(base);
+      const { centroid, radius } = polygonStats(base.map((v) => new Vector2(v.x, v.y)));
       const apothem = radius * Math.cos(Math.PI / Math.max(base.length, 3));
       const k = Math.max(0.2, (apothem - s.params.slopeWidth) / Math.max(apothem, 1e-6));
       s.controlPoints = [
@@ -144,7 +198,7 @@ export function parseDoc(json: string): LambertDoc {
     }
   }
   const migrated = doc as unknown as LambertDoc;
-  migrated.shapes = dropRemovedShapes(migrated.shapes);
+  migrated.shapes = hydrateShapes(dropRemovedShapes(migrated.shapes));
   return migrated;
 }
 

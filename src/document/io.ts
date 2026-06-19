@@ -1,94 +1,113 @@
 import { decode } from "fast-png";
 import type { Host } from "../ui/host";
-import type { DocumentStore } from "./store";
-import { emptyDoc, LambertDoc, parseDoc, serializeDoc } from "./schema";
+import { DocumentStore } from "./store";
+import {
+  emptyDoc,
+  emptyProjectConfig,
+  parseDoc,
+  parseProjectConfig,
+  ProjectConfig,
+  serializeDoc,
+  serializeProjectConfig,
+} from "./schema";
 import { basename, dirname, joinPath } from "./paths";
+import { legacySidecarCandidates, PROJECT_FILE, sidecarPath, Tab } from "./workspace";
 import { buildNxExport } from "./exports";
 import { diffuseOpacity } from "../exporters/nx";
 
-const PNG = [{ name: "PNG image", extensions: ["png"] }];
-const LAMBERT = [{ name: "Lambert project", extensions: ["lambert"] }];
-// open also accepts the pre-rename .flatland extension so old projects still load
-const LAMBERT_OPEN = [{ name: "Lambert project", extensions: ["lambert", "flatland"] }];
-
-export interface LoadedProject {
-  doc: LambertDoc;
-  docPath: string;
-  diffuseBytes: Uint8Array;
-  diffuseDir: string;
+export interface OpenedProject {
+  projectPath: string;
+  config: ProjectConfig;
 }
 
-/** The absolute diffuse path for the store's current doc (sidecar state, not in the doc). */
-export const diffusePathByStore = new WeakMap<DocumentStore, string>();
+/** Write a fresh project.lambert into `dir` and return its config. */
+export async function initProject(host: Host, dir: string): Promise<ProjectConfig> {
+  const config = emptyProjectConfig();
+  await host.writeFile(joinPath(dir, PROJECT_FILE), new TextEncoder().encode(serializeProjectConfig(config)));
+  return config;
+}
 
-/** Open a .lambert: parse, resolve + read the diffuse, enforce the dims contract. */
-export async function loadProject(host: Host, docPath: string): Promise<LoadedProject> {
-  const doc = parseDoc(new TextDecoder().decode(await host.readFile(docPath)));
-  const diffusePath = joinPath(dirname(docPath), doc.source.path);
-  const diffuseBytes = await host.readFile(diffusePath);
+/** Folder picker → open the project (reading project.lambert), or initialize one if absent. */
+export async function openProjectFlow(host: Host): Promise<OpenedProject | null> {
+  const dir = await host.openFolderDialog({ title: "Open project folder" });
+  if (!dir) return null;
+  const marker = joinPath(dir, PROJECT_FILE);
+  const config = (await host.pathExists(marker))
+    ? parseProjectConfig(new TextDecoder().decode(await host.readFile(marker)))
+    : await initProject(host, dir);
+  return { projectPath: dir, config };
+}
+
+/** New project: pick an (ideally empty) folder and write project.lambert. */
+export async function newProjectFlow(host: Host): Promise<OpenedProject | null> {
+  const dir = await host.openFolderDialog({ title: "New project — choose a folder" });
+  if (!dir) return null;
+  const marker = joinPath(dir, PROJECT_FILE);
+  const config = (await host.pathExists(marker))
+    ? parseProjectConfig(new TextDecoder().decode(await host.readFile(marker)))
+    : await initProject(host, dir);
+  return { projectPath: dir, config };
+}
+
+/** First existing sidecar (.lnb, then legacy .lambert/.flatland) for an image, or null. */
+async function resolveSidecar(host: Host, imagePath: string): Promise<string | null> {
+  for (const candidate of legacySidecarCandidates(imagePath)) {
+    if (await host.pathExists(candidate)) return candidate;
+  }
+  return null;
+}
+
+/** Whether an image already has authored shape data (badge helper). */
+export async function hasSidecar(host: Host, imagePath: string): Promise<boolean> {
+  return (await resolveSidecar(host, imagePath)) !== null;
+}
+
+/**
+ * Open an image as a tab: load its sidecar doc (or start an empty one), read the diffuse, and
+ * enforce the NX dims contract. docPath is the existing sidecar (may be legacy) or null when
+ * unsaved; saveTab always writes the `.lnb`, migrating legacy sidecars on first save.
+ */
+export async function openImageTab(host: Host, imagePath: string): Promise<Tab> {
+  const diffuseBytes = await host.readFile(imagePath);
   const decoded = decode(diffuseBytes);
-  if (decoded.width !== doc.source.width || decoded.height !== doc.source.height) {
-    throw new Error(
-      `diffuse is ${decoded.width}x${decoded.height} but the document expects ` +
-        `${doc.source.width}x${doc.source.height} — the NX contract requires an exact match`,
-    );
+  const sidecar = await resolveSidecar(host, imagePath);
+  let docPath: string | null = null;
+  let doc;
+  if (sidecar) {
+    doc = parseDoc(new TextDecoder().decode(await host.readFile(sidecar)));
+    if (decoded.width !== doc.source.width || decoded.height !== doc.source.height) {
+      throw new Error(
+        `${basename(imagePath)} is ${decoded.width}x${decoded.height} but its document expects ` +
+          `${doc.source.width}x${doc.source.height} — the NX contract requires an exact match`,
+      );
+    }
+    docPath = sidecar;
+  } else {
+    doc = emptyDoc(basename(imagePath), decoded.width, decoded.height);
   }
-  return { doc, docPath, diffuseBytes, diffuseDir: dirname(docPath) };
+  return {
+    imagePath,
+    docPath,
+    store: new DocumentStore(doc, docPath),
+    diffuse: { bytes: diffuseBytes, dir: dirname(imagePath) },
+  };
 }
 
-type SetDiffuse = (d: { bytes: Uint8Array; dir: string | null } | null) => void;
-
-export async function openImageFlow(host: Host, store: DocumentStore, setDiffuse: SetDiffuse): Promise<void> {
-  const path = await host.openDialog({ title: "Open diffuse image", filters: PNG });
-  if (!path) return;
-  const bytes = await host.readFile(path);
-  const decoded = decode(bytes);
-  const doc = emptyDoc(basename(path), decoded.width, decoded.height);
-  store.reset(doc, null);
-  diffusePathByStore.set(store, path);
-  setDiffuse({ bytes, dir: dirname(path) });
+/** Write the tab's `.lnb` sidecar (creating/migrating it), update docPath, clear dirty. */
+export async function saveTab(host: Host, tab: Tab): Promise<string> {
+  const path = sidecarPath(tab.imagePath);
+  await host.writeFile(path, new TextEncoder().encode(serializeDoc(tab.store.state.doc)));
+  tab.docPath = path;
+  tab.store.markSaved(path);
+  return path;
 }
 
-export async function openProjectFlow(host: Host, store: DocumentStore, setDiffuse: SetDiffuse): Promise<void> {
-  const path = await host.openDialog({ title: "Open project", filters: LAMBERT_OPEN });
-  if (!path) return;
-  const loaded = await loadProject(host, path);
-  store.reset(loaded.doc, loaded.docPath);
-  diffusePathByStore.set(store, joinPath(loaded.diffuseDir, loaded.doc.source.path));
-  setDiffuse({ bytes: loaded.diffuseBytes, dir: loaded.diffuseDir });
-}
-
-export async function saveFlow(host: Host, store: DocumentStore, saveAs: boolean): Promise<void> {
-  const diffusePath = diffusePathByStore.get(store);
-  if (!diffusePath) throw new Error("no document to save");
-  let path = store.state.docPath;
-  if (saveAs || !path) {
-    const stem = basename(diffusePath).replace(/(\.df)?\.png$/i, "");
-    path = await host.saveDialog({
-      title: "Save project",
-      defaultPath: joinPath(dirname(diffusePath), `${stem}.lambert`),
-      filters: LAMBERT,
-    });
-    if (!path) return;
-  }
-  // store the diffuse path relative to the doc when it lives under the doc's directory
-  const docDir = dirname(path);
-  const rel = diffusePath.startsWith(docDir + "/") ? diffusePath.slice(docDir.length + 1) : diffusePath;
-  if (rel !== store.state.doc.source.path) {
-    store.update((d) => ({ ...d, source: { ...d.source, path: rel } }));
-    store.endGesture();
-  }
-  await host.writeFile(path, new TextEncoder().encode(serializeDoc(store.state.doc)));
-  store.markSaved(path);
-}
-
-export async function exportNx(host: Host, store: DocumentStore): Promise<string> {
-  const diffusePath = diffusePathByStore.get(store);
-  if (!diffusePath) throw new Error("no document to export");
+/** Export the tab's NX next to its image, using the project's normal-channel convention. */
+export async function exportTabNx(host: Host, tab: Tab, config: ProjectConfig): Promise<string> {
   const { gpuExportRender } = await import("../ui/exportRender");
-  const render = await gpuExportRender(store.state.doc);
-  const diffuse = decode(await host.readFile(diffusePath));
-  const file = buildNxExport(store.state.doc, render, diffusePath, diffuseOpacity(diffuse));
+  const render = await gpuExportRender(tab.store.state.doc);
+  const diffuse = decode(await host.readFile(tab.imagePath));
+  const file = buildNxExport(tab.store.state.doc, render, tab.imagePath, config.normalDirs, diffuseOpacity(diffuse));
   await host.writeFile(file.path, file.bytes);
   return file.warning ? `${file.path} written — WARNING: ${file.warning}` : `wrote ${file.path}`;
 }

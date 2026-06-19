@@ -4,6 +4,8 @@ import { updateShape } from "../document/docOps";
 import type { LambertDoc } from "../document/schema";
 
 import { frustumStrip } from "../field/controlPoints";
+import { BezierAnchor, bezierAnchor, bezierSpine, nearestOnSpine, resolveHandles } from "../field/bezier";
+import { CABLE_SUB } from "../field/shapes/cable";
 import {
   alignVertToPlane,
   connectVerts,
@@ -18,14 +20,15 @@ import { getShapeType } from "../field/registry";
 import { alignedToAxis, snapVec } from "../field/snap";
 import { fromLocal, toLocal } from "../field/transform";
 import type { ShapeInstance } from "../field/types";
-import { v2, Vec2 } from "../field/vec";
+import { Vector2, Vector3 } from "@carapace/primitives";
+import { v2 } from "../field/vec";
 import { ContextMenu, MenuEntry } from "./kit";
 import { axisScaleFromDrag, groupScaleFactor, pointsBounds, scalePointsAbout } from "./picking";
 import type { ToolMode } from "./tools";
 import { canvasToScreen, screenToCanvas, Viewport } from "./viewport";
 
 /** Shape-local footprint bounds (control-point extents; dome from its radii). */
-function localBounds(s: ShapeInstance): { min: Vec2; max: Vec2 } {
+function localBounds(s: ShapeInstance): { min: Vector2; max: Vector2 } {
   if (s.controlPoints.length > 0) {
     let minX = Infinity;
     let minY = Infinity;
@@ -43,7 +46,7 @@ function localBounds(s: ShapeInstance): { min: Vec2; max: Vec2 } {
 }
 
 /** Forward of toLocal: scale THEN rotate, then translate (pinned by picking.test.ts). */
-const localToCanvas = (s: ShapeInstance, cp: Vec2): Vec2 => fromLocal(s.transform, cp);
+const localToCanvas = (s: ShapeInstance, cp: Vector2): Vector2 => fromLocal(s.transform, cp);
 
 const PAD = 6; // local-px breathing room around the footprint
 
@@ -62,17 +65,18 @@ export function Gizmos(props: {
   const unlocked = !doc.shapes.find((s) => s.id === selectedId)?.locked;
   const handles = tool === "select" && unlocked; // shape transform handles (corners/edges)
   const vertHandles = (tool === "select" || tool === "vertex") && unlocked; // vertex dots + group
+  const bezierDrag = useRef<{ kind: "point" | "in" | "out"; i: number } | null>(null); // cable pen edit
   const dragState = useRef<{
-    start: Vec2;
+    start: Vector2;
     rotation: number;
-    scale: { x: number; y: number; z: number };
-    pos: { x: number; y: number; z: number };
+    scale: Vector3;
+    pos: Vector3;
     /** Fixed point the scale pivots about (the opposite corner/edge), local + canvas. */
-    anchorLocal: Vec2;
-    anchorCanvas: Vec2;
+    anchorLocal: Vector2;
+    anchorCanvas: Vector2;
   } | null>(null);
   // multi-vertex selection lives in CanvasView; this is the move/scale drag state
-  const vertDrag = useRef<{ startCanvas: Vec2; starts: { i: number; p: Vec2 }[]; pivot: Vec2 } | null>(null);
+  const vertDrag = useRef<{ startCanvas: Vector2; starts: { i: number; p: Vector2 }[]; pivot: Vector2 } | null>(null);
   // true while a vertex is held/dragged — gates the octant alignment guide on the edge lines
   const [draggingVert, setDraggingVert] = useState(false);
   // right-click context menu: `verts` = the set Connect/Merge/Delete act on; `zalign` = align a 4th
@@ -105,26 +109,26 @@ export function Gizmos(props: {
     v2(bounds.min.x, bounds.max.y),
   ];
 
-  const eventCanvasPoint = (e: React.MouseEvent): Vec2 => {
+  const eventCanvasPoint = (e: React.MouseEvent): Vector2 => {
     const svg = (e.currentTarget as SVGGraphicsElement).ownerSVGElement!;
     const rect = svg.getBoundingClientRect();
     return screenToCanvas(viewport, v2(e.clientX - rect.left, e.clientY - rect.top));
   };
 
-  const begin = (anchorLocal: Vec2) => (e: React.PointerEvent): void => {
+  const begin = (anchorLocal: Vector2) => (e: React.PointerEvent): void => {
     e.stopPropagation();
     (e.target as Element).setPointerCapture(e.pointerId);
     dragState.current = {
       start: eventCanvasPoint(e),
       rotation: shape.transform.rotation,
-      scale: { ...shape.transform.scale },
-      pos: { ...shape.transform.pos },
+      scale: shape.transform.scale,
+      pos: shape.transform.pos,
       anchorLocal,
       anchorCanvas: localToCanvas(shape, anchorLocal),
     };
   };
 
-  const handleProps = (anchorLocal: Vec2, apply: (p: Vec2, e: React.PointerEvent) => void) => ({
+  const handleProps = (anchorLocal: Vector2, apply: (p: Vector2, e: React.PointerEvent) => void) => ({
     onPointerDown: begin(anchorLocal),
     onPointerMove: (e: React.PointerEvent) => {
       if (!dragState.current) return;
@@ -138,14 +142,14 @@ export function Gizmos(props: {
   });
 
   /** Apply a new scale while pinning the drag anchor (opposite corner/edge) in place. */
-  const scaleAround = (sc: { x: number; y: number; z: number }): void => {
+  const scaleAround = (sc: Vector3): void => {
     const ds = dragState.current!;
     const c = Math.cos(ds.rotation);
     const s = Math.sin(ds.rotation);
     const rx = ds.anchorLocal.x * sc.x;
     const ry = ds.anchorLocal.y * sc.y;
     // pos shifts so anchorLocal still lands on anchorCanvas under the new scale
-    const pos = { x: ds.anchorCanvas.x - (rx * c - ry * s), y: ds.anchorCanvas.y - (rx * s + ry * c), z: ds.pos.z };
+    const pos = new Vector3(ds.anchorCanvas.x - (rx * c - ry * s), ds.anchorCanvas.y - (rx * s + ry * c), ds.pos.z);
     store.update(
       (d) => updateShape(d, shape.id, (sh) => ({ ...sh, transform: { ...sh.transform, scale: sc, pos } })),
       { coalesce: `scale:${shape.id}` },
@@ -166,20 +170,20 @@ export function Gizmos(props: {
     return handleProps(v2((a.x + b.x) / 2, (a.y + b.y) / 2), (p, e) => {
       const ds = dragState.current!;
       const sc = axisScaleFromDrag(ds.anchorCanvas, ds.rotation, ds.start, p, ds.scale, e.shiftKey);
-      scaleAround(e.shiftKey ? sc : axis === "x" ? { ...ds.scale, x: sc.x } : { ...ds.scale, y: sc.y });
+      scaleAround(e.shiftKey ? sc : axis === "x" ? ds.scale.withX(sc.x) : ds.scale.withY(sc.y));
     });
   };
 
   // commit a transform of the selected control points (move or scale), keyed by their start
   // positions captured at drag-start so repeated moves don't compound
-  const applyVertDrag = (transformLocal: (start: Vec2) => Vec2): void => {
+  const applyVertDrag = (transformLocal: (start: Vector2) => Vector2): void => {
     const d = vertDrag.current!;
     const byIndex = new Map(d.starts.map((s) => [s.i, s.p]));
     // snap the vertex's CANVAS position to the ½px grid (not its local coord), so it lands on
     // the grid the user sees regardless of the shape's scale/rotation
     const place = shape.gridSnap
-      ? (local: Vec2): Vec2 => toLocal(shape.transform, snapVec(fromLocal(shape.transform, local)))
-      : (local: Vec2): Vec2 => local;
+      ? (local: Vector2): Vector2 => toLocal(shape.transform, snapVec(fromLocal(shape.transform, local)))
+      : (local: Vector2): Vector2 => local;
     store.update(
       (doc2) =>
         updateShape(doc2, shape.id, (s) => ({
@@ -193,7 +197,7 @@ export function Gizmos(props: {
     );
   };
 
-  const beginVertDrag = (e: React.PointerEvent, indices: number[], pivot: Vec2): void => {
+  const beginVertDrag = (e: React.PointerEvent, indices: number[], pivot: Vector2): void => {
     e.stopPropagation();
     (e.target as Element).setPointerCapture(e.pointerId);
     vertDrag.current = {
@@ -238,7 +242,7 @@ export function Gizmos(props: {
   });
 
   // group-scale handle on the selection's bbox corner: scales selected verts about centroid
-  const groupScaleHandle = (pivot: Vec2) => ({
+  const groupScaleHandle = (pivot: Vector2) => ({
     ...vertEndProps,
     onPointerDown: (e: React.PointerEvent) => beginVertDrag(e, selVerts, pivot),
     onPointerMove: (e: React.PointerEvent) => {
@@ -357,6 +361,63 @@ export function Gizmos(props: {
     return items;
   };
 
+  // cable Bézier editing
+  const isCable = shape.typeId === "cable" && !!shape.bezier;
+  const commitBezier = (next: BezierAnchor[], coalesce: string): void => {
+    // unbaked: only the path is stored; the fold samples it directly (no controlPoints)
+    store.update((d) => updateShape(d, shape.id, (sh) => ({ ...sh, bezier: next })), { coalesce });
+  };
+  // drag handlers for a vertex point / its in / out tangent handle (mirror on plain drag, Alt breaks)
+  const bezierHandleProps = (kind: "point" | "in" | "out", i: number) => ({
+    onPointerDown: (e: React.PointerEvent) => {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      (e.target as Element).setPointerCapture(e.pointerId);
+      bezierDrag.current = { kind, i };
+    },
+    onPointerMove: (e: React.PointerEvent) => {
+      const drag = bezierDrag.current;
+      if (!drag || !shape.bezier) return;
+      const local = toLocal(shape.transform, eventCanvasPoint(e));
+      const next = shape.bezier.map((a, idx) => {
+        if (idx !== drag.i) return a;
+        if (drag.kind === "point") {
+          // plain drag moves the vertex and leaves it smooth (tangents re-derive from neighbours);
+          // Alt-drag breaks it into a manual point with symmetric tangents pulled out from the cursor
+          if (e.altKey) {
+            const h = v2(local.x - a.p.x, local.y - a.p.y);
+            return { ...a, hOut: h, hIn: v2(-h.x, -h.y), mode: "manual" as const };
+          }
+          return { ...a, p: local };
+        }
+        // dragging a tangent handle pins the anchor to manual so the stored handles are honoured
+        const h = v2(local.x - a.p.x, local.y - a.p.y);
+        if (drag.kind === "out") {
+          return e.altKey ? { ...a, hOut: h, mode: "manual" as const } : { ...a, hOut: h, hIn: v2(-h.x, -h.y), mode: "manual" as const };
+        }
+        return e.altKey ? { ...a, hIn: h, mode: "manual" as const } : { ...a, hIn: h, hOut: v2(-h.x, -h.y), mode: "manual" as const };
+      });
+      commitBezier(next, `bez:${shape.id}`);
+    },
+    onPointerUp: (e: React.PointerEvent) => {
+      e.stopPropagation();
+      bezierDrag.current = null;
+      store.endGesture();
+    },
+  });
+  // click on the curve drops a new smooth anchor at the nearest point; the spline re-flows through it
+  const insertOnCurve = (e: React.PointerEvent): void => {
+    if (e.button !== 0 || !shape.bezier) return;
+    e.stopPropagation();
+    const near = nearestOnSpine(shape.bezier, toLocal(shape.transform, eventCanvasPoint(e)));
+    if (!near) return;
+    const next = shape.bezier.slice();
+    next.splice(near.seg + 1, 0, bezierAnchor(near.point));
+    commitBezier(next, `ins:${shape.id}`);
+    store.endGesture();
+  };
+  const bezScreen = (local: Vector2): Vector2 => canvasToScreen(viewport, localToCanvas(shape, local));
+
   return (
     <>
       <svg className="pointer-events-none absolute inset-0 h-full w-full">
@@ -367,6 +428,97 @@ export function Gizmos(props: {
         </filter>
       </defs>
       <g filter="url(#gizmo-halo)">
+      {/* cable Bézier pen: clickable curve (insert), tangent stalks, vertex + handle dots */}
+      {isCable && vertHandles ? (
+        <>
+          {(() => {
+            const pts = bezierSpine(shape.bezier!, CABLE_SUB).map((cp) => { const s = bezScreen(cp); return `${s.x},${s.y}`; }).join(" ");
+            return (
+              <>
+                {/* visible centreline (not interactive) so the whole cable path reads at a glance */}
+                <polyline points={pts} fill="none" stroke="var(--color-accent)" strokeWidth={1.5} strokeOpacity={0.85} style={{ pointerEvents: "none" }} />
+                {/* fat invisible hit strip: click anywhere along the path to insert an anchor */}
+                <polyline points={pts} fill="none" stroke="transparent" strokeWidth={14} style={{ pointerEvents: "stroke", cursor: "copy" }} onPointerDown={insertOnCurve} />
+              </>
+            );
+          })()}
+          {resolveHandles(shape.bezier!).map((a, i) => {
+            const pS = bezScreen(a.p);
+            const hasOut = a.hOut.x !== 0 || a.hOut.y !== 0;
+            const hasIn = a.hIn.x !== 0 || a.hIn.y !== 0;
+            const outS = bezScreen(v2(a.p.x + a.hOut.x, a.p.y + a.hOut.y));
+            const inS = bezScreen(v2(a.p.x + a.hIn.x, a.p.y + a.hIn.y));
+            return (
+              <g key={`bz-${i}`}>
+                {hasOut ? <line x1={pS.x} y1={pS.y} x2={outS.x} y2={outS.y} stroke="var(--color-accent)" strokeWidth={1} strokeOpacity={0.6} /> : null}
+                {hasIn ? <line x1={pS.x} y1={pS.y} x2={inS.x} y2={inS.y} stroke="var(--color-accent)" strokeWidth={1} strokeOpacity={0.6} /> : null}
+                {hasOut ? (
+                  <g {...bezierHandleProps("out", i)} style={{ cursor: "move" }}>
+                    <circle cx={outS.x} cy={outS.y} r={11} fill="transparent" style={{ pointerEvents: "auto" }} />
+                    <circle cx={outS.x} cy={outS.y} r={4} fill="#191a1b" stroke="var(--color-accent)" strokeWidth={1.5} style={{ pointerEvents: "none" }} />
+                  </g>
+                ) : null}
+                {hasIn ? (
+                  <g {...bezierHandleProps("in", i)} style={{ cursor: "move" }}>
+                    <circle cx={inS.x} cy={inS.y} r={11} fill="transparent" style={{ pointerEvents: "auto" }} />
+                    <circle cx={inS.x} cy={inS.y} r={4} fill="#191a1b" stroke="var(--color-accent)" strokeWidth={1.5} style={{ pointerEvents: "none" }} />
+                  </g>
+                ) : null}
+                <g
+                  {...bezierHandleProps("point", i)}
+                  style={{ cursor: "move" }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (shape.bezier && shape.bezier.length > 2) {
+                      commitBezier(
+                        shape.bezier.filter((_, idx) => idx !== i),
+                        `del:${shape.id}`,
+                      );
+                      store.endGesture();
+                    }
+                  }}
+                >
+                  <circle cx={pS.x} cy={pS.y} r={12} fill="transparent" style={{ pointerEvents: "auto" }} />
+                  <circle cx={pS.x} cy={pS.y} r={5} fill="var(--color-accent)" stroke="#191a1b" strokeWidth={1.5} style={{ pointerEvents: "none" }} />
+                </g>
+              </g>
+            );
+          })}
+          {/* end-extend handles (hollow): append a corner segment past either end to lengthen */}
+          {shape.bezier!.length >= 2
+            ? [false, true].map((atEnd) => {
+                const b = shape.bezier!;
+                const a = atEnd ? b[b.length - 1]! : b[0]!;
+                const nb = atEnd ? b[b.length - 2]! : b[1]!;
+                const dx = a.p.x - nb.p.x;
+                const dy = a.p.y - nb.p.y;
+                const len = Math.hypot(dx, dy) || 1;
+                const ext = v2(a.p.x + (dx / len) * 28, a.p.y + (dy / len) * 28);
+                const s = bezScreen(ext);
+                return (
+                  <circle
+                    key={atEnd ? "ext-end" : "ext-start"}
+                    cx={s.x}
+                    cy={s.y}
+                    r={4}
+                    fill="none"
+                    stroke="var(--color-accent)"
+                    strokeWidth={1.5}
+                    strokeOpacity={0.7}
+                    style={{ pointerEvents: "auto", cursor: "copy" }}
+                    onPointerDown={(e) => {
+                      if (e.button !== 0) return;
+                      e.stopPropagation();
+                      commitBezier(atEnd ? [...b, bezierAnchor(ext)] : [bezierAnchor(ext), ...b], `ext:${shape.id}`);
+                      store.endGesture();
+                    }}
+                  />
+                );
+              })
+            : null}
+        </>
+      ) : null}
       {/* oriented bounding box: rotates and shears with the shape's transform */}
       <polygon
         points={corners.map((c) => `${c.x},${c.y}`).join(" ")}
@@ -467,7 +619,7 @@ export function Gizmos(props: {
             // while dragging a vertex, an edge aligned to a 45° axis (within ¼px on the canvas
             // grid — points are screen-space, so scale the tol by zoom) lights bright white + thick
             const alignTol = 0.25 * viewport.zoom;
-            const seg = (a: Vec2, b: Vec2, key: string, dashed?: boolean): React.JSX.Element => {
+            const seg = (a: Vector2, b: Vector2, key: string, dashed?: boolean): React.JSX.Element => {
               const on = draggingVert && alignedToAxis(a, b, alignTol);
               return (
                 <line

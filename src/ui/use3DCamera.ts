@@ -68,16 +68,16 @@ export function use3DCamera() {
       if (b & 1 && b & 2) {
         setTranslating(true);
         verticalPan(docW, docH, cssH, dy); // left+right = raise/lower the focal
-      } else if (b & 2 || b & 4) {
+      } else if (b & 2) {
         setTranslating(false);
         setOrbit((o) => ({
           ...o,
           yaw: o.yaw - dx * 0.01,
           pitch: Math.min(PITCH_MAX, Math.max(PITCH_MIN, o.pitch + dy * 0.01)),
-        })); // right or middle = rotate
-      } else if (b & 1) {
+        })); // right = rotate
+      } else if (b & 1 || b & 4) {
         setTranslating(true);
-        groundPan(docW, docH, cssH, dx, dy); // left = drag the focal horizontally
+        groundPan(docW, docH, cssH, dx, dy); // left or middle = pan the focal horizontally
       }
     };
     const cleanup = (): void => {

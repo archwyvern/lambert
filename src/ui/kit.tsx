@@ -1,5 +1,4 @@
 import { useEffect } from "react";
-import { SpinSlider } from "@carapace/shell";
 
 export function cx(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(" ");
@@ -87,39 +86,6 @@ export function SectionLabel(props: { children: React.ReactNode; className?: str
   return (
     <div className={cx("mb-1.5 text-sm font-semibold uppercase tracking-wide text-fg-mid", props.className)}>
       {props.children}
-    </div>
-  );
-}
-
-/**
- * Labelled number field: carapace's SpinSlider (drag-scrub + click-to-type +
- * expr eval) in carapace's stacked FormSlider layout, but with OPTIONAL bounds —
- * lambert's transform fields are unbounded, which carapace's FormSlider can't express.
- */
-export function NumberField(props: {
-  label: string;
-  value: number;
-  step?: number;
-  min?: number;
-  max?: number;
-  onChange: (v: number) => void;
-  onCommit?: (v: number) => void;
-}): React.JSX.Element {
-  const { label, value, step, min, max, onChange, onCommit } = props;
-  return (
-    <div className="flex flex-col gap-0.5">
-      <span className="truncate text-sm text-fg-mid" title={label}>
-        {label}
-      </span>
-      <SpinSlider
-        value={value}
-        onChange={onChange}
-        onCommit={onCommit}
-        min={min}
-        max={max}
-        step={step}
-        integer={(step ?? 1) >= 1}
-      />
     </div>
   );
 }

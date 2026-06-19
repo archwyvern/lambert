@@ -1,7 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu } from "electron";
-import { readFile, writeFile } from "node:fs/promises";
+import { access, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { serveFs } from "@carapace/shell/node";
 
 // unpackaged dev runs report the app name as "Electron"; pin it so userData
 // (session memory) lands in ~/.config/lambert instead of the shared Electron dir
@@ -43,6 +44,19 @@ app.whenReady().then(() => {
     await writeFile(p, data);
   });
 
+  ipcMain.handle("dialog:openFolder", async (_e, opts: { title: string }) => {
+    const r = await dialog.showOpenDialog({ title: opts.title, properties: ["openDirectory"] });
+    return r.canceled ? null : r.filePaths[0];
+  });
+  ipcMain.handle("fs:exists", async (_e, p: string) => {
+    try {
+      await access(p);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+
   // session memory: last working state, stashed in userData (see src/document/session.ts)
   const sessionPath = path.join(app.getPath("userData"), "session.json");
   ipcMain.handle("session:load", async () => {
@@ -68,6 +82,10 @@ app.whenReady().then(() => {
     },
   });
 
+  // carapace fs protocol: backs the shared <FileExplorer> (renderer createIpcFs <-> this).
+  // Default real-path provider (createNodeFs) — Lambert addresses files by absolute path.
+  serveFs(ipcMain, { send: (channel, ...args) => win.webContents.send(channel, ...args) });
+
   // application menu: file/edit actions route to the renderer as menu:action events;
   // accelerators live here so they are real OS-level shortcuts
   const send = (action: string) => () => win.webContents.send("menu:action", action);
@@ -76,11 +94,11 @@ app.whenReady().then(() => {
       {
         label: "File",
         submenu: [
-          { label: "Open Image…", accelerator: "CmdOrCtrl+O", click: send("open-image") },
-          { label: "Open Project…", accelerator: "CmdOrCtrl+Shift+O", click: send("open-project") },
+          { label: "New Project…", accelerator: "CmdOrCtrl+Shift+N", click: send("new-project") },
+          { label: "Open Project…", accelerator: "CmdOrCtrl+O", click: send("open-project") },
           { type: "separator" },
           { label: "Save", accelerator: "CmdOrCtrl+S", click: send("save") },
-          { label: "Save As…", accelerator: "CmdOrCtrl+Shift+S", click: send("save-as") },
+          { label: "Save All", accelerator: "CmdOrCtrl+Shift+S", click: send("save-all") },
           { type: "separator" },
           { label: "Export NX", accelerator: "CmdOrCtrl+E", click: send("export-nx") },
           { type: "separator" },

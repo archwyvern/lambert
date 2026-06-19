@@ -13,7 +13,7 @@ test("addShape appends, updateShape patches immutably", () => {
   expect(d1.shapes.length).toBe(1);
   expect(doc.shapes.length).toBe(0); // original untouched
   const id = d1.shapes[0]!.id;
-  const d2 = updateShape(d1, id, (s) => ({ ...s, transform: { ...s.transform, scale: { ...s.transform.scale, z: 0.5 } } }));
+  const d2 = updateShape(d1, id, (s) => ({ ...s, transform: { ...s.transform, scale: s.transform.scale.withZ(0.5) } }));
   expect(d2.shapes[0]!.transform.scale.z).toBe(0.5);
   expect(d1.shapes[0]!.transform.scale.z).toBe(1);
 });
@@ -94,7 +94,7 @@ test("store: coalesced gesture is one undo step", () => {
   const id = store.state.doc.shapes[0]!.id;
   for (const x of [1, 2, 3, 4]) {
     store.update(
-      (d) => updateShape(d, id, (s) => ({ ...s, transform: { ...s.transform, pos: { ...s.transform.pos, x, y: 0 } } })),
+      (d) => updateShape(d, id, (s) => ({ ...s, transform: { ...s.transform, pos: s.transform.pos.withX(x).withY(0) } })),
       { coalesce: `move:${id}` },
     );
   }

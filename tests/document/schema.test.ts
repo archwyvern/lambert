@@ -1,8 +1,33 @@
 import { expect, test } from "vitest";
 import "../../src/field/shapes";
 import { createShapeInstance } from "../../src/field/registry";
-import { emptyDoc, parseDoc, serializeDoc } from "../../src/document/schema";
+import {
+  emptyDoc,
+  emptyProjectConfig,
+  parseDoc,
+  parseProjectConfig,
+  serializeDoc,
+  serializeProjectConfig,
+} from "../../src/document/schema";
 import { v2 } from "../../src/field/vec";
+
+test("project config round-trips with default normal dirs", () => {
+  const config = emptyProjectConfig();
+  expect(config).toEqual({ schemaVersion: 1, normalDirs: { red: "right", green: "up" } });
+  expect(parseProjectConfig(serializeProjectConfig(config))).toEqual(config);
+});
+
+test("project config applies normalDirs defaults when absent", () => {
+  expect(parseProjectConfig(JSON.stringify({ schemaVersion: 1 }))).toEqual(emptyProjectConfig());
+});
+
+test("doc no longer carries normalDirs; a legacy normalDirs field is dropped on load", () => {
+  const doc = emptyDoc("hull.df.png", 64, 64);
+  expect("normalDirs" in doc).toBe(false);
+  const legacy = { ...(doc as Record<string, unknown>), normalDirs: { red: "left", green: "down" } };
+  const back = parseDoc(JSON.stringify(legacy));
+  expect("normalDirs" in back).toBe(false);
+});
 
 test("empty doc round-trips", () => {
   const doc = emptyDoc("hull.df.png", 256, 128);

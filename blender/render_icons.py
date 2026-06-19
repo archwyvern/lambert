@@ -1,7 +1,7 @@
 """Render the shape-library icons as actual 3D clay renders.
 
-Each icon models the real height-field shape the engine evaluates (dome, plateau,
-ridge, groove) so the palette previews what you actually get. Run headless:
+Each icon models the real height-field shape the engine evaluates, so the palette previews
+what you actually get. One builder per registered shape type. Run headless:
 
     blender --background --python blender/render_icons.py
 
@@ -23,7 +23,6 @@ def reset_scene() -> None:
     scene.render.resolution_x = SIZE
     scene.render.resolution_y = SIZE
     scene.render.film_transparent = True
-    # EEVEE's identifier varies across versions; fall back gracefully
     for engine in ("BLENDER_EEVEE_NEXT", "BLENDER_EEVEE", "BLENDER_WORKBENCH"):
         try:
             scene.render.engine = engine
@@ -33,8 +32,6 @@ def reset_scene() -> None:
 
 
 def add_clay_material(obj: bpy.types.Object) -> None:
-    # mid-gray clay with a harder key/fill ratio (set in the lights) so the form's
-    # edges read at small sizes; pure white washed out the silhouettes
     mat = bpy.data.materials.new("clay")
     mat.use_nodes = True
     bsdf = mat.node_tree.nodes["Principled BSDF"]
@@ -44,7 +41,6 @@ def add_clay_material(obj: bpy.types.Object) -> None:
 
 
 def setup_camera_and_light() -> None:
-    # orthographic three-quarter view, classic clay-icon framing
     cam_data = bpy.data.cameras.new("cam")
     cam_data.type = "ORTHO"
     cam_data.ortho_scale = 3.4
@@ -54,7 +50,6 @@ def setup_camera_and_light() -> None:
     cam.rotation_euler = (math.radians(60), 0.0, math.radians(45))
     bpy.context.scene.camera = cam
 
-    # hard key + weak fill + dim ambient = strong facet contrast (edges readable small)
     sun_data = bpy.data.lights.new("sun", type="SUN")
     sun_data.energy = 5.5
     sun = bpy.data.objects.new("sun", sun_data)
@@ -74,7 +69,6 @@ def setup_camera_and_light() -> None:
     bg.inputs[1].default_value = 0.15
     bpy.context.scene.world = world
 
-    # ambient occlusion deepens creases (engine-dependent flags; best effort)
     eevee = bpy.context.scene.eevee
     for flag in ("use_gtao", "use_fast_gi"):
         try:
@@ -83,21 +77,76 @@ def setup_camera_and_light() -> None:
             pass
 
 
-def smooth(obj: bpy.types.Object) -> None:
+# ── geometry helpers ──────────────────────────────────────────────
+
+def smooth(obj: bpy.types.Object) -> bpy.types.Object:
     for poly in obj.data.polygons:
         poly.use_smooth = True
+    return obj
 
+
+def box(sx: float, sy: float, sz: float, z: float | None = None) -> bpy.types.Object:
+    bpy.ops.mesh.primitive_cube_add(size=1.0)
+    o = bpy.context.active_object
+    o.scale = (sx, sy, sz)
+    o.location.z = z if z is not None else sz / 2
+    return o
+
+
+def cyl(r: float, h: float, verts: int = 48, z: float | None = None) -> bpy.types.Object:
+    bpy.ops.mesh.primitive_cylinder_add(vertices=verts, radius=r, depth=h)
+    o = bpy.context.active_object
+    o.location.z = z if z is not None else h / 2
+    if verts > 8:
+        smooth(o)
+    return o
+
+
+def difference(target: bpy.types.Object, cutter: bpy.types.Object) -> bpy.types.Object:
+    m = target.modifiers.new("cut", "BOOLEAN")
+    m.operation = "DIFFERENCE"
+    m.object = cutter
+    bpy.context.view_layer.objects.active = target
+    bpy.ops.object.modifier_apply(modifier="cut")
+    bpy.data.objects.remove(cutter)
+    return target
+
+
+# ── shape builders (one per registered ShapeType) ─────────────────
 
 def build_dome() -> bpy.types.Object:
-    # hemisphere: the dome's spherical-cap height profile
+    # hemisphere: spherical-cap height profile
     bpy.ops.mesh.primitive_uv_sphere_add(segments=48, ring_count=24, radius=1.2)
     obj = bpy.context.active_object
-    # flatten the lower half onto z=0 so it reads as a dome on a surface
     for v in obj.data.vertices:
         if v.co.z < 0:
             v.co.z = 0
-    smooth(obj)
-    return obj
+    return smooth(obj)
+
+
+def build_cone() -> bpy.types.Object:
+    # circular cone: linear slope to a central apex
+    bpy.ops.mesh.primitive_cone_add(vertices=48, radius1=1.1, radius2=0.0, depth=1.5)
+    o = bpy.context.active_object
+    o.location.z = 0.75
+    return smooth(o)
+
+
+def build_pyramid() -> bpy.types.Object:
+    # square pyramid: linear slope to apex over a square footprint
+    bpy.ops.mesh.primitive_cone_add(vertices=4, radius1=1.35, radius2=0.0, depth=1.3)
+    o = bpy.context.active_object
+    o.rotation_euler = (0.0, 0.0, math.radians(45))
+    o.location.z = 0.65
+    return o
+
+
+def build_torus() -> bpy.types.Object:
+    # raised ring with a rounded tube cross-section
+    bpy.ops.mesh.primitive_torus_add(major_radius=1.0, minor_radius=0.34)
+    o = bpy.context.active_object
+    o.location.z = 0.34
+    return smooth(o)
 
 
 def build_plateau() -> bpy.types.Object:
@@ -110,56 +159,92 @@ def build_plateau() -> bpy.types.Object:
 
 
 def build_ridge() -> bpy.types.Object:
-    # half-cylinder bar: polyline spine with a round profile
-    bpy.ops.mesh.primitive_cylinder_add(vertices=48, radius=0.55, depth=2.6)
-    obj = bpy.context.active_object
+    # rounded bar: a polyline spine with a round cross-section
+    obj = cyl(0.55, 2.6, z=0.32)
     obj.rotation_euler = (0.0, math.radians(90), math.radians(20))
-    for v in obj.data.vertices:
-        pass  # keep full cylinder; lying on the ground it reads as a rounded ridge
-    obj.location.z = 0.32
-    smooth(obj)
     return obj
 
 
 def build_groove() -> bpy.types.Object:
-    # slab with a rounded channel carved through it (boolean difference)
-    bpy.ops.mesh.primitive_cube_add(size=1.0)
-    slab = bpy.context.active_object
-    slab.scale = (1.5, 1.5, 0.28)
-    slab.location.z = 0.28
-
-    bpy.ops.mesh.primitive_cylinder_add(vertices=48, radius=0.42, depth=4.0)
-    cutter = bpy.context.active_object
+    # slab with a rounded channel carved through it
+    slab = box(1.5, 1.5, 0.56, z=0.28)
+    cutter = cyl(0.42, 4.0, z=0.56)
     cutter.rotation_euler = (0.0, math.radians(90), math.radians(20))
-    cutter.location.z = 0.56
+    return difference(slab, cutter)
 
-    mod = slab.modifiers.new("groove", "BOOLEAN")
-    mod.operation = "DIFFERENCE"
-    mod.object = cutter
-    bpy.context.view_layer.objects.active = slab
-    bpy.ops.object.modifier_apply(modifier="groove")
-    bpy.data.objects.remove(cutter)
-    return slab
+
+def build_wedge() -> bpy.types.Object:
+    # ramp: a block with its +x top edge dropped to the floor
+    o = box(1.4, 1.6, 0.9)
+    for v in o.data.vertices:
+        if v.co.x > 0 and v.co.z > 0:
+            v.co.z = -0.5
+    return o
+
+
+def build_fillet() -> bpy.types.Object:
+    # concave cove: a quarter-round carved from a block's top-front edge
+    blk = box(1.5, 2.4, 1.0, z=0.5)
+    cutter = cyl(0.95, 3.2, z=1.0)
+    cutter.rotation_euler = (math.radians(90), 0.0, 0.0)
+    cutter.location.x = 0.75
+    return difference(blk, cutter)
+
+
+def build_cable() -> bpy.types.Object:
+    # an S-curve tube: a bezier path with a round bevel (a cable routed around)
+    curve = bpy.data.curves.new("cable", "CURVE")
+    curve.dimensions = "3D"
+    curve.bevel_depth = 0.34
+    curve.bevel_resolution = 6
+    spline = curve.splines.new("BEZIER")
+    spline.bezier_points.add(2)
+    for bp, co in zip(spline.bezier_points, [(-1.35, -0.6, 0.34), (0.0, 0.7, 0.34), (1.35, -0.6, 0.34)]):
+        bp.co = co
+        bp.handle_left_type = "AUTO"
+        bp.handle_right_type = "AUTO"
+    obj = bpy.data.objects.new("cable", curve)
+    bpy.context.collection.objects.link(obj)
+    bpy.ops.object.select_all(action="DESELECT")
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.convert(target="MESH")
+    return smooth(bpy.context.active_object)
 
 
 BUILDERS = {
+    # Primitives
     "dome": build_dome,
+    "cone": build_cone,
+    "pyramid": build_pyramid,
+    "torus": build_torus,
     "plateau": build_plateau,
+    # Profiles
     "ridge": build_ridge,
     "groove": build_groove,
+    "wedge": build_wedge,
+    "fillet": build_fillet,
+    "cable": build_cable,
 }
 
 
 def main() -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+    ok, failed = 0, []
     for name, build in BUILDERS.items():
-        reset_scene()
-        setup_camera_and_light()
-        obj = build()
-        add_clay_material(obj)
-        bpy.context.scene.render.filepath = str(OUT_DIR / f"{name}.png")
-        bpy.ops.render.render(write_still=True)
-        print(f"rendered {name}.png")
+        try:
+            reset_scene()
+            setup_camera_and_light()
+            obj = build()
+            add_clay_material(obj)
+            bpy.context.scene.render.filepath = str(OUT_DIR / f"{name}.png")
+            bpy.ops.render.render(write_still=True)
+            ok += 1
+            print(f"rendered {name}.png")
+        except Exception as exc:  # one bad builder must not kill the batch
+            failed.append(name)
+            print(f"FAILED {name}: {exc}")
+    print(f"\ndone: {ok} rendered, {len(failed)} failed: {failed}")
 
 
 if __name__ == "__main__":

@@ -1,8 +1,21 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { decode } from "fast-png";
-import { parseDoc } from "../document/schema";
+import { emptyProjectConfig, parseDoc, parseProjectConfig } from "../document/schema";
+import { PROJECT_FILE } from "../document/workspace";
 import "../field/shapes";
+
+/** Walk up from a doc's directory to find the project's normal-channel convention. */
+function resolveNormalDirs(docDir: string): ReturnType<typeof emptyProjectConfig>["normalDirs"] {
+  let dir = docDir;
+  for (;;) {
+    const candidate = path.join(dir, PROJECT_FILE);
+    if (existsSync(candidate)) return parseProjectConfig(readFileSync(candidate, "utf8")).normalDirs;
+    const parent = path.dirname(dir);
+    if (parent === dir) return emptyProjectConfig().normalDirs;
+    dir = parent;
+  }
+}
 import { renderField } from "../field/render";
 import { encodeHeightmapPng } from "../exporters/heightmap";
 import { encodeNormalPng } from "../exporters/normalmap";
@@ -29,13 +42,14 @@ if (source.width !== doc.source.width || source.height !== doc.source.height) {
 const r = renderField(doc.shapes, doc.source.width, doc.source.height, { supersample: 2 });
 if (r.mask.every((m) => m === 0)) console.warn("warning: authored mask is empty — NX would change nothing");
 
+const normalDirs = resolveNormalDirs(docDir);
 const outDir = outDirArg ? path.resolve(outDirArg) : docDir;
 const stem = path.basename(sourcePath);
 const nxPath = path.join(outDir, nxFileName(stem));
-writeFileSync(nxPath, encodeNxPng(r.normals, r.mask, r.width, r.height, doc.normalDirs, diffuseOpacity(source)));
+writeFileSync(nxPath, encodeNxPng(r.normals, r.mask, r.width, r.height, normalDirs, diffuseOpacity(source)));
 writeFileSync(path.join(outDir, `${stem}.height.png`), encodeHeightmapPng(r));
 writeFileSync(
   path.join(outDir, `${stem}.normal.png`),
-  encodeNormalPng(r.normals, r.width, r.height, doc.normalDirs),
+  encodeNormalPng(r.normals, r.width, r.height, normalDirs),
 );
 console.log(`wrote ${nxPath} (+ height/normal debug maps)`);

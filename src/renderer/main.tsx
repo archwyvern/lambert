@@ -1,5 +1,6 @@
 import { createRoot } from "react-dom/client";
-import { createElement } from "react";
+import { ConfirmProvider, HostProvider } from "@carapace/shell";
+import { carapaceHost } from "../ui/host";
 
 const status = document.getElementById("status")!;
 const params = new URLSearchParams(location.search);
@@ -16,6 +17,12 @@ if (params.has("selftest")) {
     });
 } else {
   void import("../ui/App").then(({ App }) => {
-    createRoot(document.getElementById("root")!).render(createElement(App));
+    createRoot(document.getElementById("root")!).render(
+      <HostProvider host={carapaceHost}>
+        <ConfirmProvider>
+          <App />
+        </ConfirmProvider>
+      </HostProvider>,
+    );
   });
 }

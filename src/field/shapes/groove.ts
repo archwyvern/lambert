@@ -6,6 +6,7 @@ import { spineEval } from "./spine";
 export const Groove = defineShapeType({
   id: "groove",
   name: "Groove",
+  category: "Profiles",
   params: {
     width: { type: "px", default: 12, min: 1 },
     profile: { type: "enum", options: PROFILE_KINDS, default: "round" },

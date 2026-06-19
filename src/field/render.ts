@@ -1,3 +1,4 @@
+import { Vector3 } from "@carapace/primitives";
 import { evaluateField, FieldResult } from "./evalCpu";
 import { deriveNormals } from "./normals";
 import type { ShapeInstance } from "./types";
@@ -25,10 +26,10 @@ export function scaleShapesForSupersample(shapes: ShapeInstance[], f: number): S
   return shapes.map((s) => ({
     ...s,
     transform: {
-      pos: { x: s.transform.pos.x * f, y: s.transform.pos.y * f, z: s.transform.pos.z },
+      pos: new Vector3(s.transform.pos.x * f, s.transform.pos.y * f, s.transform.pos.z),
       rotation: s.transform.rotation,
       // z (tallness) does NOT scale with the canvas: heights stay put, slopeScale corrects
-      scale: { x: s.transform.scale.x * f, y: s.transform.scale.y * f, z: s.transform.scale.z },
+      scale: new Vector3(s.transform.scale.x * f, s.transform.scale.y * f, s.transform.scale.z),
     },
   }));
 }

@@ -1,5 +1,13 @@
 import { compareRenders, DriftReport } from "../field/compare";
-import { GOLDEN_H, GOLDEN_W, goldenShapes, meshShapes, stressShapes } from "../field/fixtures";
+import {
+  cableShapes,
+  GOLDEN_H,
+  GOLDEN_W,
+  goldenShapes,
+  meshShapes,
+  primitivesShapes,
+  stressShapes,
+} from "../field/fixtures";
 import { GpuFieldRenderer } from "../field/gpu/pipeline";
 import { renderField } from "../field/render";
 import type { ShapeInstance } from "../field/types";
@@ -45,6 +53,10 @@ export async function runSelftest(): Promise<void> {
     report.cases.push(await runCase(gpu, "stress ss2 tiled-48", stressShapes(), 2, 48));
     report.cases.push(await runCase(gpu, "mesh ss1", meshShapes(), 1));
     report.cases.push(await runCase(gpu, "mesh ss2 tiled-48", meshShapes(), 2, 48));
+    report.cases.push(await runCase(gpu, "primitives ss1", primitivesShapes(), 1));
+    report.cases.push(await runCase(gpu, "primitives ss2 tiled-48", primitivesShapes(), 2, 48));
+    report.cases.push(await runCase(gpu, "cable ss1", cableShapes(), 1));
+    report.cases.push(await runCase(gpu, "cable ss2 tiled-48", cableShapes(), 2, 48));
     report.pass = report.cases.every((c) => c.pass);
   } catch (err) {
     report.error = err instanceof Error ? `${err.message}\n${err.stack ?? ""}` : String(err);

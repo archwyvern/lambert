@@ -6,6 +6,7 @@ import { spineEval } from "./spine";
 export const Ridge = defineShapeType({
   id: "ridge",
   name: "Ridge",
+  category: "Profiles",
   params: {
     width: { type: "px", default: 24, min: 1 },
     profile: { type: "enum", options: PROFILE_KINDS, default: "round" },

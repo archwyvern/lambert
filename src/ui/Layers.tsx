@@ -5,17 +5,7 @@ import { duplicateShape, moveShapeTo, removeShape, updateShape } from "../docume
 import { getShapeType } from "../field/registry";
 import type { ShapeInstance } from "../field/types";
 import { cx, SectionLabel } from "./kit";
-import domeIcon from "./icons/dome.png";
-import grooveIcon from "./icons/groove.png";
-import plateauIcon from "./icons/plateau.png";
-import ridgeIcon from "./icons/ridge.png";
-
-const SHAPE_ICONS: Record<string, string> = {
-  dome: domeIcon,
-  plateau: plateauIcon,
-  ridge: ridgeIcon,
-  groove: grooveIcon,
-};
+import { SHAPE_ICONS } from "./shapeIcons";
 
 /** Subtractive shapes (carve types) get a "-" marker; clipping shapes stay unmarked. */
 const isCarve = (typeId: string): boolean => getShapeType(typeId).defaultCombine === "carve";
@@ -147,7 +137,11 @@ export function Layers(props: { store: DocumentStore; state: EditorState }): Rea
                     !s.visible && "opacity-50",
                   )}
                 >
-                  <img src={SHAPE_ICONS[s.typeId]} alt="" className="h-4.5 w-4.5 shrink-0" draggable={false} />
+                  {SHAPE_ICONS[s.typeId] ? (
+                    <img src={SHAPE_ICONS[s.typeId]} alt="" className="h-4.5 w-4.5 shrink-0" draggable={false} />
+                  ) : (
+                    <span className="h-4.5 w-4.5 shrink-0" />
+                  )}
                   {renaming === s.id ? (
                     <input
                       autoFocus

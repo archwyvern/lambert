@@ -104,7 +104,54 @@ fn sd_ellipse(p: vec2f, r: vec2f) -> f32 {
   return k1 * (k1 - 1.0) / max(k2, 1e-12);
 }
 
-fn shape_spine(p: vec2f, base: u32, h: f32, halfW: f32, prof: u32) -> vec2f {
+// cubic Bézier point + derivatives (mirror bezier.ts) — the cable samples these per pixel
+fn cubic_at(p0: vec2f, c0: vec2f, c1: vec2f, p1: vec2f, t: f32) -> vec2f {
+  let u = 1.0 - t;
+  return u * u * u * p0 + 3.0 * u * u * t * c0 + 3.0 * u * t * t * c1 + t * t * t * p1;
+}
+fn cubic_d1(p0: vec2f, c0: vec2f, c1: vec2f, p1: vec2f, t: f32) -> vec2f {
+  let u = 1.0 - t;
+  return 3.0 * u * u * (c0 - p0) + 6.0 * u * t * (c1 - c0) + 3.0 * t * t * (p1 - c1);
+}
+fn cubic_d2(p0: vec2f, c0: vec2f, c1: vec2f, p1: vec2f, t: f32) -> vec2f {
+  let u = 1.0 - t;
+  return 6.0 * u * (c1 - 2.0 * c0 + p0) + 6.0 * t * (p1 - 2.0 * c1 + c0);
+}
+// SMOOTH distance from p to a cubic segment: coarse scan for the nearest t, then Newton-refine
+// the closest-point condition dot(B(t)-p, B'(t)) = 0. A smooth distance => smooth normals (no facets).
+// Distance from p to a cubic segment. cutStart/cutEnd request a flat cap at that endpoint: the dome
+// (the region whose nearest point IS the endpoint, and which sits beyond it) is removed locally —
+// a Voronoi test, NOT an infinite half-plane (a half-plane slices off curved tube far from the end).
+fn cubic_dist(p: vec2f, p0: vec2f, c0: vec2f, c1: vec2f, p1: vec2f, cutStart: bool, cutEnd: bool) -> f32 {
+  // 16-sample bracket: enough to isolate the global nearest even when long tangents make the curve
+  // loop/cusp and the distance-in-t has several local minima (a coarse 8-sample scan missed them).
+  var bestT = 0.0;
+  var bestD = 1e30;
+  for (var s = 0u; s <= 16u; s = s + 1u) {
+    let t = f32(s) / 16.0;
+    let q = cubic_at(p0, c0, c1, p1, t);
+    let dd = dot(q - p, q - p);
+    if (dd < bestD) { bestD = dd; bestT = t; }
+  }
+  var t = bestT;
+  for (var it = 0u; it < 4u; it = it + 1u) {
+    let B = cubic_at(p0, c0, c1, p1, t);
+    let d1 = cubic_d1(p0, c0, c1, p1, t);
+    let d2 = cubic_d2(p0, c0, c1, p1, t);
+    let fp = dot(d1, d1) + dot(B - p, d2);
+    if (abs(fp) > 1e-5) { t = clamp(t - dot(B - p, d1) / fp, 0.0, 1.0); }
+  }
+  // flat cap: nearest pinned at this end (t at the boundary) AND strictly beyond it -> outside.
+  if (cutEnd && t > 0.9999 && dot(p - p1, p1 - c1) > 0.0) { return 1e30; }
+  if (cutStart && t < 0.0001 && dot(p - p0, c0 - p0) < 0.0) { return 1e30; }
+  // guard: a diverging Newton step must never make it worse than the coarse bracket (that produced
+  // the spiky garbage normals on long tangents) — keep whichever distance is smaller.
+  let bn = cubic_at(p0, c0, c1, p1, t);
+  return sqrt(min(bestD, dot(bn - p, bn - p)));
+}
+
+// spine with a separate profile slope width (slopeW < halfW gives a flat-topped section)
+fn shape_spine_s(p: vec2f, base: u32, h: f32, halfW: f32, slopeW: f32, prof: u32) -> vec2f {
   let cs = u32(rec(base, 11u));
   let cc = u32(rec(base, 12u));
   var d = 1e30;
@@ -112,7 +159,11 @@ fn shape_spine(p: vec2f, base: u32, h: f32, halfW: f32, prof: u32) -> vec2f {
     d = min(d, sd_segment(p, points[cs + i], points[cs + i + 1u]));
   }
   let sd = d - halfW;
-  return vec2f(h * apply_profile(prof, -sd, halfW), sd);
+  return vec2f(h * apply_profile(prof, -sd, slopeW), sd);
+}
+
+fn shape_spine(p: vec2f, base: u32, h: f32, halfW: f32, prof: u32) -> vec2f {
+  return shape_spine_s(p, base, h, halfW, halfW, prof);
 }
 `;
 

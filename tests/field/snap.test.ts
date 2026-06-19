@@ -4,6 +4,7 @@ import { createShapeInstance } from "../../src/field/registry";
 import { alignedToAxis, snapHalf, snapShapeToGrid } from "../../src/field/snap";
 import { fromLocal } from "../../src/field/transform";
 import { v2 } from "../../src/field/vec";
+import { Vector3 } from "@carapace/primitives";
 
 test("snapHalf snaps to the nearest whole or half", () => {
   expect(snapHalf(0.24)).toBe(0);
@@ -16,9 +17,9 @@ test("snapHalf snaps to the nearest whole or half", () => {
 
 test("snapShapeToGrid puts position + every vertex's canvas position on the ½px grid", () => {
   const s = createShapeInstance("plateau", v2(40.3, 48.8));
-  s.transform.pos.z = 5.2;
+  s.transform.pos = s.transform.pos.withZ(5.2);
   s.transform.rotation = 0.37;
-  s.transform.scale = { x: 1.3, y: 1.3, z: 1.3 };
+  s.transform.scale = new Vector3(1.3, 1.3, 1.3);
   s.controlPoints = [v2(0.2, -0.4), v2(2.6, 2.9), v2(-5.1, 7.3)];
   const snapped = snapShapeToGrid(s);
   expect(snapped.transform.pos).toEqual({ x: 40.5, y: 49, z: 5 });
@@ -43,7 +44,7 @@ test("alignedToAxis fires on every 45° axis (0,45,90,...,315) at any length, no
 
 test("vertex canvas position snaps to ½px even on a scaled shape (the 0.5-not-1.0 fix)", () => {
   const s = createShapeInstance("plateau", v2(10, 10)); // pos on grid, no rotation
-  s.transform.scale = { x: 2, y: 2, z: 1 };
+  s.transform.scale = new Vector3(2, 2, 1);
   s.controlPoints = [v2(3.1, 3.1)]; // canvas = 10 + 3.1*2 = 16.2
   const world = fromLocal(snapShapeToGrid(s).transform, snapShapeToGrid(s).controlPoints[0]!);
   expect(world.x).toBe(16); // 16.2 -> 16.0 (nearest ½), not a 1px step from the 2× scale

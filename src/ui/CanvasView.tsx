@@ -4,8 +4,9 @@ import { addShape, updateShape } from "../document/docOps";
 import { getShapeType } from "../field/registry";
 import { snapHalf } from "../field/snap";
 import { fromLocal } from "../field/transform";
-import { normalSigns } from "../document/schema";
-import { v2, Vec2 } from "../field/vec";
+import { normalSigns, type NormalDirs } from "../document/schema";
+import { Vector2, Vector3 } from "@carapace/primitives";
+import { v2 } from "../field/vec";
 import { Gizmos } from "./Gizmos";
 import { LightPad } from "./LightPad";
 import { axisScaleFromDrag, constrainAxis, pickShape, pointsInBox, rotationFromDrag, snapAngle } from "./picking";
@@ -19,17 +20,17 @@ const ROTATE_SNAP = Math.PI / 12; // 15 deg, godot default rotation snap step
 
 type Drag =
   | { kind: "pan"; lastX: number; lastY: number }
-  | { kind: "move"; id: string; startCanvas: Vec2; startPos: { x: number; y: number } }
-  | { kind: "rotate"; id: string; startCanvas: Vec2; startRotation: number; pivot: Vec2 }
+  | { kind: "move"; id: string; startCanvas: Vector2; startPos: Vector2 }
+  | { kind: "rotate"; id: string; startCanvas: Vector2; startRotation: number; pivot: Vector2 }
   | {
       kind: "scale";
       id: string;
-      startCanvas: Vec2;
-      startScale: { x: number; y: number; z: number };
-      pivot: Vec2;
+      startCanvas: Vector2;
+      startScale: Vector3;
+      pivot: Vector2;
       rotation: number;
     }
-  | { kind: "marquee"; startCanvas: Vec2; current: Vec2; additive: boolean; base: number[]; moved: boolean };
+  | { kind: "marquee"; startCanvas: Vector2; current: Vector2; additive: boolean; base: number[]; moved: boolean };
 
 export function CanvasView(props: {
   store: DocumentStore;
@@ -42,17 +43,20 @@ export function CanvasView(props: {
   onLightChange: (dir: [number, number, number]) => void;
   canvas3dRef: React.RefObject<HTMLCanvasElement | null>;
   orbit3d: Orbit;
+  /** Project normal-channel convention (project.lambert), for the normal-view encode. */
+  normalDirs: NormalDirs;
 }): React.JSX.Element {
-  const { store, state, view, tool, diffuseBytes, selVerts, setSelVerts, onLightChange, canvas3dRef, orbit3d } = props;
+  const { store, state, view, tool, diffuseBytes, selVerts, setSelVerts, onLightChange, canvas3dRef, orbit3d, normalDirs } =
+    props;
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<PreviewRenderer | null>(null);
   const [viewport, setViewport] = useState<Viewport>({ zoom: 1, panX: 0, panY: 0 });
   const [gpuError, setGpuError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
-  const [cursor, setCursor] = useState<Vec2 | null>(null);
+  const [cursor, setCursor] = useState<Vector2 | null>(null);
   const dragRef = useRef<Drag | null>(null);
-  const [marquee, setMarquee] = useState<{ a: Vec2; b: Vec2 } | null>(null);
+  const [marquee, setMarquee] = useState<{ a: Vector2; b: Vector2 } | null>(null);
 
   const doc = state.doc;
 
@@ -126,13 +130,13 @@ export function CanvasView(props: {
       mode: view.mode,
       opacity: view.opacity,
       lightDir: view.lightDir,
-      normalSigns: normalSigns(doc.normalDirs),
+      normalSigns: normalSigns(normalDirs),
       raster: view.raster,
       orbit3d,
     });
   });
 
-  const toCanvasPoint = (e: React.PointerEvent): Vec2 => {
+  const toCanvasPoint = (e: React.PointerEvent): Vector2 => {
     const rect = hostRef.current!.getBoundingClientRect();
     return screenToCanvas(viewport, v2(e.clientX - rect.left, e.clientY - rect.top));
   };
@@ -188,7 +192,7 @@ export function CanvasView(props: {
       const hit = pickShape(doc.shapes, p);
       if (hit) {
         store.select(hit.id);
-        dragRef.current = { kind: "move", id: hit.id, startCanvas: p, startPos: hit.transform.pos };
+        dragRef.current = { kind: "move", id: hit.id, startCanvas: p, startPos: v2(hit.transform.pos.x, hit.transform.pos.y) };
         return;
       }
       // empty space: begin a vertex marquee (a plain click with no drag still deselects on
@@ -203,22 +207,22 @@ export function CanvasView(props: {
     const target = doc.shapes.find((s) => s.id === state.selectedId) ?? null;
     if (!target || target.locked) return;
     if (effective === "move") {
-      dragRef.current = { kind: "move", id: target.id, startCanvas: p, startPos: target.transform.pos };
+      dragRef.current = { kind: "move", id: target.id, startCanvas: p, startPos: v2(target.transform.pos.x, target.transform.pos.y) };
     } else if (effective === "rotate") {
       dragRef.current = {
         kind: "rotate",
         id: target.id,
         startCanvas: p,
         startRotation: target.transform.rotation,
-        pivot: target.transform.pos,
+        pivot: v2(target.transform.pos.x, target.transform.pos.y),
       };
     } else {
       dragRef.current = {
         kind: "scale",
         id: target.id,
         startCanvas: p,
-        startScale: { ...target.transform.scale },
-        pivot: target.transform.pos,
+        startScale: target.transform.scale,
+        pivot: v2(target.transform.pos.x, target.transform.pos.y),
         rotation: target.transform.rotation,
       };
     }
@@ -257,8 +261,8 @@ export function CanvasView(props: {
             const x = drag.startPos.x + dx;
             const y = drag.startPos.y + dy;
             const pos = s.gridSnap
-              ? { ...s.transform.pos, x: snapHalf(x), y: snapHalf(y) }
-              : { ...s.transform.pos, x, y };
+              ? s.transform.pos.withX(snapHalf(x)).withY(snapHalf(y))
+              : s.transform.pos.withX(x).withY(y);
             return { ...s, transform: { ...s.transform, pos } };
           }),
         { coalesce: `move:${drag.id}` },

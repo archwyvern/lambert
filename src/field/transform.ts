@@ -1,27 +1,22 @@
-import { Vec2, v2 } from "./vec";
-
-/** xy scale the footprint; z scales the height contribution (tallness). */
-export interface Vec3 {
-  x: number;
-  y: number;
-  z: number;
-}
+import { Vector2, Vector3 } from "@carapace/primitives";
+import { v2 } from "./vec";
 
 export interface Transform2D {
   /** x/y = canvas position; z = base elevation in height px. */
-  pos: Vec3;
+  pos: Vector3;
   rotation: number; // radians
-  scale: Vec3;
+  /** xy scale the footprint; z scales the height contribution (tallness). */
+  scale: Vector3;
 }
 
 export const identityTransform = (): Transform2D => ({
-  pos: { x: 0, y: 0, z: 0 },
+  pos: Vector3.zero,
   rotation: 0,
-  scale: { x: 1, y: 1, z: 1 },
+  scale: Vector3.one,
 });
 
 /** Map a canvas-space point into shape-local space (inverse of the instance transform). */
-export function toLocal(t: Transform2D, p: Vec2): Vec2 {
+export function toLocal(t: Transform2D, p: Vector2): Vector2 {
   const dx = p.x - t.pos.x;
   const dy = p.y - t.pos.y;
   const c = Math.cos(-t.rotation);
@@ -32,7 +27,7 @@ export function toLocal(t: Transform2D, p: Vec2): Vec2 {
 }
 
 /** Map a shape-local point into canvas space (forward of toLocal: scale, rotate, translate). */
-export function fromLocal(t: Transform2D, p: Vec2): Vec2 {
+export function fromLocal(t: Transform2D, p: Vector2): Vector2 {
   const sx = p.x * t.scale.x;
   const sy = p.y * t.scale.y;
   const c = Math.cos(t.rotation);

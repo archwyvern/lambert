@@ -21,7 +21,7 @@ export function convertToMesh(shape: ShapeInstance): ShapeInstance {
   const h = type.nominalHeight ?? 0;
   const nB = shape.ringSplit ?? (shape.controlPoints.length >> 1); // base ring [0..nB), top ring [nB..]
   const nT = shape.controlPoints.length - nB;
-  const verts = shape.controlPoints.map((p) => ({ ...p }));
+  const verts = shape.controlPoints.slice();
   const z = verts.map((_, i) => (i < nB ? 0 : h)); // base on the ground, top rim at nominal height
 
   const tris: [number, number, number][] = [];

@@ -8,6 +8,7 @@ const R = 48;
 export const Dome = defineShapeType({
   id: "dome",
   name: "Dome",
+  category: "Primitives",
   params: {},
   nominalHeight: 48,
   controlPoints: { kind: "none", default: [] },

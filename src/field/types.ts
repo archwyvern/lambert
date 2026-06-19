@@ -1,5 +1,6 @@
+import { Vector2 } from "@carapace/primitives";
+import type { BezierAnchor } from "./bezier";
 import type { Transform2D } from "./transform";
-import type { Vec2 } from "./vec";
 import type { CombineOp } from "./combine";
 
 export interface ParamSpecPx {
@@ -25,7 +26,7 @@ export interface ControlPointSpec {
   kind: "none" | "polygon" | "polyline" | "rings" | "mesh";
   min?: number;
   /** Default control points in shape-local px. */
-  default: Vec2[];
+  default: Vector2[];
 }
 
 /** A mesh-plane's topology: per-vertex height (index-aligned with controlPoints) + triangles. */
@@ -47,7 +48,10 @@ export interface ShapeInstance {
   name?: string;
   transform: Transform2D;
   params: Record<string, number | string | boolean>;
-  controlPoints: Vec2[];
+  controlPoints: Vector2[];
+  /** Cable only: the cubic-Bézier pen path (anchors + tangent handles). controlPoints is the
+   *  dense sample of it (what eval/GPU walk); editing the path regenerates controlPoints. */
+  bezier?: BezierAnchor[];
   /** "rings" shapes (plateau): index where the top ring begins = base-ring vertex count.
    *  Absent = equal split (controlPoints.length / 2); lets inner/outer counts differ. */
   ringSplit?: number;
@@ -69,6 +73,8 @@ export interface FieldSample {
 export interface ShapeType {
   id: string;
   name: string;
+  /** Library palette group (e.g. "Primitives", "Profiles"). Absent = ungrouped/hidden. */
+  category?: string;
   params: Record<string, ParamSpec>;
   controlPoints: ControlPointSpec;
   /** carve = subtractive shape (groove); everything else clips via max. */
@@ -83,5 +89,8 @@ export interface ShapeType {
    * Optional so test-only types can skip it; buildFoldWgsl() skips types without it.
    */
   wgsl?: string;
-  eval(pLocal: Vec2, shape: ShapeInstance): FieldSample;
+  /** Optional post-construction hook (createShapeInstance) — e.g. cable seeds its anchors and
+   *  resamples them into the dense controlPoints. */
+  onCreate?(shape: ShapeInstance): void;
+  eval(pLocal: Vector2, shape: ShapeInstance): FieldSample;
 }

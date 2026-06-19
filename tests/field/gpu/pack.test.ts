@@ -4,11 +4,12 @@ import { createShapeInstance } from "../../../src/field/registry";
 import { packShapes } from "../../../src/field/gpu/pack";
 import { RECORD_F32 } from "../../../src/field/gpu/wgsl";
 import { v2 } from "../../../src/field/vec";
+import { Vector3 } from "@carapace/primitives";
 
 test("dome record: layout offsets", () => {
   const dome = createShapeInstance("dome", v2(10, 20));
   dome.transform.rotation = Math.PI / 2;
-  dome.transform.scale = { x: 2, y: 4, z: 0.5 };
+  dome.transform.scale = new Vector3(2, 4, 0.5);
   const { records, points, count } = packShapes([dome]);
   expect(count).toBe(1);
   expect(records.length).toBe(RECORD_F32);

@@ -1,9 +1,9 @@
+import { Vector2, Vector3 } from "@carapace/primitives";
 import type { LambertDoc } from "./schema";
 import { createShapeInstance } from "../field/registry";
 import type { ShapeInstance } from "../field/types";
-import { Vec2, v2 } from "../field/vec";
 
-export function addShape(doc: LambertDoc, typeId: string, pos: Vec2): LambertDoc {
+export function addShape(doc: LambertDoc, typeId: string, pos: Vector2): LambertDoc {
   return { ...doc, shapes: [...doc.shapes, createShapeInstance(typeId, pos)] };
 }
 
@@ -46,8 +46,25 @@ export function moveShapeTo(doc: LambertDoc, id: string, finalIndex: number): La
 export function duplicateShape(doc: LambertDoc, id: string): LambertDoc {
   const src = doc.shapes.find((s) => s.id === id);
   if (!src) return doc;
-  const copy: ShapeInstance = structuredClone(src);
-  copy.id = crypto.randomUUID();
-  copy.transform.pos = { ...src.transform.pos, x: src.transform.pos.x + 5, y: src.transform.pos.y + 5 };
+  // Deep-copy the mutable containers (params, mesh arrays); Vector2/Vector3 are immutable so
+  // their refs are safe to share. structuredClone would strip the Vector class prototypes.
+  const copy: ShapeInstance = {
+    ...src,
+    id: crypto.randomUUID(),
+    params: { ...src.params },
+    controlPoints: src.controlPoints.slice(),
+    bezier: src.bezier?.map((a) => ({ ...a })),
+    transform: {
+      ...src.transform,
+      pos: new Vector3(src.transform.pos.x + 5, src.transform.pos.y + 5, src.transform.pos.z),
+    },
+    mesh: src.mesh
+      ? {
+          z: [...src.mesh.z],
+          tris: src.mesh.tris.map((t) => [...t] as [number, number, number]),
+          edges: src.mesh.edges?.map((e) => [...e] as [number, number]),
+        }
+      : undefined,
+  };
   return { ...doc, shapes: [...doc.shapes, copy] };
 }

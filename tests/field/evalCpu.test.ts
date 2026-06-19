@@ -3,6 +3,7 @@ import "../../src/field/shapes";
 import { createShapeInstance } from "../../src/field/registry";
 import { evaluateField } from "../../src/field/evalCpu";
 import { v2 } from "../../src/field/vec";
+import { Vector3 } from "@carapace/primitives";
 
 const px = (r: { width: number }, x: number, y: number) => y * r.width + x;
 
@@ -26,7 +27,7 @@ test("invisible shapes are skipped", () => {
 test("max: overlapping shapes merge to the taller", () => {
   const low = createShapeInstance("plateau", v2(64, 64));
   const tall = createShapeInstance("plateau", v2(80, 64));
-  tall.transform.scale.z = 40 / 24; // extrude to 40px
+  tall.transform.scale = tall.transform.scale.withZ(40 / 24); // extrude to 40px
   const r = evaluateField([low, tall], 160, 128);
   expect(r.heightMap[px(r, 80, 64)]!).toBeCloseTo(40, 0); // overlap: taller wins
 });
@@ -34,7 +35,7 @@ test("max: overlapping shapes merge to the taller", () => {
 test("shapes clip: overlapping shapes do not stack heights", () => {
   const slab = createShapeInstance("plateau", v2(64, 64));
   const stud = createShapeInstance("dome", v2(64, 64));
-  stud.transform.scale = { x: 8 / 48, y: 8 / 48, z: 10 / 48 }; // 8px stud, 10px tall
+  stud.transform.scale = new Vector3(8 / 48, 8 / 48, 10 / 48); // 8px stud, 10px tall
   const r = evaluateField([slab, stud], 128, 128);
   expect(r.heightMap[px(r, 64, 64)]!).toBeCloseTo(24, 0); // max(24, ~10), not 34
 });
@@ -49,8 +50,8 @@ test("carve cuts into what is below", () => {
 
 test("pos.z is base elevation: lifts the shape, does not scale with extrude", () => {
   const dome = createShapeInstance("dome", v2(64, 64));
-  dome.transform.pos.z = 10;
-  dome.transform.scale.z = 0.5;
+  dome.transform.pos = dome.transform.pos.withZ(10);
+  dome.transform.scale = dome.transform.scale.withZ(0.5);
   const r = evaluateField([dome], 128, 128);
   expect(r.heightMap[px(r, 64, 64)]!).toBeCloseTo(10 + 24, 1); // elevation + 48*0.5
   expect(r.heightMap[px(r, 64 + 47, 64)]!).toBeGreaterThan(9.9); // near the rim: cliff at elevation
@@ -58,11 +59,11 @@ test("pos.z is base elevation: lifts the shape, does not scale with extrude", ()
 
 test("negative elevation sinks into the ground: no height, NO mask", () => {
   const dome = createShapeInstance("dome", v2(64, 64));
-  dome.transform.pos.z = -60; // fully buried (peak 48 - 60 < 0)
+  dome.transform.pos = dome.transform.pos.withZ(-60); // fully buried (peak 48 - 60 < 0)
   const r = evaluateField([dome], 128, 128);
   expect(r.heightMap[px(r, 64, 64)]!).toBe(0);
   expect(r.mask[px(r, 64, 64)]!).toBe(0); // sunk shape must not flatten the override
-  dome.transform.pos.z = -24; // half-buried: cap pokes out at center
+  dome.transform.pos = dome.transform.pos.withZ(-24); // half-buried: cap pokes out at center
   const r2 = evaluateField([dome], 128, 128);
   expect(r2.heightMap[px(r2, 64, 64)]!).toBeCloseTo(24, 1);
   expect(r2.mask[px(r2, 64, 64)]!).toBe(1);
@@ -71,14 +72,14 @@ test("negative elevation sinks into the ground: no height, NO mask", () => {
 
 test("scale.z scales the contribution (tallness)", () => {
   const dome = createShapeInstance("dome", v2(64, 64));
-  dome.transform.scale.z = 0.5;
+  dome.transform.scale = dome.transform.scale.withZ(0.5);
   const r = evaluateField([dome], 128, 128);
   expect(r.heightMap[px(r, 64, 64)]!).toBeCloseTo(24, 1);
 });
 
 test("transform: offset position and 2x scale", () => {
   const dome = createShapeInstance("dome", v2(32, 32));
-  dome.transform.scale = { x: 2, y: 2, z: 1 };
+  dome.transform.scale = new Vector3(2, 2, 1);
   const r = evaluateField([dome], 256, 256);
   // local rim at 48 -> canvas rim at 96 from center
   expect(r.heightMap[px(r, 32, 32)]!).toBeGreaterThan(23.9);

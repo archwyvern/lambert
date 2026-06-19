@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
+import { exposeFs } from "@carapace/shell/ipc";
 
 contextBridge.exposeInMainWorld("lambertHost", {
   sendSelftestResult: (report: unknown) => ipcRenderer.send("selftest-result", report),
@@ -6,6 +7,8 @@ contextBridge.exposeInMainWorld("lambertHost", {
   saveDialog: (opts: unknown) => ipcRenderer.invoke("dialog:save", opts),
   readFile: (path: string) => ipcRenderer.invoke("fs:read", path),
   writeFile: (path: string, data: Uint8Array) => ipcRenderer.invoke("fs:write", path, data),
+  openFolderDialog: (opts: unknown) => ipcRenderer.invoke("dialog:openFolder", opts),
+  pathExists: (path: string) => ipcRenderer.invoke("fs:exists", path),
   loadSession: () => ipcRenderer.invoke("session:load"),
   saveSession: (json: string) => ipcRenderer.invoke("session:save", json),
   onMenuAction: (cb: (action: string) => void) =>
@@ -14,3 +17,6 @@ contextBridge.exposeInMainWorld("lambertHost", {
   onConfirmClose: (cb: () => void) => ipcRenderer.on("confirm-close", cb),
   respondClose: (ok: boolean) => ipcRenderer.send("close-response", ok),
 });
+
+// carapace fs bridge (window.carapaceFs) for the shared <FileExplorer>
+exposeFs(contextBridge, ipcRenderer);

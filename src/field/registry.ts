@@ -1,5 +1,6 @@
 import type { ShapeInstance, ShapeType } from "./types";
-import { Vec2, v2 } from "./vec";
+import { Vector2, Vector3 } from "@carapace/primitives";
+import { v2 } from "./vec";
 
 const types = new Map<string, ShapeType>();
 
@@ -19,21 +20,23 @@ export function allShapeTypes(): ShapeType[] {
   return [...types.values()];
 }
 
-export function createShapeInstance(typeId: string, pos: Vec2): ShapeInstance {
+export function createShapeInstance(typeId: string, pos: Vector2): ShapeInstance {
   const t = getShapeType(typeId);
   const params = Object.fromEntries(
     Object.entries(t.params).map(([key, spec]) => [key, spec.default]),
   );
-  return {
+  const instance: ShapeInstance = {
     id: crypto.randomUUID(),
     typeId,
-    transform: { pos: { x: pos.x, y: pos.y, z: 0 }, rotation: 0, scale: { x: 1, y: 1, z: 1 } },
+    transform: { pos: new Vector3(pos.x, pos.y, 0), rotation: 0, scale: Vector3.one },
     params,
-    controlPoints: t.controlPoints.default.map((p) => ({ ...p })),
+    controlPoints: t.controlPoints.default.map((p) => v2(p.x, p.y)),
     gridSnap: t.controlPoints.kind !== "none", // vertex shapes snap to the ½px grid by default
     visible: true,
     locked: false,
   };
+  t.onCreate?.(instance);
+  return instance;
 }
 
 /** Peak |height| in px at scale.z = 1: the type's nominal, or the mesh's tallest vertex. */

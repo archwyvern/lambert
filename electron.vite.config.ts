@@ -1,5 +1,5 @@
 import tailwindcss from "@tailwindcss/vite";
-import { defineConfig } from "electron-vite";
+import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 import { resolve } from "node:path";
 
 // @carapace/shell is a github-declared dependency, but in development the renderer
@@ -7,8 +7,11 @@ import { resolve } from "node:path";
 // with no rebuild. The pnpm `link:` override symlinks the package (tsc resolves its
 // types via dist); this alias points Vite at src instead.
 export default defineConfig({
-  main: {},
-  preload: {},
+  // externalize deps so @carapace/shell/node (the FileExplorer's fs server) and its chokidar
+  // dependency load at runtime from the linked package rather than being bundled (chokidar is
+  // ESM-only with native bits; bundling it into the electron main breaks).
+  main: { plugins: [externalizeDepsPlugin()] },
+  preload: { plugins: [externalizeDepsPlugin()] },
   renderer: {
     plugins: [tailwindcss()],
     resolve: {

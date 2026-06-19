@@ -2,7 +2,8 @@ import { frustumStrip } from "../controlPoints";
 import { applyProfile, PROFILE_KINDS, ProfileKind } from "../profiles";
 import { defineShapeType, enumParam } from "../registry";
 import { sdPolygon } from "../sdf";
-import { clamp, Vec2, v2 } from "../vec";
+import { Vector2 } from "@carapace/primitives";
+import { clamp, v2 } from "../vec";
 
 /**
  * Frustum: a base ring at ground level and an independently draggable top rim at full height.
@@ -15,7 +16,7 @@ import { clamp, Vec2, v2 } from "../vec";
  */
 
 /** Barycentric height inside triangle abc with corner heights ha/hb/hc; null if outside. */
-function triHeight(p: Vec2, a: Vec2, b: Vec2, c: Vec2, ha: number, hb: number, hc: number): number | null {
+function triHeight(p: Vector2, a: Vector2, b: Vector2, c: Vector2, ha: number, hb: number, hc: number): number | null {
   const det = (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
   if (Math.abs(det) < 1e-9) return null;
   const u = ((p.x - a.x) * (c.y - a.y) - (c.x - a.x) * (p.y - a.y)) / det;
@@ -28,6 +29,7 @@ function triHeight(p: Vec2, a: Vec2, b: Vec2, c: Vec2, ha: number, hb: number, h
 export const Plateau = defineShapeType({
   id: "plateau",
   name: "Plateau",
+  category: "Primitives",
   params: {
     profile: { type: "enum", options: PROFILE_KINDS, default: "linear" },
   },
@@ -115,7 +117,7 @@ fn shape_plateau(p: vec2f, base: u32) -> vec2f {
       // slope band: barycentric height inside the two-ring strip triangulation. The SDF ramp
       // is the fallback for points no triangle covers (degenerate / non-convex rings).
       t = clamp(sdB / Math.min(sdB - sdT, -1e-6), 0, 1);
-      const ring = (r: number, idx: number): Vec2 => (r === 0 ? outer[idx]! : inner[idx]!);
+      const ring = (r: number, idx: number): Vector2 => (r === 0 ? outer[idx]! : inner[idx]!);
       for (const [a, b, c] of frustumStrip(nB, inner.length).tris) {
         const hit = triHeight(p, ring(a[0], a[1]), ring(b[0], b[1]), ring(c[0], c[1]), a[0], b[0], c[0]);
         if (hit !== null) {

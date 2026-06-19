@@ -1,4 +1,5 @@
-import type { Vec2 } from "../field/vec";
+import { Vector2 } from "@carapace/primitives";
+import { v2 } from "../field/vec";
 
 export interface Viewport {
   zoom: number;
@@ -9,18 +10,12 @@ export interface Viewport {
 export const MIN_ZOOM = 0.125;
 export const MAX_ZOOM = 16;
 
-export const canvasToScreen = (v: Viewport, p: Vec2): Vec2 => ({
-  x: p.x * v.zoom + v.panX,
-  y: p.y * v.zoom + v.panY,
-});
+export const canvasToScreen = (v: Viewport, p: Vector2): Vector2 => v2(p.x * v.zoom + v.panX, p.y * v.zoom + v.panY);
 
-export const screenToCanvas = (v: Viewport, p: Vec2): Vec2 => ({
-  x: (p.x - v.panX) / v.zoom,
-  y: (p.y - v.panY) / v.zoom,
-});
+export const screenToCanvas = (v: Viewport, p: Vector2): Vector2 => v2((p.x - v.panX) / v.zoom, (p.y - v.panY) / v.zoom);
 
 /** Zoom by factor keeping the screen-space anchor over the same canvas point. */
-export function zoomAt(v: Viewport, anchor: Vec2, factor: number): Viewport {
+export function zoomAt(v: Viewport, anchor: Vector2, factor: number): Viewport {
   const zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, v.zoom * factor));
   const c = screenToCanvas(v, anchor);
   return { zoom, panX: anchor.x - c.x * zoom, panY: anchor.y - c.y * zoom };

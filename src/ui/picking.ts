@@ -1,12 +1,13 @@
 import { getShapeType } from "../field/registry";
 import { distanceScale, toLocal } from "../field/transform";
 import type { ShapeInstance } from "../field/types";
-import { v2, Vec2 } from "../field/vec";
+import { Vector2, Vector3 } from "@carapace/primitives";
+import { v2 } from "../field/vec";
 
 const PICK_SLOP_PX = 1;
 
 /** Topmost visible, unlocked shape whose footprint (± slop, canvas px) contains the point. */
-export function pickShape(shapes: ShapeInstance[], canvasPoint: Vec2): ShapeInstance | null {
+export function pickShape(shapes: ShapeInstance[], canvasPoint: Vector2): ShapeInstance | null {
   for (let i = shapes.length - 1; i >= 0; i--) {
     const s = shapes[i]!;
     if (!s.visible || s.locked) continue;
@@ -18,7 +19,7 @@ export function pickShape(shapes: ShapeInstance[], canvasPoint: Vec2): ShapeInst
 }
 
 /** New rotation given a drag from startPoint to currentPoint around pivot. */
-export function rotationFromDrag(pivot: Vec2, startPoint: Vec2, currentPoint: Vec2, startRotation: number): number {
+export function rotationFromDrag(pivot: Vector2, startPoint: Vector2, currentPoint: Vector2, startRotation: number): number {
   const a0 = Math.atan2(startPoint.y - pivot.y, startPoint.x - pivot.x);
   const a1 = Math.atan2(currentPoint.y - pivot.y, currentPoint.x - pivot.x);
   return startRotation + (a1 - a0);
@@ -45,41 +46,35 @@ const clampMag = (v: number): number => Math.max(0.05, Math.abs(v));
  * three axes, so a shape grown 2x also gets 2x taller.
  */
 export function axisScaleFromDrag(
-  pivot: Vec2,
+  pivot: Vector2,
   rotation: number,
-  startPoint: Vec2,
-  currentPoint: Vec2,
-  startScale: { x: number; y: number; z: number },
+  startPoint: Vector2,
+  currentPoint: Vector2,
+  startScale: Vector3,
   uniform: boolean,
-): { x: number; y: number; z: number } {
+): Vector3 {
   if (uniform) {
     const d0 = Math.hypot(startPoint.x - pivot.x, startPoint.y - pivot.y) || 1;
     const d1 = Math.hypot(currentPoint.x - pivot.x, currentPoint.y - pivot.y);
     const ratio = d1 / d0;
-    return {
-      x: clampMag(startScale.x * ratio),
-      y: clampMag(startScale.y * ratio),
-      z: clampMag(startScale.z * ratio),
-    };
+    return new Vector3(clampMag(startScale.x * ratio), clampMag(startScale.y * ratio), clampMag(startScale.z * ratio));
   }
   // un-rotate into the shape's local axes (scale still applied — ratios cancel it out)
   const c = Math.cos(-rotation);
   const s = Math.sin(-rotation);
-  const unrot = (p: Vec2): Vec2 => ({
-    x: (p.x - pivot.x) * c - (p.y - pivot.y) * s,
-    y: (p.x - pivot.x) * s + (p.y - pivot.y) * c,
-  });
+  const unrot = (p: Vector2): Vector2 =>
+    v2((p.x - pivot.x) * c - (p.y - pivot.y) * s, (p.x - pivot.x) * s + (p.y - pivot.y) * c);
   const a = unrot(startPoint);
   const b = unrot(currentPoint);
   const apply = (v: number, num: number, den: number): number =>
     Math.abs(den) < 1e-3 ? v : clampMag(v * (num / den));
-  return { x: apply(startScale.x, b.x, a.x), y: apply(startScale.y, b.y, a.y), z: startScale.z };
+  return new Vector3(apply(startScale.x, b.x, a.x), apply(startScale.y, b.y, a.y), startScale.z);
 }
 
 // --- multi-vertex group editing (move/scale a set of selected control points) ---
 
 /** Axis-aligned bounds + centroid of a set of points (shape-local). */
-export function pointsBounds(pts: Vec2[]): { min: Vec2; max: Vec2; centroid: Vec2 } {
+export function pointsBounds(pts: Vector2[]): { min: Vector2; max: Vector2; centroid: Vector2 } {
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -98,19 +93,19 @@ export function pointsBounds(pts: Vec2[]): { min: Vec2; max: Vec2; centroid: Vec
 }
 
 /** Per-axis scale factor for a group drag: how far the handle moved from the pivot. */
-export function groupScaleFactor(pivot: Vec2, startLocal: Vec2, currentLocal: Vec2): Vec2 {
+export function groupScaleFactor(pivot: Vector2, startLocal: Vector2, currentLocal: Vector2): Vector2 {
   const fx = Math.abs(startLocal.x - pivot.x) < 1e-3 ? 1 : (currentLocal.x - pivot.x) / (startLocal.x - pivot.x);
   const fy = Math.abs(startLocal.y - pivot.y) < 1e-3 ? 1 : (currentLocal.y - pivot.y) / (startLocal.y - pivot.y);
   return v2(fx, fy);
 }
 
 /** Scale points about a pivot by a per-axis factor (group vertex scale). */
-export function scalePointsAbout(pts: Vec2[], pivot: Vec2, factor: Vec2): Vec2[] {
+export function scalePointsAbout(pts: Vector2[], pivot: Vector2, factor: Vector2): Vector2[] {
   return pts.map((p) => v2(pivot.x + (p.x - pivot.x) * factor.x, pivot.y + (p.y - pivot.y) * factor.y));
 }
 
 /** Indices of canvas-space points inside the axis-aligned box between a and b (marquee). */
-export function pointsInBox(canvasPts: Vec2[], a: Vec2, b: Vec2): number[] {
+export function pointsInBox(canvasPts: Vector2[], a: Vector2, b: Vector2): number[] {
   const lo = v2(Math.min(a.x, b.x), Math.min(a.y, b.y));
   const hi = v2(Math.max(a.x, b.x), Math.max(a.y, b.y));
   const out: number[] = [];
