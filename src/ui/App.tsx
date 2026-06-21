@@ -20,13 +20,12 @@ import { getHost } from "./host";
 import { Inspector } from "./Inspector";
 import { Layers } from "./Layers";
 import { Library } from "./Library";
-import { Tabs } from "./Tabs";
-import { Button, SectionLabel, StatusBar, ToastState } from "./kit";
+import { Button, SectionLabel, ToastState } from "./kit";
 import { FileExplorer } from "@carapace/shell";
 import type { DirEntry, FileExplorerProps } from "@carapace/shell";
 import { DocumentRegular, FolderRegular, ImageRegular } from "@fluentui/react-icons";
 import { usePersistentState } from "./persist";
-import { Sash } from "./Sash";
+import { Sash, EditorTabs, StatusBar } from "@carapace/shell";
 import { Toolbar } from "./Toolbar";
 import type { ViewMode } from "./preview";
 import { VIEW_MODES } from "./preview";
@@ -52,13 +51,15 @@ export interface ViewState {
   /** Overlay opacity for the normal view (1 = 100%). */
   opacity: number;
   lightDir: [number, number, number];
+  /** Lit view: light intensity multiplier (1 = default). */
+  lightEnergy: number;
   /** Raster view: the pixelated exported output instead of the crisp display-res vector view. */
   raster: boolean;
   /** Lit view: preview the full Skyrat pipeline (alpha-volume + NX override + radial + gradient). */
   fullPipeline: boolean;
 }
 
-const DEFAULT_VIEW: ViewState = { mode: "lit", opacity: 1, lightDir: [-0.5, -0.5, 0.7], raster: false, fullPipeline: false };
+const DEFAULT_VIEW: ViewState = { mode: "lit", opacity: 1, lightDir: [-0.5, -0.5, 0.7], lightEnergy: 1, raster: false, fullPipeline: false };
 
 export function App(): React.JSX.Element {
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
@@ -579,12 +580,12 @@ export function App(): React.JSX.Element {
           ) : null}
         </aside>
         {active ? <ToolPalette tool={tool} setTool={setTool} /> : null}
-        <Sash onDrag={(dx) => setLeftWidth((w) => clampPanel(w + dx))} />
+        <Sash orientation="vertical" onDrag={(dx) => setLeftWidth((w) => clampPanel(w + dx))} />
         <div className="flex min-w-0 flex-1 flex-col">
-          <Tabs
-            tabs={tabInfos}
-            activeIndex={workspace?.activeIndex ?? -1}
-            onSelect={(i) => workspaceRef.current?.focus(workspaceRef.current.tabs[i]!.imagePath)}
+          <EditorTabs
+            tabs={tabInfos.map((t) => ({ id: t.imagePath, title: t.name, dirty: t.dirty }))}
+            activeId={tabInfos[workspace?.activeIndex ?? -1]?.imagePath ?? null}
+            onSelect={(id) => workspaceRef.current?.focus(id)}
             onClose={closeImage}
           />
           {active && state ? (
@@ -606,6 +607,7 @@ export function App(): React.JSX.Element {
                   selVerts={selVerts}
                   setSelVerts={setSelVerts}
                   onLightChange={(d) => setActiveView((v) => ({ ...v, lightDir: d }))}
+                  onEnergyChange={(en) => setActiveView((v) => ({ ...v, lightEnergy: en }))}
                   canvas3dRef={canvas3dRef}
                   orbit3d={cam3d.orbit}
                   normalDirs={workspace!.config.normalDirs}
@@ -619,7 +621,7 @@ export function App(): React.JSX.Element {
                 />
               </main>
               <div className="flex" style={{ gridArea: "sash" }}>
-                <Sash onDrag={(dx) => setRightWidth((w) => clampPanel(w - dx))} />
+                <Sash orientation="vertical" onDrag={(dx) => setRightWidth((w) => clampPanel(w - dx))} />
               </div>
               <aside className="overflow-y-auto bg-bg p-3" style={{ gridArea: "inspector" }}>
                 <Inspector
@@ -672,7 +674,7 @@ export function App(): React.JSX.Element {
         </div>
       </div>
       <StatusBar
-        message={toast}
+        left={toast ? <span className={toast.tone === "error" ? "text-error" : "text-fg-mid"}>{toast.msg}</span> : null}
         right={state ? `${state.doc.source.width}×${state.doc.source.height} · ${flattenLayers(state.doc.layers).length} shapes` : null}
       />
     </div>
