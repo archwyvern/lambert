@@ -1,0 +1,44 @@
+appId: com.archwyvern.lambert
+productName: Lambert
+copyright: Copyright © Archwyvern
+
+# electron-vite bundles the main/preload/renderer into out/ (carapace + chokidar inlined — see
+# electron.vite.config.ts), so the packaged app is fully self-contained: just out/ + package.json,
+# no runtime node_modules. Keeps the installer small and sidesteps the github/link carapace dep.
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+asar: true
+
+# Draft GitHub release per tag (electron-builder default releaseType: draft). The CI publishes here.
+publish:
+  provider: github
+  owner: archwyvern
+  repo: lambert
+
+linux:
+  target:
+    - deb # Debian / Ubuntu
+    - rpm # Fedora / RHEL
+  category: Graphics
+  maintainer: Archwyvern <codekestrel@googlemail.com>
+  synopsis: Shape-based height-field authoring for normal maps.
+
+win:
+  target:
+    - nsis
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+
+mac:
+  target:
+    - dmg
+    - zip
+  category: public.app-category.graphics
+  identity: null # alpha builds are unsigned (no Developer ID / notarization yet)

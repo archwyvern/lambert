@@ -1,0 +1,75 @@
+name: release
+
+# Build + publish installers for Windows, Linux (Debian .deb + Fedora .rpm) and macOS to a GitHub
+# release whenever a v* tag is pushed. electron-builder uploads to a DRAFT release per tag.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # the GITHUB_TOKEN needs this to create/upload the release
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      # Lambert and carapace are checked out as SIBLINGS (carapace/ next to lambert/) because the
+      # renderer bundles @carapace/shell's source and the main process bundles its compiled dist —
+      # the pnpm `link:../carapace` override + the vite alias both resolve to ../carapace.
+      - name: Checkout lambert
+        uses: actions/checkout@v4
+        with:
+          path: lambert
+
+      - name: Checkout carapace (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: archwyvern/carapace
+          ref: main
+          path: carapace
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: lambert/pnpm-lock.yaml
+
+      # carapace shell's compiled dist (dist/fs/node.js) is what the main process bundles; build it.
+      - name: Build carapace shell
+        working-directory: carapace
+        run: |
+          pnpm install
+          pnpm --filter @carapace/shell build
+
+      - name: Install lambert deps
+        working-directory: lambert
+        run: pnpm install --frozen-lockfile
+
+      # electron-builder builds .rpm on Linux via the `rpm` tool, which isn't on ubuntu by default.
+      - name: Install rpm tooling (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y rpm
+
+      - name: Build renderer/main/preload
+        working-directory: lambert
+        run: pnpm build
+
+      # electron-builder targets the host OS's configured targets (deb+rpm / nsis / dmg+zip) and
+      # publishes to the tag's draft release. Mac builds are unsigned for alpha.
+      - name: Package + publish
+        working-directory: lambert
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: pnpm exec electron-builder --publish always

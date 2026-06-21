@@ -6,12 +6,16 @@ import { resolve } from "node:path";
 // bundler resolves it to the local checkout's SOURCE so edits to carapace are live
 // with no rebuild. The pnpm `link:` override symlinks the package (tsc resolves its
 // types via dist); this alias points Vite at src instead.
+// chokidar 5 is pure-JS ESM, so we BUNDLE @carapace/shell (the FileExplorer's fs server + ipc
+// bridge) and chokidar into the main/preload output — `out/` is then fully self-contained and the
+// packaged app needs no runtime node_modules. carapace is a github/link dep with no single-package
+// npm install, so bundling is what makes a distributable build possible. Everything else (electron,
+// node builtins) stays external via externalizeDepsPlugin's defaults.
+const BUNDLE = ["@carapace/shell", "chokidar"];
+
 export default defineConfig({
-  // externalize deps so @carapace/shell/node (the FileExplorer's fs server) and its chokidar
-  // dependency load at runtime from the linked package rather than being bundled (chokidar is
-  // ESM-only with native bits; bundling it into the electron main breaks).
-  main: { plugins: [externalizeDepsPlugin()] },
-  preload: { plugins: [externalizeDepsPlugin()] },
+  main: { plugins: [externalizeDepsPlugin({ exclude: BUNDLE })] },
+  preload: { plugins: [externalizeDepsPlugin({ exclude: BUNDLE })] },
   renderer: {
     plugins: [tailwindcss()],
     resolve: {

@@ -4,15 +4,26 @@
   "description": "Shape-based height field authoring for normal maps. 3D but not 3D, done the hard way.",
   "type": "module",
   "license": "MIT",
+  "author": "Archwyvern <codekestrel@googlemail.com>",
+  "homepage": "https://github.com/archwyvern/lambert",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/archwyvern/lambert.git"
+  },
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
+    "build": "electron-vite build",
     "selftest": "electron-vite build && electron . --selftest",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "eval": "tsx src/cli/evaluate.ts",
-    "gen-goldens": "tsx tests/golden/gen.ts"
+    "gen-goldens": "tsx tests/golden/gen.ts",
+    "dist": "electron-vite build && electron-builder",
+    "dist:linux": "electron-vite build && electron-builder --linux",
+    "dist:win": "electron-vite build && electron-builder --win",
+    "dist:mac": "electron-vite build && electron-builder --mac"
   },
   "packageManager": "pnpm@10.33.4",
   "pnpm": {
@@ -33,6 +44,7 @@
     "@types/react-dom": "^19.2.3",
     "@webgpu/types": "^0.1.70",
     "electron": "^42.3.3",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "tailwindcss": "^4.3.0",
     "tsx": "^4.22.4",
