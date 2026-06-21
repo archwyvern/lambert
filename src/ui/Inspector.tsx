@@ -19,24 +19,22 @@ import type { ToolMode } from "./tools";
 const toDeg = (rad: number): number => Number(((rad * 180) / Math.PI).toFixed(1));
 const toRad = (deg: number): number => (deg * Math.PI) / 180;
 const wrapDeg = (deg: number): number => ((((deg + 180) % 360) + 360) % 360) - 180; // -> (-180, 180]
-const SCALE_MIN = 0.05; // no negative/mirrored/zero scale
-const SCRUB = 0.5; // gentler drag-scrub than carapace's default — most fields here are unbounded
-const SHIFT_FAST = 10; // hold Shift to scrub 10x faster (carapace's default Shift is 10x *finer*)
+const SCALE_MIN = 0.05; // min magnitude; sign is allowed (a flipped/mirrored axis is negative scale)
+
+/** Clamp a scale component to >= SCALE_MIN in magnitude, KEEPING its sign so a flip (negative scale)
+ *  survives scrubbing. Zero -> +min. */
+const clampScale = (v: number): number => (Math.abs(v) < SCALE_MIN ? (v < 0 ? -SCALE_MIN : SCALE_MIN) : v);
 
 /** Group mirror modes; index order doubles as the enum-field option index. */
 const MIRROR_MODES = ["none", "x", "y", "quad"] as const;
 
-// Every numeric field is floating-point by default: step 0.01 (so drag-scrub = 0.01/px, and Shift =
-// 0.1/px via SHIFT_FAST). Genuinely-integer fields (vertex counts) opt out with `integer: true, step: 1`.
-/** Number field — float 0.01 / Shift 0.1 by default. */
-const num = (
-  f: Omit<Extract<InspectorField, { kind: "number" }>, "kind" | "dragScale"> & { dragScale?: number },
-): InspectorField => ({ kind: "number", dragScale: SCRUB, shiftScale: SHIFT_FAST, step: 0.01, ...f });
+// SpinSlider's scrub step is universal in carapace now (float 0.01 / Shift 0.1 / Ctrl 1.0; integer = 1.0),
+// so these helpers only tag the field kind. Genuinely-integer fields pass `integer: true`.
+/** Number field. */
+const num = (f: Omit<Extract<InspectorField, { kind: "number" }>, "kind">): InspectorField => ({ kind: "number", ...f });
 
-/** Vector field (carapace's per-axis SpinSliders), same float-0.01 conventions as `num`. */
-const vec = (
-  f: Omit<Extract<InspectorField, { kind: "vec" }>, "kind" | "dragScale"> & { dragScale?: number },
-): InspectorField => ({ kind: "vec", dragScale: SCRUB, shiftScale: SHIFT_FAST, step: 0.01, ...f });
+/** Vector field (carapace's per-axis SpinSliders). */
+const vec = (f: Omit<Extract<InspectorField, { kind: "vec" }>, "kind">): InspectorField => ({ kind: "vec", ...f });
 
 export function Inspector(props: {
   store: DocumentStore;
@@ -79,7 +77,6 @@ export function Inspector(props: {
         group: "Transform",
         value: [g.transform.pos.x - gdx, g.transform.pos.y - gdy, g.transform.pos.z],
         size: 3,
-        step: snap ? 0.5 : 0.01,
         onChange: (a) => liveG((n) => ({ ...n, transform: { ...n.transform, pos: new Vector3(a[0]! + gdx, a[1]! + gdy, a[2]!) } }), "gpos"),
         onCommit: commitG,
       }),
@@ -97,8 +94,11 @@ export function Inspector(props: {
         group: "Transform",
         value: [g.transform.scale.x, g.transform.scale.y, g.transform.scale.z],
         size: 3,
-        min: SCALE_MIN,
-        onChange: (a) => liveG((n) => ({ ...n, transform: { ...n.transform, scale: new Vector3(a[0]!, a[1]!, a[2]!) } }), "gscale"),
+        onChange: (a) =>
+          liveG(
+            (n) => ({ ...n, transform: { ...n.transform, scale: new Vector3(clampScale(a[0]!), clampScale(a[1]!), clampScale(a[2]!)) } }),
+            "gscale",
+          ),
         onCommit: commitG,
       }),
       {
@@ -125,6 +125,14 @@ export function Inspector(props: {
         <div className="mb-2 border-b border-border pb-1.5 text-md font-semibold text-fg">{g.name ?? "Group"}</div>
         <p className="mb-2 px-2 text-sm text-fg-mid">{g.children.length} layer{g.children.length === 1 ? "" : "s"}</p>
         <PropertyInspector fields={gfields} sections={[{ name: "Transform" }, { name: "Symmetry" }]} />
+        <div className="mt-1 flex gap-1 px-2">
+          <Button className="flex-1" onClick={() => { liveG((n) => ({ ...n, transform: { ...n.transform, scale: n.transform.scale.withX(-n.transform.scale.x) } }), "flip"); commitG(); }}>
+            Flip H
+          </Button>
+          <Button className="flex-1" onClick={() => { liveG((n) => ({ ...n, transform: { ...n.transform, scale: n.transform.scale.withY(-n.transform.scale.y) } }), "flip"); commitG(); }}>
+            Flip V
+          </Button>
+        </div>
         <div className="my-3 border-t border-border" />
         <MaskList
           masks={g.masks ?? []}
@@ -135,6 +143,7 @@ export function Inspector(props: {
           }}
           onMode={(id, mode) => patchGMasks((n) => ({ ...n, masks: n.masks?.map((mm) => (mm.id === id ? { ...mm, mode } : mm)) }))}
           onFollow={(id, follow) => patchGMasks((n) => setMaskFollow(n, id, follow))}
+          onToggleAA={(id, aa) => patchGMasks((n) => ({ ...n, masks: n.masks?.map((mm) => (mm.id === id ? { ...mm, hard: !aa } : mm)) }))}
           onToggleVisible={(id, visible) => patchGMasks((n) => ({ ...n, masks: n.masks?.map((mm) => (mm.id === id ? { ...mm, visible } : mm)) }))}
           onRemove={(id) => patchGMasks((n) => ({ ...n, masks: n.masks?.filter((mm) => mm.id !== id) }))}
         />
@@ -169,7 +178,6 @@ export function Inspector(props: {
         group: "Canvas",
         value: [doc.canvas.origin.x, doc.canvas.origin.y],
         size: 2,
-        step: 1,
         onChange: (a) => store.update((d) => ({ ...d, canvas: { ...d.canvas, origin: { x: a[0]!, y: a[1]! } } }), { coalesce: "origin" }),
         onCommit: () => store.endGesture(),
       }),
@@ -256,7 +264,6 @@ export function Inspector(props: {
         value: shape.ringSplit ?? (shape.controlPoints.length >> 1),
         min: type.controlPoints.min ?? 3,
         max: 16,
-        step: 1,
         integer: true,
         onChange: (v) => {
           const n = Math.round(v);
@@ -280,7 +287,6 @@ export function Inspector(props: {
         value: shape.controlPoints.length - (shape.ringSplit ?? (shape.controlPoints.length >> 1)),
         min: 1,
         max: 16,
-        step: 1,
         integer: true,
         onChange: (v) => {
           const n = Math.round(v);
@@ -308,7 +314,6 @@ export function Inspector(props: {
         value: shape.controlPoints.length,
         min: type.controlPoints.min ?? (type.controlPoints.kind === "polyline" ? 2 : 3),
         max: 16,
-        step: 1,
         integer: true,
         onChange: (v) => {
           const n = Math.round(v);
@@ -372,7 +377,6 @@ export function Inspector(props: {
           min: spec.min,
           max: spec.max,
           // float params: 0.01 / Shift 0.1 (the universal scrub); non-float params stay integer.
-          step: spec.float ? (spec.step ?? 0.01) : (spec.step ?? 1),
           integer: !spec.float,
           onChange,
           onCommit: commit,
@@ -392,7 +396,6 @@ export function Inspector(props: {
         size: 2,
         min: -1,
         max: 1,
-        step: 0.01,
         onChange: (a) => live((s) => ({ ...s, params: { ...s.params, tiltX: a[0]!, tiltY: a[1]! } }), "tilt"),
         onCommit: commit,
       }),
@@ -415,7 +418,6 @@ export function Inspector(props: {
         group: "Transform",
         value: [pos.x - dx, pos.y - dy, pos.z],
         size: 3,
-        step: snap ? 0.5 : 0.01,
         onChange: (a) =>
           live((s) => ({ ...s, transform: { ...s.transform, pos: new Vector3(a[0]! + dx, a[1]! + dy, a[2]!) } }), "tpos"),
         onCommit: commit,
@@ -434,21 +436,44 @@ export function Inspector(props: {
         group: "Transform",
         value: [scale.x, scale.y, scale.z],
         size: 3,
-        min: SCALE_MIN,
         onChange: (a) =>
-          live((s) => ({ ...s, transform: { ...s.transform, scale: new Vector3(a[0]!, a[1]!, a[2]!) } }), "tscale"),
+          live(
+            (s) => ({ ...s, transform: { ...s.transform, scale: new Vector3(clampScale(a[0]!), clampScale(a[1]!), clampScale(a[2]!)) } }),
+            "tscale",
+          ),
         onCommit: commit,
       }),
     );
   }
 
-  // selected control-point vertices get their OWN "Vertex" section: a single vertex shows x/y (and,
-  // for a mesh, its height); a multi-selection shows just height, applied to every selected vertex so
-  // a whole ridge raises at once. (Multi x/y is the canvas drag.)
+  // selected control-point vertices get their OWN "Vertex" section. A single MESH vertex is one
+  // Vector3 (x, y, height — z is the vertex height); a single non-mesh vertex is x/y; a multi-mesh
+  // selection shows just height, applied to every selected vertex so a whole ridge raises at once.
   const editVerts = selVerts.length > 0 && shape.controlPoints.length > 0;
   if (editVerts) {
-    if (selVerts.length === 1) {
-      const cp = shape.controlPoints[selVerts[0]!];
+    const i0 = selVerts[0]!;
+    const cp = shape.controlPoints[i0];
+    if (selVerts.length === 1 && shape.mesh) {
+      fields.push(
+        vec({
+          key: "vpos3",
+          label: "position",
+          group: "Vertex",
+          value: [cp?.x ?? 0, cp?.y ?? 0, shape.mesh.z[i0] ?? 0],
+          size: 3,
+          onChange: (a) =>
+            live(
+              (s) => ({
+                ...s,
+                controlPoints: s.controlPoints.map((p, i) => (i === i0 ? v2(a[0]!, a[1]!) : p)),
+                mesh: s.mesh ? { ...s.mesh, z: s.mesh.z.map((z, i) => (i === i0 ? a[2]! : z)) } : s.mesh,
+              }),
+              "vpos3",
+            ),
+          onCommit: commit,
+        }),
+      );
+    } else if (selVerts.length === 1) {
       fields.push(
         vec({
           key: "vpos",
@@ -456,29 +481,21 @@ export function Inspector(props: {
           group: "Vertex",
           value: [cp?.x ?? 0, cp?.y ?? 0],
           size: 2,
-          step: snap ? 0.5 : 0.01,
           onChange: (a) =>
-            live(
-              (s) => ({ ...s, controlPoints: s.controlPoints.map((p, i) => (i === selVerts[0] ? v2(a[0]!, a[1]!) : p)) }),
-              "vpos",
-            ),
+            live((s) => ({ ...s, controlPoints: s.controlPoints.map((p, i) => (i === i0 ? v2(a[0]!, a[1]!) : p)) }), "vpos"),
           onCommit: commit,
         }),
       );
-    }
-    if (shape.mesh) {
+    } else if (shape.mesh) {
       fields.push(
         num({
           key: "vz",
           label: "height",
           group: "Vertex",
-          value: Number((shape.mesh.z[selVerts[0]!] ?? 0).toFixed(2)),
+          value: Number((shape.mesh.z[i0] ?? 0).toFixed(2)),
           onChange: (v) =>
             live(
-              (s) => ({
-                ...s,
-                mesh: s.mesh ? { ...s.mesh, z: s.mesh.z.map((z, i) => (selVerts.includes(i) ? v : z)) } : s.mesh,
-              }),
+              (s) => ({ ...s, mesh: s.mesh ? { ...s.mesh, z: s.mesh.z.map((z, i) => (selVerts.includes(i) ? v : z)) } : s.mesh }),
               "vz",
             ),
           onCommit: commit,
@@ -498,6 +515,26 @@ export function Inspector(props: {
       {multiBanner}
       <div className="mb-2 border-b border-border pb-1.5 text-md font-semibold text-fg">{type.name}</div>
       <PropertyInspector fields={fields} sections={sections} />
+      <div className="mt-1 flex gap-1 px-2">
+        <Button
+          className="flex-1"
+          onClick={() => {
+            live((s) => ({ ...s, transform: { ...s.transform, scale: s.transform.scale.withX(-s.transform.scale.x) } }), "flip");
+            commit();
+          }}
+        >
+          Flip H
+        </Button>
+        <Button
+          className="flex-1"
+          onClick={() => {
+            live((s) => ({ ...s, transform: { ...s.transform, scale: s.transform.scale.withY(-s.transform.scale.y) } }), "flip");
+            commit();
+          }}
+        >
+          Flip V
+        </Button>
+      </div>
       {editVerts ? (
         <p className="mt-1 px-2 text-sm leading-snug text-fg-mid">
           {selVerts.length === 1 ? "1 vertex" : `${selVerts.length} vertices`} · right-click or Alt-click an edge to insert · ⌫ deletes
@@ -517,6 +554,10 @@ export function Inspector(props: {
         }}
         onFollow={(id, follow) => {
           store.update((d) => updateShape(d, shape.id, (s) => setMaskFollow(s, id, follow)));
+          commit();
+        }}
+        onToggleAA={(id, aa) => {
+          store.update((d) => updateShape(d, shape.id, (s) => ({ ...s, masks: s.masks?.map((mm) => (mm.id === id ? { ...mm, hard: !aa } : mm)) })));
           commit();
         }}
         onToggleVisible={(id, visible) => {
