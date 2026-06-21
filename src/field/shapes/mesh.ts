@@ -1,6 +1,23 @@
+import { meshEdges } from "../meshOps";
 import { defineShapeType } from "../registry";
 import { sdSegment } from "../sdf";
 import { triBary } from "../tri";
+import type { ShapeInstance } from "../types";
+import { v2 } from "../vec";
+
+const QUAD_R = 32; // half-extent of a fresh mesh (a 64px plane), matching the plateau footprint
+const QUAD_H = 24; // flat starting height (px), so a new mesh is immediately visible to sculpt
+
+/** Seed a brand-new mesh as a flat quad: 4 corner vertices, 2 triangles, a uniform starting height. */
+function seedQuad(shape: ShapeInstance): void {
+  shape.controlPoints = [v2(-QUAD_R, -QUAD_R), v2(QUAD_R, -QUAD_R), v2(QUAD_R, QUAD_R), v2(-QUAD_R, QUAD_R)];
+  const z = [QUAD_H, QUAD_H, QUAD_H, QUAD_H];
+  const tris: [number, number, number][] = [
+    [0, 1, 2],
+    [0, 2, 3],
+  ];
+  shape.mesh = { z, tris, edges: meshEdges({ z, tris }) };
+}
 
 /**
  * Mesh plane: a free triangulated height surface. Vertices live in controlPoints (xy) with a
@@ -8,15 +25,16 @@ import { triBary } from "../tri";
  * barycentric interpolation across the triangle under it; the `smoothness` param (0..1) blends
  * that flat interpolation toward Phong tessellation (each vertex's tangent plane, from the
  * per-vertex gradient mesh.grad) so the faceted surface rounds off. Normals derive from the
- * resulting height field like every other shape. Created by converting a rings shape, never
- * dragged from the library.
+ * resulting height field like every other shape. Dragged from the library as a flat quad, then
+ * sculpted by moving vertices and editing their heights.
  */
 export const Mesh = defineShapeType({
   id: "mesh",
   name: "Mesh",
+  category: "Primitives",
   params: { smoothness: { type: "px", default: 0, min: 0, max: 1, step: 0.05 } },
   controlPoints: { kind: "mesh", default: [] },
-  libraryHidden: true, // created by conversion, never dragged from the palette
+  onCreate: seedQuad,
   // record slots: 13 = smoothness; 22 = meshTriStart (vec4 idx), 23 = meshTriCount. meshTris is
   // 2 vec4 per vertex (pos x,y,height,gradX then gradY,_,_,_), 6 vec4 per triangle.
   wgsl: /* wgsl */ `

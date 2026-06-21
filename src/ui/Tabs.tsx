@@ -24,7 +24,15 @@ export function Tabs(props: {
             key={t.imagePath}
             role="tab"
             aria-selected={active}
-            onPointerDown={() => onSelect(i)}
+            title={t.imagePath}
+            onPointerDown={(e) => {
+              if (e.button === 1) {
+                e.preventDefault(); // middle-click closes (standard editor convention)
+                onClose(t.imagePath);
+              } else if (e.button === 0) {
+                onSelect(i);
+              }
+            }}
             className={cx(
               "group flex cursor-pointer items-center gap-1.5 border-r border-border px-3 text-base whitespace-nowrap",
               active ? "bg-surface2 text-fg" : "text-fg-mid hover:bg-hover hover:text-fg",

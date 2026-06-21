@@ -16,6 +16,7 @@ function resolveNormalDirs(docDir: string): ReturnType<typeof emptyProjectConfig
     dir = parent;
   }
 }
+import { flattenLayers } from "../field/flatten";
 import { renderField } from "../field/render";
 import { encodeHeightmapPng } from "../exporters/heightmap";
 import { encodeNormalPng } from "../exporters/normalmap";
@@ -39,7 +40,7 @@ if (source.width !== doc.source.width || source.height !== doc.source.height) {
   process.exit(1);
 }
 
-const r = renderField(doc.shapes, doc.source.width, doc.source.height, { supersample: 2 });
+const r = renderField(flattenLayers(doc.layers), doc.source.width, doc.source.height, { supersample: 2 });
 if (r.mask.every((m) => m === 0)) console.warn("warning: authored mask is empty — NX would change nothing");
 
 const normalDirs = resolveNormalDirs(docDir);

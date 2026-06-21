@@ -1,8 +1,11 @@
 import { expect, test } from "vitest";
 import "../../../src/field/shapes";
 import { createShapeInstance } from "../../../src/field/registry";
+import { createMask } from "../../../src/field/maskOps";
+import { flattenLayers, resolveShapes } from "../../../src/field/flatten";
 import { packShapes } from "../../../src/field/gpu/pack";
 import { RECORD_F32 } from "../../../src/field/gpu/wgsl";
+import { toLocal } from "../../../src/field/transform";
 import { v2 } from "../../../src/field/vec";
 import { Vector3 } from "@carapace/primitives";
 
@@ -10,18 +13,27 @@ test("dome record: layout offsets", () => {
   const dome = createShapeInstance("dome", v2(10, 20));
   dome.transform.rotation = Math.PI / 2;
   dome.transform.scale = new Vector3(2, 4, 0.5);
-  const { records, points, count } = packShapes([dome]);
+  const { records, points, count } = packShapes(resolveShapes([dome]));
   expect(count).toBe(1);
   expect(records.length).toBe(RECORD_F32);
   expect(records[0]).toBe(0); // dome registered first -> typeIndex 0
   expect(records[1]).toBe(0); // op: dome clips (max)
   expect(records[3]).toBe(0.5); // scale.z (tallness)
-  expect(records[4]).toBe(10); // posX
-  expect(records[5]).toBe(20); // posY
-  expect(records[6]).toBeCloseTo(Math.cos(-Math.PI / 2));
-  expect(records[7]).toBeCloseTo(Math.sin(-Math.PI / 2));
-  expect(records[8]).toBeCloseTo(0.5); // invScaleX
-  expect(records[9]).toBeCloseTo(0.25); // invScaleY
+  // slots 4..9 hold the inverse affine: local = (r4*x + r5*y + r8, r6*x + r7*y + r9)
+  const localOf = (wx: number, wy: number): { x: number; y: number } => ({
+    x: records[4]! * wx + records[5]! * wy + records[8]!,
+    y: records[6]! * wx + records[7]! * wy + records[9]!,
+  });
+  for (const [wx, wy] of [
+    [10, 20],
+    [0, 0],
+    [33, -7],
+  ] as const) {
+    const exp = toLocal(dome.transform, v2(wx, wy));
+    const got = localOf(wx, wy);
+    expect(got.x).toBeCloseTo(exp.x, 5);
+    expect(got.y).toBeCloseTo(exp.y, 5);
+  }
   expect(records[10]).toBeCloseTo(3); // distScale = (2+4)/2
   expect(records[11]).toBe(0); // cpStart
   expect(records[12]).toBe(0); // cpCount (dome has none)
@@ -32,7 +44,7 @@ test("dome record: layout offsets", () => {
 test("plateau: control points and enum param index", () => {
   const plateau = createShapeInstance("plateau", v2(0, 0));
   plateau.params.profile = "round";
-  const { records, points } = packShapes([plateau]);
+  const { records, points } = packShapes(resolveShapes([plateau]));
   expect(records[12]).toBe(8); // 4 base + 4 top-rim vertices
   expect(records[13]).toBe(2); // profile "round" -> options index 2
   expect(points[0]).toBe(-32); // first base vertex x
@@ -45,17 +57,60 @@ test("multiple shapes: cpStart advances, invisible skipped", () => {
   const a = createShapeInstance("plateau", v2(0, 0));
   const hidden = createShapeInstance("dome", v2(0, 0));
   hidden.visible = false;
-  const b = createShapeInstance("ridge", v2(0, 0));
-  const { records, count } = packShapes([a, hidden, b]);
+  const b = createShapeInstance("groove", v2(0, 0));
+  const { records, count } = packShapes(resolveShapes([a, hidden, b]));
   expect(count).toBe(2);
   expect(records.length).toBe(2 * RECORD_F32);
-  expect(records[RECORD_F32 + 11]).toBe(8); // ridge cpStart after plateau's 8 points
-  expect(records[RECORD_F32 + 12]).toBe(2); // ridge polyline 2 points
+  expect(records[RECORD_F32 + 11]).toBe(8); // groove cpStart after plateau's 8 points
+  expect(records[RECORD_F32 + 12]).toBe(2); // groove polyline 2 points
 });
 
 test("empty list still allocates non-empty buffers", () => {
-  const { records, points, count } = packShapes([]);
+  const { records, points, maskLoops, maskVerts, count } = packShapes(resolveShapes([]));
   expect(count).toBe(0);
   expect(records.length).toBeGreaterThan(0);
   expect(points.length).toBeGreaterThan(0);
+  expect(maskLoops.length).toBeGreaterThan(0);
+  expect(maskVerts.length).toBeGreaterThan(0);
+});
+
+test("masks: maskLoopStart/Count + vec4 header + verts per loop", () => {
+  const s = createShapeInstance("dome", v2(10, 10));
+  s.masks = [
+    { ...createMask([v2(0, 0), v2(4, 0), v2(4, 4), v2(0, 4)], true), mode: "keep" }, // 4 verts, follow
+    { ...createMask([v2(1, 1), v2(2, 1), v2(2, 2)], false), mode: "cut" }, // 3 verts, world
+  ];
+  const { records, maskLoops, maskVerts } = packShapes(resolveShapes([s]));
+  expect(records[24]).toBe(0); // maskLoopStart
+  expect(records[25]).toBe(2); // maskLoopCount
+  // loop 0 header: vec4(vertStart, vertCount, flags, scopeId)
+  expect(maskLoops[0]).toBe(0); // vertStart
+  expect(maskLoops[1]).toBe(4); // vertCount
+  expect(maskLoops[2]).toBe(2); // keep(0) + follow(2) = 2
+  expect(maskLoops[3]).toBe(0); // scope 0 (shape's own)
+  // loop 1 header
+  expect(maskLoops[4]).toBe(4); // vertStart (after loop 0's 4 verts)
+  expect(maskLoops[5]).toBe(3); // vertCount
+  expect(maskLoops[6]).toBe(1); // cut(1) + world(0) = 1
+  expect(maskLoops[7]).toBe(0); // scope 0
+  expect(maskVerts.length).toBe((4 + 3) * 2);
+});
+
+test("group mask: a child carries the group mask at scope 1 (world, follow bit clear)", () => {
+  const child = createShapeInstance("dome", v2(0, 0));
+  child.masks = [{ ...createMask([v2(0, 0), v2(4, 0), v2(4, 4), v2(0, 4)], true), mode: "keep" }]; // scope 0
+  const g = {
+    kind: "group" as const,
+    id: "g",
+    transform: { pos: new Vector3(0, 0, 0), rotation: 0, scale: new Vector3(1, 1, 1) },
+    visible: true,
+    locked: false,
+    masks: [{ ...createMask([v2(0, 0), v2(8, 0), v2(8, 8), v2(0, 8)], true), mode: "keep" as const }],
+    children: [child],
+  };
+  const { records, maskLoops } = packShapes(flattenLayers([g]));
+  expect(records[25]).toBe(2); // 2 loops: shape's own + the group's
+  expect(maskLoops[3]).toBe(0); // loop 0 scope 0 (shape's own)
+  expect(maskLoops[7]).toBe(1); // loop 1 scope 1 (group mask)
+  expect(maskLoops[6]! & 2).toBe(0); // group mask baked to world -> follow bit clear
 });

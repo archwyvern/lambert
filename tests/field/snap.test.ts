@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import "../../src/field/shapes";
 import { createShapeInstance } from "../../src/field/registry";
-import { alignedToAxis, snapHalf, snapShapeToGrid } from "../../src/field/snap";
+import { alignedToAxis, snapHalf, snapShapeToGrid, snapToGuides } from "../../src/field/snap";
 import { fromLocal } from "../../src/field/transform";
 import { v2 } from "../../src/field/vec";
 import { Vector3 } from "@carapace/primitives";
@@ -30,6 +30,27 @@ test("snapShapeToGrid puts position + every vertex's canvas position on the ½px
   }
   expect(snapped.transform.rotation).toBe(0.37); // untouched
   expect(snapped.transform.scale).toEqual({ x: 1.3, y: 1.3, z: 1.3 }); // untouched
+});
+
+test("snapToGuides snaps each axis to the nearest in-range guide", () => {
+  const guides = [
+    { orient: "v" as const, at: 10 },
+    { orient: "h" as const, at: 50 },
+  ];
+  const p = snapToGuides(v2(10.4, 80), guides, 1); // x near v-guide 10 (within 1), y far from h-guide 50
+  expect(p.x).toBe(10);
+  expect(p.y).toBe(80); // unchanged
+});
+
+test("snapToGuides picks the nearest among several and ignores the other axis", () => {
+  const guides = [
+    { orient: "v" as const, at: 0 },
+    { orient: "v" as const, at: 12 },
+    { orient: "h" as const, at: 30 },
+  ];
+  const p = snapToGuides(v2(11, 29.5), guides, 2);
+  expect(p.x).toBe(12); // nearer than 0
+  expect(p.y).toBe(30);
 });
 
 test("alignedToAxis fires on every 45° axis (0,45,90,...,315) at any length, not off-axis", () => {

@@ -10,6 +10,8 @@ export interface ParamSpecPx {
   max?: number;
   /** Inspector scrub/step increment (default 1). Use a fraction for 0..1 sliders. */
   step?: number;
+  /** Allow fractional values (inspector edits to 0.01 precision instead of whole numbers). */
+  float?: boolean;
 }
 
 export interface ParamSpecEnum {
@@ -41,6 +43,21 @@ export interface MeshData {
   grad?: [number, number][];
 }
 
+/** A pen-drawn closed-Bézier mask that trims its owner shape. keep = shape shows only inside the
+ *  loop; cut = shape is removed inside the loop. follow (default true) = anchors are in shape-local
+ *  space and ride the transform; false = anchors are pinned in canvas/doc space. */
+export interface Mask {
+  id: string;
+  anchors: BezierAnchor[];
+  mode: "keep" | "cut";
+  follow: boolean;
+  /** Absent = visible; false = disabled (kept in the doc but skipped by the fold, so it doesn't trim). */
+  visible?: boolean;
+  /** Engine-internal: a hard (non-anti-aliased) step at the loop edge instead of the ½px feather.
+   *  Set only by the mirror SOURCE clip, so the seam is an exact cut with no half-pixel crossover. */
+  hard?: boolean;
+}
+
 export interface ShapeInstance {
   id: string;
   typeId: string;
@@ -55,12 +72,52 @@ export interface ShapeInstance {
   /** "rings" shapes (plateau): index where the top ring begins = base-ring vertex count.
    *  Absent = equal split (controlPoints.length / 2); lets inner/outer counts differ. */
   ringSplit?: number;
-  /** When true, this shape's vertices + position snap to the ½-pixel grid on every edit. */
-  gridSnap?: boolean;
   /** Present only for mesh-plane shapes (typeId "mesh"); aligns with controlPoints. */
   mesh?: MeshData;
+  /** Per-shape trim masks; each gates ONLY this shape's influence. Absent = unmasked. */
+  masks?: Mask[];
   visible: boolean;
   locked: boolean;
+}
+
+/** A group: a layer with a transform and children but no geometry of its own. Its transform is
+ *  inherited by everything inside it. Non-uniform scale is allowed (resolved transforms are affine). */
+export interface GroupLayer {
+  kind: "group";
+  id: string;
+  name?: string;
+  transform: Transform2D;
+  visible: boolean;
+  locked: boolean;
+  /** Layers-panel collapse state (persisted). */
+  collapsed?: boolean;
+  /** Group-level trim masks (Phase 3). */
+  masks?: Mask[];
+  /** Symmetry about the group's local origin (Phase 4). */
+  mirror?: "none" | "x" | "y" | "quad";
+  /** Absent = on; false = mirror temporarily disabled (renders as a plain group, mode preserved). */
+  mirrorEnabled?: boolean;
+  children: LayerNode[];
+}
+
+/** A node in the layer tree: a shape (leaf) or a group (subtree). */
+export type LayerNode = ShapeInstance | GroupLayer;
+
+/** Per-file canvas aids: a repositionable origin (creation point + ruler/display zero), guides, and
+ *  guide lock + snap toggles. Coords are absolute texture pixels; the origin is displayed relative. */
+export interface CanvasState {
+  origin: { x: number; y: number };
+  /** "v" = vertical guide line at x=at; "h" = horizontal guide line at y=at. */
+  guides: { orient: "v" | "h"; at: number }[];
+  guidesLocked: boolean;
+  snapToGuides: boolean;
+}
+
+export function isGroup(n: LayerNode): n is GroupLayer {
+  return (n as GroupLayer).kind === "group";
+}
+export function isShape(n: LayerNode): n is ShapeInstance {
+  return (n as GroupLayer).kind !== "group";
 }
 
 export interface FieldSample {

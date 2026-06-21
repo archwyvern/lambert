@@ -4,6 +4,7 @@ import {
   ArrowRotateClockwiseRegular,
   BezierCurveSquareRegular,
   CursorRegular,
+  PenRegular,
 } from "@fluentui/react-icons";
 import { cx } from "./kit";
 import type { ToolMode } from "./tools";
@@ -18,6 +19,7 @@ const TOOLS: Array<{ id: ToolMode; key: string; label: string; Icon: typeof Curs
   { id: "rotate", key: "E", label: "Rotate", Icon: ArrowRotateClockwiseRegular },
   { id: "scale", key: "R", label: "Scale", Icon: ArrowExpandRegular },
   { id: "vertex", key: "T", label: "Edit Vertices", Icon: BezierCurveSquareRegular },
+  { id: "pen", key: "P", label: "Mask Pen", Icon: PenRegular },
 ];
 
 export function ToolPalette(props: { tool: ToolMode; setTool: (t: ToolMode) => void }): React.JSX.Element {

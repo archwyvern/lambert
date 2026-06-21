@@ -25,6 +25,7 @@ struct U {
 struct VOut {
   @builtin(position) pos: vec4f,
   @location(0) uv: vec2f,
+  @location(1) world: vec3f,
 }
 
 fn height_at(px: vec2i) -> f32 {
@@ -67,6 +68,7 @@ fn vs(@builtin(vertex_index) vi: u32) -> VOut {
   var out: VOut;
   out.pos = u.mvp * vec4f(world, 1.0);
   out.uv = uv;
+  out.world = world;
   return out;
 }
 
@@ -77,6 +79,12 @@ fn fs(in: VOut) -> @location(0) vec4f {
     vec2i(0),
     vec2i(i32(u.docW) - 1, i32(u.docH) - 1),
   );
+  // hide near-vertical cliff faces (from hard height steps: silhouettes, z-position, scale, masks) so
+  // the relief reads like an orthographic bake instead of a walled extrusion. The triangle's geometric
+  // normal comes from the screen-space derivatives of its world position; its up-component (.y) is ~0
+  // for a vertical wall, ~1 for flat ground. Discarding the walls leaves the floor grid showing through.
+  let geoN = normalize(cross(dpdx(in.world), dpdy(in.world)));
+  if (abs(geoN.y) < 0.35) { discard; }
   // lambert entirely in image space: identical shading to the 2D lit composite
   let diffuse = textureLoad(diffuseTex, px, 0);
   if (diffuse.a < 0.5) { discard; } // transparent diffuse -> see the floor grid through it

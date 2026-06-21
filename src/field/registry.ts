@@ -31,7 +31,6 @@ export function createShapeInstance(typeId: string, pos: Vector2): ShapeInstance
     transform: { pos: new Vector3(pos.x, pos.y, 0), rotation: 0, scale: Vector3.one },
     params,
     controlPoints: t.controlPoints.default.map((p) => v2(p.x, p.y)),
-    gridSnap: t.controlPoints.kind !== "none", // vertex shapes snap to the ½px grid by default
     visible: true,
     locked: false,
   };

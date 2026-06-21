@@ -13,6 +13,10 @@ export interface BezierAnchor {
   hIn: Vector2;
   hOut: Vector2;
   mode?: "smooth" | "manual";
+  /** Tangent symmetry when dragging a handle: undefined/true = the opposite handle mirrors;
+   *  false = the two handles move independently. Alt held during a drag inverts this. UI-only
+   *  (the fold uses the resolved tangents regardless). */
+  sym?: boolean;
 }
 
 export const bezierAnchor = (
@@ -137,6 +141,50 @@ export function bezierSpine(anchors: BezierAnchor[], perSeg = 16): Vector2[] {
   }
   const last = r[r.length - 1]!.p;
   out.push(v2(last.x, last.y));
+  return out;
+}
+
+/**
+ * Closed-loop variant of resolveHandles: every "smooth" anchor derives Catmull-Rom tangents from
+ * its wrap-around neighbours (the first anchor's prev is the last, the last anchor's next is the
+ * first). "manual" anchors pass through. Used to bake closed mask paths.
+ */
+export function resolveHandlesClosed(anchors: BezierAnchor[]): BezierAnchor[] {
+  const n = anchors.length;
+  return anchors.map((a, i) => {
+    if (a.mode === "manual") return a;
+    const prev = anchors[(i - 1 + n) % n]!.p;
+    const next = anchors[(i + 1) % n]!.p;
+    const t = v2((next.x - prev.x) / 6, (next.y - prev.y) / 6);
+    return { ...a, hOut: t, hIn: v2(-t.x, -t.y) };
+  });
+}
+
+/**
+ * Bake a CLOSED Bézier path (mask loop) to a dense polygon for the inside/AA test. A straight
+ * segment (both touching handles zero — i.e. corner anchors) contributes only its start vertex, so
+ * an all-corner loop bakes to exactly its anchor points (a polygon); curved segments emit `perSeg`
+ * samples. The returned ring is implicitly closed (no duplicated first vertex) — sdPolygon wraps.
+ */
+export function bakeMaskLoop(anchors: BezierAnchor[], perSeg = 12): Vector2[] {
+  if (anchors.length < 3) return anchors.map((a) => v2(a.p.x, a.p.y));
+  const r = resolveHandlesClosed(anchors);
+  const n = r.length;
+  const out: Vector2[] = [];
+  const zero = (h: Vector2): boolean => Math.abs(h.x) < 1e-9 && Math.abs(h.y) < 1e-9;
+  for (let i = 0; i < n; i++) {
+    const a0 = r[i]!;
+    const a1 = r[(i + 1) % n]!;
+    if (zero(a0.hOut) && zero(a1.hIn)) {
+      out.push(v2(a0.p.x, a0.p.y)); // straight segment: just the start vertex
+      continue;
+    }
+    const p0 = a0.p;
+    const c0 = ctrlOut(a0);
+    const c1 = ctrlIn(a1);
+    const p1 = a1.p;
+    for (let s = 0; s < perSeg; s++) out.push(cubic(p0, c0, c1, p1, s / perSeg));
+  }
   return out;
 }
 

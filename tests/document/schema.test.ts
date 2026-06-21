@@ -37,8 +37,8 @@ test("empty doc round-trips", () => {
 
 test("doc with shapes round-trips", () => {
   const doc = emptyDoc("hull.df.png", 256, 128);
-  doc.shapes.push(createShapeInstance("dome", v2(64, 64)));
-  doc.shapes.push(createShapeInstance("groove", v2(80, 40)));
+  doc.layers.push(createShapeInstance("dome", v2(64, 64)));
+  doc.layers.push(createShapeInstance("groove", v2(80, 40)));
   const back = parseDoc(serializeDoc(doc));
   expect(back).toEqual(doc);
 });

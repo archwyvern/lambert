@@ -17,6 +17,9 @@ export function LightPad(props: {
       x /= len; // clamp the handle to the circle, not the bounding square
       y /= len;
     }
+    // hemisphere of directions: the pad is its orthographic projection, so z = sqrt(1 - x^2 - y^2)
+    // makes (x,y,z) the unit light direction (rim = horizontal). The 0.3 floor keeps a fully horizontal
+    // light from going pure black on flat surfaces. NdotL then darkens grazing angles, as it should.
     onChange([x, y, Math.max(0.3, Math.sqrt(Math.max(0, 1 - x * x - y * y)))]);
   };
   return (
@@ -27,7 +30,9 @@ export function LightPad(props: {
       role="slider"
       aria-label="Light direction"
       onPointerDown={(e) => {
-        (e.target as Element).setPointerCapture(e.pointerId);
+        // capture on the svg itself (not e.target, a child circle) so the drag keeps receiving moves
+        // — and the handle keeps following, clamped to the rim — even when the cursor leaves the pad
+        e.currentTarget.setPointerCapture(e.pointerId);
         fromEvent(e);
       }}
       onPointerMove={(e) => {

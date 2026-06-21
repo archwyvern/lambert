@@ -1,19 +1,20 @@
+import { affineApply } from "../field/affine";
+import type { ResolvedShape } from "../field/flatten";
 import { getShapeType } from "../field/registry";
-import { distanceScale, toLocal } from "../field/transform";
 import type { ShapeInstance } from "../field/types";
 import { Vector2, Vector3 } from "@carapace/primitives";
 import { v2 } from "../field/vec";
 
 const PICK_SLOP_PX = 1;
 
-/** Topmost visible, unlocked shape whose footprint (± slop, canvas px) contains the point. */
-export function pickShape(shapes: ShapeInstance[], canvasPoint: Vector2): ShapeInstance | null {
-  for (let i = shapes.length - 1; i >= 0; i--) {
-    const s = shapes[i]!;
-    if (!s.visible || s.locked) continue;
-    const local = toLocal(s.transform, canvasPoint);
-    const sample = getShapeType(s.typeId).eval(local, s);
-    if (sample.sd * distanceScale(s.transform) <= PICK_SLOP_PX) return s;
+/** Topmost (last-in-fold) resolved shape whose world footprint (± slop, canvas px) contains the
+ *  point. Hidden subtrees are already dropped by flatten; locked shapes are skipped here. */
+export function pickShape(resolved: ResolvedShape[], canvasPoint: Vector2): ShapeInstance | null {
+  for (let i = resolved.length - 1; i >= 0; i--) {
+    const rs = resolved[i]!;
+    if (rs.shape.locked) continue;
+    const sample = getShapeType(rs.shape.typeId).eval(affineApply(rs.invAffine, canvasPoint), rs.shape);
+    if (sample.sd * rs.scaleHint <= PICK_SLOP_PX) return rs.shape;
   }
   return null;
 }

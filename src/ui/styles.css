@@ -96,3 +96,12 @@ input[type="number"]::-webkit-inner-spin-button {
 .animate-fade-in {
   animation: fadeIn 0.12s ease-out;
 }
+
+/* rotate cursor for the gizmo rotation handles (CSS has no native rotate cursor). A curved arrow
+   drawn white-on-black so it reads on any background; hotspot centred. */
+.cursor-rotate {
+  cursor:
+    url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'><path d='M7.5 7.5 a6 6 0 1 1 -1.4 6.2' fill='none' stroke='black' stroke-width='3.4' stroke-linecap='round'/><path d='M7.5 3.6 l0 4 l4 0' fill='none' stroke='black' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'/><path d='M7.5 7.5 a6 6 0 1 1 -1.4 6.2' fill='none' stroke='white' stroke-width='1.6' stroke-linecap='round'/><path d='M7.5 3.6 l0 4 l4 0' fill='none' stroke='white' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>")
+      12 12,
+    grab;
+}

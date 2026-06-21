@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import "../../src/field/shapes";
 import { createShapeInstance } from "../../src/field/registry";
+import { resolveShapes } from "../../src/field/flatten";
 import { axisScaleFromDrag, constrainAxis, groupScaleFactor, pointsBounds, pointsInBox, scalePointsAbout, pickShape, rotationFromDrag, snapAngle } from "../../src/ui/picking";
 import { toLocal } from "../../src/field/transform";
 import { v2 } from "../../src/field/vec";
@@ -9,10 +10,10 @@ import { Vector3 } from "@carapace/primitives";
 test("pickShape: topmost (last in z-order) wins, slop catches near-misses", () => {
   const below = createShapeInstance("dome", v2(50, 50));
   const above = createShapeInstance("plateau", v2(60, 50));
-  expect(pickShape([below, above], v2(62, 50))?.id).toBe(above.id); // inside both -> above
-  expect(pickShape([below, above], v2(20, 50))?.id).toBe(below.id); // only dome
-  expect(pickShape([below, above], v2(50, 99.5))).toBe(null); // dome rim at 98; 1px slop misses
-  expect(pickShape([below, above], v2(50, 98.5))?.id).toBe(below.id); // within slop
+  expect(pickShape(resolveShapes([below, above]),v2(62, 50))?.id).toBe(above.id); // inside both -> above
+  expect(pickShape(resolveShapes([below, above]),v2(20, 50))?.id).toBe(below.id); // only dome
+  expect(pickShape(resolveShapes([below, above]),v2(50, 99.5))).toBe(null); // dome rim at 98; 1px slop misses
+  expect(pickShape(resolveShapes([below, above]),v2(50, 98.5))?.id).toBe(below.id); // within slop
 });
 
 test("pickShape skips invisible and locked shapes", () => {
@@ -20,8 +21,8 @@ test("pickShape skips invisible and locked shapes", () => {
   a.visible = false;
   const b = createShapeInstance("dome", v2(0, 0));
   b.locked = true;
-  expect(pickShape([a], v2(0, 0))).toBe(null);
-  expect(pickShape([b], v2(0, 0))).toBe(null);
+  expect(pickShape(resolveShapes([a]), v2(0, 0))).toBe(null);
+  expect(pickShape(resolveShapes([b]), v2(0, 0))).toBe(null);
 });
 
 test("rotationFromDrag: quarter turn around the pivot", () => {

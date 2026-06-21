@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { docSchema, dropRemovedShapes, hydrateShapes, LambertDoc } from "./schema";
+import { defaultCanvas, docSchema, normalizeLayers, LambertDoc } from "./schema";
 
 /**
  * Session memory: the app continuously stashes the whole workspace — the open project, every
@@ -20,6 +20,18 @@ const tabSchema = z.object({
   dirty: z.boolean(),
   doc: docSchema,
   view: viewSchema,
+  selectedId: z.string().nullable().catch(null), // restored on reopen so the selection survives
+  // per-image 2D pan/zoom; optional so old sessions (and never-fitted tabs) just re-fit on open
+  viewport: z.object({ zoom: z.number(), panX: z.number(), panY: z.number() }).optional(),
+  // per-image 3D camera; optional so old sessions / never-orbited tabs open at the default framing
+  orbit: z
+    .object({
+      yaw: z.number(),
+      pitch: z.number(),
+      dist: z.number(),
+      target: z.object({ x: z.number(), y: z.number(), z: z.number() }),
+    })
+    .optional(),
 });
 
 const sessionSchema = z.object({
@@ -39,6 +51,10 @@ export function buildSessionJson(s: Omit<SessionData, "version">): string {
 
 export function parseSessionJson(json: string): SessionData {
   const data = sessionSchema.parse(JSON.parse(json)) as SessionData;
-  for (const t of data.tabs) t.doc.shapes = hydrateShapes(dropRemovedShapes(t.doc.shapes));
+  for (const t of data.tabs) {
+    const raw = t.doc as unknown as { layers?: unknown[]; shapes?: unknown[] };
+    t.doc.layers = normalizeLayers((raw.layers ?? raw.shapes ?? []) as unknown[] as Parameters<typeof normalizeLayers>[0]);
+    t.doc.canvas = t.doc.canvas ?? defaultCanvas(t.doc.source.width, t.doc.source.height);
+  }
   return data;
 }

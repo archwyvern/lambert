@@ -1,7 +1,7 @@
-import { Vector3 } from "@carapace/primitives";
 import { evaluateField, FieldResult } from "./evalCpu";
+import type { ResolvedShape } from "./flatten";
 import { deriveNormals } from "./normals";
-import type { ShapeInstance } from "./types";
+import { v2 } from "./vec";
 
 export interface RenderResult {
   width: number;
@@ -18,20 +18,34 @@ export interface RenderOptions {
 }
 
 /**
- * Scale shape instances onto a canvas f times larger: positions, scales, and blends
- * multiply by f so footprints keep their relative area. Heights are NOT scaled — the
- * normal derivation compensates with slopeScale = f.
+ * Scale resolved shapes onto a canvas f times larger: the world point grows by f, so the inverse
+ * affine's linear part divides by f (translation unchanged — `local = invAffine·(p_hi/f)`), and the
+ * scale hint grows by f. Tallness/elevation (z) do NOT scale — the normal derivation compensates
+ * with slopeScale = f. World (non-follow) masks are canvas coords and scale by f; follow masks live
+ * in shape-local space (scale-invariant — scaleHint carries f).
  */
-export function scaleShapesForSupersample(shapes: ShapeInstance[], f: number): ShapeInstance[] {
-  return shapes.map((s) => ({
-    ...s,
-    transform: {
-      pos: new Vector3(s.transform.pos.x * f, s.transform.pos.y * f, s.transform.pos.z),
-      rotation: s.transform.rotation,
-      // z (tallness) does NOT scale with the canvas: heights stay put, slopeScale corrects
-      scale: new Vector3(s.transform.scale.x * f, s.transform.scale.y * f, s.transform.scale.z),
-    },
-  }));
+export function scaleResolvedForSupersample(resolved: ResolvedShape[], f: number): ResolvedShape[] {
+  return resolved.map((rs) => {
+    const inv = rs.invAffine;
+    return {
+      ...rs,
+      invAffine: { a: inv.a / f, b: inv.b / f, c: inv.c / f, d: inv.d / f, e: inv.e, f: inv.f },
+      scaleHint: rs.scaleHint * f,
+      masks: rs.masks.map((m) =>
+        m.follow
+          ? m
+          : {
+              ...m,
+              anchors: m.anchors.map((a) => ({
+                ...a,
+                p: v2(a.p.x * f, a.p.y * f),
+                hIn: v2(a.hIn.x * f, a.hIn.y * f),
+                hOut: v2(a.hOut.x * f, a.hOut.y * f),
+              })),
+            },
+      ),
+    };
+  });
 }
 
 /**
@@ -77,19 +91,20 @@ export function downsampleRender(hi: FieldResult, hiNormals: Float32Array, f: nu
   return { width, height, heightMap, mask, normals };
 }
 
-/** Full CPU render. The reference implementation the GPU path is drift-tested against. */
+/** Full CPU render. The reference implementation the GPU path is drift-tested against. Takes the
+ *  flattened, world-resolved shape list (see flattenLayers). */
 export function renderField(
-  shapes: ShapeInstance[],
+  resolved: ResolvedShape[],
   width: number,
   height: number,
   opts: RenderOptions,
 ): RenderResult {
   const f = opts.supersample;
   if (f === 1) {
-    const field = evaluateField(shapes, width, height);
+    const field = evaluateField(resolved, width, height);
     return { ...field, normals: deriveNormals(field.heightMap, width, height) };
   }
-  const hi = evaluateField(scaleShapesForSupersample(shapes, f), width * f, height * f);
+  const hi = evaluateField(scaleResolvedForSupersample(resolved, f), width * f, height * f);
   const hiNormals = deriveNormals(hi.heightMap, hi.width, hi.height, f);
   return downsampleRender(hi, hiNormals, f);
 }

@@ -1,11 +1,23 @@
+import { findNode } from "./layerOps";
 import type { LambertDoc } from "./schema";
 
 export interface EditorState {
   doc: LambertDoc;
+  /** Multi-selection in pick order; the LAST entry is the "primary". Empty = nothing selected. */
+  selectedIds: string[];
+  /** Derived convenience: the primary (last of selectedIds), or null. Single-select readers use this. */
   selectedId: string | null;
   dirty: boolean;
   docPath: string | null;
 }
+
+const sameIds = (a: string[], b: string[]): boolean => a.length === b.length && a.every((x, i) => x === b[i]);
+
+/** Build the paired selection fields (the array + its derived primary). */
+const sel = (ids: string[]): { selectedIds: string[]; selectedId: string | null } => ({
+  selectedIds: ids,
+  selectedId: ids.length ? ids[ids.length - 1]! : null,
+});
 
 export interface UpdateOptions {
   /** Consecutive updates with the same key merge into one undo entry until endGesture(). */
@@ -19,9 +31,13 @@ export class DocumentStore {
   private redoStack: LambertDoc[] = [];
   private gestureKey: string | null = null;
   private current: EditorState;
+  // the doc reference at the last save/load; dirty is `current.doc !== savedDoc`, so undoing all the
+  // way back to the saved content clears the dirty flag instead of leaving a false "unsaved" badge.
+  private savedDoc: LambertDoc | null;
 
   constructor(doc: LambertDoc, docPath: string | null) {
-    this.current = { doc, selectedId: null, dirty: false, docPath };
+    this.current = { doc, ...sel([]), dirty: false, docPath };
+    this.savedDoc = doc;
   }
 
   get state(): EditorState {
@@ -46,9 +62,8 @@ export class DocumentStore {
     for (const fn of this.listeners) fn();
   }
 
-  private survivingSelection(doc: LambertDoc): string | null {
-    const id = this.current.selectedId;
-    return id && doc.shapes.some((s) => s.id === id) ? id : null;
+  private survivingSelection(doc: LambertDoc): { selectedIds: string[]; selectedId: string | null } {
+    return sel(this.current.selectedIds.filter((id) => findNode(doc.layers, id)));
   }
 
   update(mutate: (doc: LambertDoc) => LambertDoc, opts: UpdateOptions = {}): void {
@@ -61,16 +76,28 @@ export class DocumentStore {
       this.redoStack = [];
     }
     this.gestureKey = key;
-    this.emit({ doc: next, dirty: true, selectedId: this.survivingSelection(next) });
+    this.emit({ doc: next, dirty: next !== this.savedDoc, ...this.survivingSelection(next) });
   }
 
   endGesture(): void {
     this.gestureKey = null;
   }
 
+  /** Replace the selection with a single id (or clear it). */
   select(id: string | null): void {
-    if (id === this.current.selectedId) return;
-    this.emit({ selectedId: id });
+    this.setSelection(id === null ? [] : [id]);
+  }
+
+  /** Add the id if absent, remove it if present (Ctrl/Cmd-click). */
+  toggleSelect(id: string): void {
+    const cur = this.current.selectedIds;
+    this.setSelection(cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
+  }
+
+  /** Replace the whole selection. */
+  setSelection(ids: string[]): void {
+    if (sameIds(ids, this.current.selectedIds)) return;
+    this.emit(sel(ids));
   }
 
   undo(): void {
@@ -78,7 +105,7 @@ export class DocumentStore {
     if (!prev) return;
     this.gestureKey = null;
     this.redoStack.push(this.current.doc);
-    this.emit({ doc: prev, dirty: true, selectedId: this.survivingSelection(prev) });
+    this.emit({ doc: prev, dirty: prev !== this.savedDoc, ...this.survivingSelection(prev) });
   }
 
   redo(): void {
@@ -86,7 +113,7 @@ export class DocumentStore {
     if (!next) return;
     this.gestureKey = null;
     this.undoStack.push(this.current.doc);
-    this.emit({ doc: next, dirty: true, selectedId: this.survivingSelection(next) });
+    this.emit({ doc: next, dirty: next !== this.savedDoc, ...this.survivingSelection(next) });
   }
 
   /** Replace the whole document (open/new/session-restore). Clears history. */
@@ -94,10 +121,13 @@ export class DocumentStore {
     this.undoStack = [];
     this.redoStack = [];
     this.gestureKey = null;
-    this.emit({ doc, docPath, dirty: opts.dirty ?? false, selectedId: null });
+    // a clean load makes `doc` the saved baseline; a dirty restore has no on-disk baseline (stays dirty)
+    this.savedDoc = opts.dirty ? null : doc;
+    this.emit({ doc, docPath, dirty: opts.dirty ?? false, ...sel([]) });
   }
 
   markSaved(path: string): void {
+    this.savedDoc = this.current.doc;
     this.emit({ dirty: false, docPath: path });
   }
 }

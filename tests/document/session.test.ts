@@ -3,6 +3,7 @@ import "../../src/field/shapes";
 import { addShape } from "../../src/document/docOps";
 import { emptyDoc } from "../../src/document/schema";
 import { buildSessionJson, parseSessionJson, TabSession } from "../../src/document/session";
+import type { ShapeInstance } from "../../src/field/types";
 import { Vector3 } from "@carapace/primitives";
 import { v2 } from "../../src/field/vec";
 
@@ -13,8 +14,8 @@ const view = {
   raster: false,
 };
 
-function tab(imagePath: string, docPath: string | null, dirty: boolean): TabSession {
-  return { imagePath, docPath, dirty, doc: addShape(emptyDoc("hull.png", 64, 64), "dome", v2(10, 10)), view };
+function tab(imagePath: string, docPath: string | null, dirty: boolean, selectedId: string | null = null): TabSession {
+  return { imagePath, docPath, dirty, doc: addShape(emptyDoc("hull.png", 64, 64), "dome", v2(10, 10)), view, selectedId };
 }
 
 test("workspace session round-trips project, tabs, active index, and hydrates docs", () => {
@@ -30,7 +31,7 @@ test("workspace session round-trips project, tabs, active index, and hydrates do
   expect(s.tabs[1]!.docPath).toBe(null);
   expect(s.tabs[1]!.dirty).toBe(true);
   // shapes hydrate back into Vector instances (have methods, not plain objects)
-  expect(s.tabs[0]!.doc.shapes[0]!.transform.pos).toBeInstanceOf(Vector3);
+  expect((s.tabs[0]!.doc.layers[0] as ShapeInstance).transform.pos).toBeInstanceOf(Vector3);
 });
 
 test("session with no open project round-trips (empty tabs, no active)", () => {
@@ -49,6 +50,20 @@ test("migrates a legacy per-tab view: removed 'height' mode -> lit, missing rast
   const s = parseSessionJson(JSON.stringify(legacy));
   expect(s.tabs[0]!.view.mode).toBe("lit");
   expect(s.tabs[0]!.view.raster).toBe(false);
+});
+
+test("persists per-tab selection + viewport, and defaults them for legacy sessions", () => {
+  const withVp = { ...tab("/p/a.png", null, false, "shape-1"), viewport: { zoom: 2, panX: 10, panY: -5 } };
+  const s = parseSessionJson(buildSessionJson({ projectPath: "/p", activeIndex: 0, tabs: [withVp] }));
+  expect(s.tabs[0]!.selectedId).toBe("shape-1");
+  expect(s.tabs[0]!.viewport).toEqual({ zoom: 2, panX: 10, panY: -5 });
+
+  const legacy = JSON.parse(buildSessionJson({ projectPath: "/p", activeIndex: 0, tabs: [tab("/p/a.png", null, false)] }));
+  delete legacy.tabs[0].selectedId; // saved before selection/viewport persistence existed
+  delete legacy.tabs[0].viewport;
+  const s2 = parseSessionJson(JSON.stringify(legacy));
+  expect(s2.tabs[0]!.selectedId).toBe(null);
+  expect(s2.tabs[0]!.viewport).toBeUndefined();
 });
 
 test("rejects garbage and wrong versions", () => {

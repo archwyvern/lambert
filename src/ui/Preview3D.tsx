@@ -1,5 +1,9 @@
-import { AddRegular, SubtractRegular } from "@fluentui/react-icons";
+import { AddRegular, ArrowResetRegular, ArrowSwapRegular, SubtractRegular } from "@fluentui/react-icons";
 import { useEffect, useRef, useState } from "react";
+import { DEFAULT_ORBIT } from "../field/gpu/preview3d";
+import { GUIDE_3D } from "./keymap";
+import { LightPad } from "./LightPad";
+import { ShortcutGuide } from "./ShortcutGuide";
 import type { use3DCamera } from "./use3DCamera";
 
 /**
@@ -17,8 +21,15 @@ export function Preview3D(props: {
   enabled: boolean;
   /** Called after the 3D canvas resizes so the renderer re-renders at the new resolution. */
   onResize: () => void;
+  /** Occupying the big slot — show the navigation guide (the small corner is too tight for it). */
+  big: boolean;
+  /** Swap this 3D view between the big slot and the small corner. */
+  onSwap: () => void;
+  /** Scene light direction (shared with the 2D lit view) + its setter, for the in-view light pad. */
+  lightDir: [number, number, number];
+  onLightChange: (dir: [number, number, number]) => void;
 }): React.JSX.Element {
-  const { cam, canvasRef, docW, docH, enabled, onResize } = props;
+  const { cam, canvasRef, docW, docH, enabled, onResize, big, onSwap, lightDir, onLightChange } = props;
   const hostRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 1, h: 1 });
 
@@ -65,9 +76,17 @@ export function Preview3D(props: {
         }}
         onContextMenu={(e) => e.preventDefault()}
       />
-      <div className="pointer-events-none absolute inset-x-0 top-0 flex h-[22px] items-center justify-between px-2">
+      <div className="pointer-events-none absolute inset-x-0 top-0 flex h-[22px] items-center px-2">
         <span className="text-sm font-semibold uppercase tracking-wide text-fg-mid">3D</span>
+      </div>
+      <div className="pointer-events-none absolute top-2 right-3 flex items-start gap-2">
         <div className="pointer-events-auto flex items-center gap-0.5">
+          <button title={big ? "Swap to corner" : "Swap to big view"} className={iconBtn} onClick={onSwap}>
+            <ArrowSwapRegular style={{ fontSize: 12 }} />
+          </button>
+          <button title="Reset view" className={iconBtn} onClick={() => cam.setOrbit({ ...DEFAULT_ORBIT })}>
+            <ArrowResetRegular style={{ fontSize: 12 }} />
+          </button>
           <button title="Zoom out" className={iconBtn} onClick={() => cam.zoomBy(1.25)}>
             <SubtractRegular style={{ fontSize: 12 }} />
           </button>
@@ -75,6 +94,15 @@ export function Preview3D(props: {
             <AddRegular style={{ fontSize: 12 }} />
           </button>
         </div>
+        {enabled && big ? (
+          <div
+            className="pointer-events-auto flex flex-col items-center gap-1 border border-border bg-surface2/90 p-2"
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <LightPad lightDir={lightDir} onChange={onLightChange} radius={34} />
+            <span className="text-sm uppercase tracking-[var(--tracking-tight)] text-fg-mid">light</span>
+          </div>
+        ) : null}
       </div>
       {inView(focal) || showAid ? (
         <svg
@@ -126,6 +154,7 @@ export function Preview3D(props: {
       {!enabled ? (
         <div className="absolute inset-0 grid place-items-center text-sm text-fg-mid">3D preview</div>
       ) : null}
+      {enabled && big ? <ShortcutGuide storageKey="lambert.guide3d.open" sections={GUIDE_3D} /> : null}
     </div>
   );
 }

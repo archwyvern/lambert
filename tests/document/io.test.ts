@@ -5,6 +5,7 @@ import { basename, dirname, joinPath } from "../../src/document/paths";
 import { buildNxExport } from "../../src/document/exports";
 import { DEFAULT_NORMAL_DIRS, emptyDoc, serializeDoc } from "../../src/document/schema";
 import { addShape } from "../../src/document/docOps";
+import { flattenLayers } from "../../src/field/flatten";
 import { renderField } from "../../src/field/render";
 import { hasSidecar, openImageTab, saveTab } from "../../src/document/io";
 import { sidecarPath } from "../../src/document/workspace";
@@ -47,7 +48,7 @@ test("openImageTab on an image without a sidecar yields an empty doc and null do
   const files = { "/p/ship.png": gray(32, 16) };
   const tab = await openImageTab(fakeHost(files), "/p/ship.png");
   expect(tab.docPath).toBe(null);
-  expect(tab.store.state.doc.shapes.length).toBe(0);
+  expect(tab.store.state.doc.layers.length).toBe(0);
   expect(tab.store.state.doc.source).toEqual({ path: "ship.png", width: 32, height: 16 });
   expect(tab.diffuse.dir).toBe("/p");
 });
@@ -97,11 +98,11 @@ test("hasSidecar reflects whether any sidecar exists", async () => {
 
 test("buildNxExport: nx bytes + sibling path + empty-mask warning", () => {
   let doc = emptyDoc("hull.df.png", 32, 32);
-  const empty = buildNxExport(doc, renderField(doc.shapes, 32, 32, { supersample: 1 }), "/p/hull.df.png", DEFAULT_NORMAL_DIRS);
+  const empty = buildNxExport(doc, renderField(flattenLayers(doc.layers), 32, 32, { supersample: 1 }), "/p/hull.df.png", DEFAULT_NORMAL_DIRS);
   expect(empty.path).toBe("/p/hull.nx.png");
   expect(empty.warning).toMatch(/empty/);
   doc = addShape(doc, "dome", v2(16, 16));
-  const real = buildNxExport(doc, renderField(doc.shapes, 32, 32, { supersample: 1 }), "/p/hull.df.png", DEFAULT_NORMAL_DIRS);
+  const real = buildNxExport(doc, renderField(flattenLayers(doc.layers), 32, 32, { supersample: 1 }), "/p/hull.df.png", DEFAULT_NORMAL_DIRS);
   expect(real.warning).toBe(null);
   expect(real.bytes.length).toBeGreaterThan(0);
 });

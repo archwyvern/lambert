@@ -1,6 +1,8 @@
 import { expect, test } from "vitest";
 import {
+  deleteVertices,
   frustumStrip,
+  insertVertex,
   polygonStats,
   regularPolygon,
   regularPolygonAligned,
@@ -8,6 +10,37 @@ import {
   ringPhase,
 } from "../../src/field/controlPoints";
 import { v2 } from "../../src/field/vec";
+
+test("insertVertex: places the new point right after afterIndex", () => {
+  const pts = [v2(0, 0), v2(10, 0), v2(10, 10)];
+  const out = insertVertex(pts, 0, v2(5, 0));
+  expect(out.map((p) => [p.x, p.y])).toEqual([
+    [0, 0],
+    [5, 0],
+    [10, 0],
+    [10, 10],
+  ]);
+  expect(pts.length).toBe(3); // original untouched
+});
+
+test("insertVertex: afterIndex = last appends (wrap edge)", () => {
+  const out = insertVertex([v2(0, 0), v2(10, 0)], 1, v2(20, 0));
+  expect(out[2]).toEqual(v2(20, 0));
+});
+
+test("deleteVertices: removes the indices when above the minimum", () => {
+  const pts = [v2(0, 0), v2(10, 0), v2(10, 10), v2(0, 10)];
+  expect(deleteVertices(pts, [1], 3)?.map((p) => [p.x, p.y])).toEqual([
+    [0, 0],
+    [10, 10],
+    [0, 10],
+  ]);
+});
+
+test("deleteVertices: returns null when it would drop below the minimum", () => {
+  expect(deleteVertices([v2(0, 0), v2(10, 0), v2(5, 10)], [0], 3)).toBeNull();
+  expect(deleteVertices([v2(0, 0), v2(10, 0), v2(5, 10)], [0, 1], 2)).toBeNull();
+});
 
 test("regularPolygon: n=4 is an axis-aligned square", () => {
   const square = regularPolygon(v2(0, 0), Math.SQRT2, 4);

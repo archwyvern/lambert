@@ -1,35 +1,49 @@
-import { EyeOffRegular, EyeRegular, LockClosedRegular, LockOpenRegular } from "@fluentui/react-icons";
-import { useEffect, useRef, useState } from "react";
+import {
+  ChevronDownRegular,
+  ChevronRightRegular,
+  EyeOffRegular,
+  EyeRegular,
+  FlipHorizontalRegular,
+  FolderRegular,
+  LockClosedRegular,
+  LockOpenRegular,
+} from "@fluentui/react-icons";
+import { useEffect, useState } from "react";
+import { Vector3 } from "@carapace/primitives";
 import type { DocumentStore, EditorState } from "../document/store";
-import { duplicateShape, moveShapeTo, removeShape, updateShape } from "../document/docOps";
+import { duplicateShape, moveShapeTo, removeShape } from "../document/docOps";
+import { addGroup, emptyGroup, findNode, findParentId, moveNode, siblingsOf, ungroup, updateNode, wrapInGroup } from "../document/layerOps";
 import { getShapeType } from "../field/registry";
-import type { ShapeInstance } from "../field/types";
-import { cx, SectionLabel } from "./kit";
+import { isGroup, type GroupLayer, type LayerNode } from "../field/types";
+import { Button, ContextMenu, cx, SectionLabel } from "./kit";
 import { SHAPE_ICONS } from "./shapeIcons";
 
-/** Subtractive shapes (carve types) get a "-" marker; clipping shapes stay unmarked. */
-const isCarve = (typeId: string): boolean => getShapeType(typeId).defaultCombine === "carve";
+const DRAG_MIME = "application/x-lambert-layer";
 
 interface Menu {
   x: number;
   y: number;
-  shapeId: string;
+  id: string;
+}
+
+/** Display name for a node: its user name, else the group label / shape type name. */
+function nodeLabel(n: LayerNode): string {
+  if (n.name) return n.name;
+  return isGroup(n) ? "Group" : getShapeType(n.typeId).name;
 }
 
 /**
- * Layer panel: every placed shape, front-most on top. Click selects (the only selection
- * surface for non-pointer tools), double-click renames, drag reorders, right-click for
- * the verb menu. Eye = visibility, lock = inert on canvas (inspector still edits).
+ * Layer tree panel: groups + shapes, front-most on top, indented by depth. Click selects, drag
+ * reparents/reorders, right-click for verbs (Group / Ungroup / Duplicate / reorder / Delete), eye =
+ * visibility, lock = inert on canvas. Collapse a group via its chevron.
  */
 export function Layers(props: { store: DocumentStore; state: EditorState }): React.JSX.Element {
   const { store, state } = props;
-  const shapes = state.doc.shapes;
+  const layers = state.doc.layers;
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameText, setRenameText] = useState("");
   const [menu, setMenu] = useState<Menu | null>(null);
-  // drop gap in DISPLAY coordinates (0 = above the front-most row), null = no drag
-  const [dropGap, setDropGap] = useState<number | null>(null);
-  const listRef = useRef<HTMLDivElement>(null);
+  const [dropId, setDropId] = useState<string | null>(null); // row being hovered as a drop target
 
   useEffect(() => {
     if (!menu) return;
@@ -42,224 +56,306 @@ export function Layers(props: { store: DocumentStore; state: EditorState }): Rea
     };
   }, [menu]);
 
-  // stable display names: occurrence count per type, in fold (array) order
-  const counts = new Map<string, number>();
-  const labels = shapes.map((s) => {
-    if (s.name) return s.name;
-    const n = (counts.get(s.typeId) ?? 0) + 1;
-    counts.set(s.typeId, n);
-    return n > 1 ? `${getShapeType(s.typeId).name} ${n}` : getShapeType(s.typeId).name;
-  });
+  // F2 renames the selected layer from anywhere
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== "F2" || e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+      const id = state.selectedId;
+      const n = id ? findNode(state.doc.layers, id) : null;
+      if (!n) return;
+      e.preventDefault();
+      setRenaming(n.id);
+      setRenameText(nodeLabel(n));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [state.selectedId, state.doc.layers]);
 
-  const patch = (id: string, fn: (s: ShapeInstance) => ShapeInstance): void => {
-    store.update((d) => updateShape(d, id, fn));
+  const patchNode = (id: string, fn: (n: LayerNode) => LayerNode): void => {
+    store.update((d) => ({ ...d, layers: updateNode(d.layers, id, fn) }));
     store.endGesture();
   };
 
   const commitRename = (id: string): void => {
     const name = renameText.trim();
-    patch(id, (s) => ({ ...s, name: name === "" ? undefined : name }));
+    patchNode(id, (n) => ({ ...n, name: name === "" ? undefined : name }) as LayerNode);
     setRenaming(null);
   };
 
-  /** Map a display gap to moveShapeTo's final array index. */
-  const dropToIndex = (fromDisplay: number, gap: number): number => {
-    const target = gap > fromDisplay ? gap - 1 : gap;
-    return shapes.length - 1 - target;
+  const doOp = (fn: (d: typeof state.doc) => typeof state.doc): void => {
+    store.update(fn);
+    store.endGesture();
   };
 
-  const menuShape = menu ? shapes.find((s) => s.id === menu.shapeId) : null;
-  const menuItem =
-    "block w-full px-3 py-1 text-left text-base text-fg hover:bg-hover disabled:opacity-40";
+  // drop `dragged` onto `target`: into a group, else reorder just before the target in its parent
+  const onDropOn = (targetId: string, draggedId: string): void => {
+    if (draggedId === targetId) return;
+    const target = findNode(layers, targetId);
+    if (!target) return;
+    if (isGroup(target)) {
+      store.update((d) => ({ ...d, layers: moveNode(d.layers, draggedId, targetId, target.children.length) }));
+    } else {
+      const parent = findParentId(layers, targetId);
+      const sibs = siblingsOf(layers, targetId);
+      const idx = sibs.findIndex((n) => n.id === targetId);
+      store.update((d) => ({ ...d, layers: moveNode(d.layers, draggedId, parent ?? null, idx) }));
+    }
+    store.endGesture();
+    setDropId(null);
+  };
+
+  const menuNode = menu ? findNode(layers, menu.id) : null;
+  // context-menu verbs act on the whole selection when the right-clicked row is one of its members
+  const menuTargets = !menuNode
+    ? []
+    : state.selectedIds.includes(menuNode.id) && state.selectedIds.length > 1
+      ? state.selectedIds
+      : [menuNode.id];
+
+  // click selection with modifiers: plain = one, Ctrl/Cmd = toggle, Shift = range over visible order
+  const onRowClick = (e: React.MouseEvent, id: string): void => {
+    if (e.metaKey || e.ctrlKey) {
+      store.toggleSelect(id);
+    } else if (e.shiftKey && state.selectedId) {
+      const a = order.indexOf(state.selectedId);
+      const b = order.indexOf(id);
+      if (a >= 0 && b >= 0) {
+        const [lo, hi] = a < b ? [a, b] : [b, a];
+        store.setSelection(order.slice(lo, hi + 1));
+      } else {
+        store.select(id);
+      }
+    } else {
+      store.select(id);
+    }
+  };
+
+  // render the tree depth-first, front-most (last in array) on top. `order` is the flat visible id
+  // list in display order (top->bottom) for Shift-range selection.
+  const rows: React.JSX.Element[] = [];
+  const order: string[] = [];
+  const walk = (nodes: LayerNode[], depth: number): void => {
+    for (let i = nodes.length - 1; i >= 0; i--) {
+      const n = nodes[i]!;
+      order.push(n.id);
+      const selected = state.selectedIds.includes(n.id);
+      const group = isGroup(n);
+      rows.push(
+        <div
+          key={n.id}
+          role="button"
+          tabIndex={0}
+          draggable={renaming !== n.id}
+          onClick={(e) => onRowClick(e, n.id)}
+          onDoubleClick={() => {
+            setRenaming(n.id);
+            setRenameText(nodeLabel(n));
+          }}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            // keep a multi-selection when right-clicking one of its members; else select just this row
+            if (!state.selectedIds.includes(n.id)) store.select(n.id);
+            setMenu({ x: e.clientX, y: e.clientY, id: n.id });
+          }}
+          onDragStart={(e) => {
+            e.dataTransfer.setData(DRAG_MIME, n.id);
+            e.dataTransfer.effectAllowed = "move";
+            if (!state.selectedIds.includes(n.id)) store.select(n.id);
+          }}
+          onDragOver={(e) => {
+            if (!e.dataTransfer.types.includes(DRAG_MIME)) return;
+            e.preventDefault();
+            setDropId(n.id);
+          }}
+          onDragLeave={() => setDropId((d) => (d === n.id ? null : d))}
+          onDrop={(e) => {
+            const id = e.dataTransfer.getData(DRAG_MIME);
+            if (!id) return;
+            e.preventDefault();
+            e.stopPropagation();
+            onDropOn(n.id, id);
+          }}
+          className={cx(
+            "group flex h-[24px] cursor-pointer items-center gap-1 px-1.5 text-base",
+            selected ? "bg-list-active text-fg" : "text-fg-mid hover:bg-hover hover:text-fg",
+            !n.visible && "opacity-50",
+            dropId === n.id && "outline outline-1 outline-accent",
+          )}
+          style={{ paddingLeft: 6 + depth * 12 }}
+        >
+          {group ? (
+            <button
+              className="flex h-3.5 w-3.5 shrink-0 items-center justify-center text-fg-mid hover:text-fg"
+              title={n.collapsed ? "Expand" : "Collapse"}
+              onClick={(e) => {
+                e.stopPropagation();
+                patchNode(n.id, (g) => ({ ...g, collapsed: !(g as { collapsed?: boolean }).collapsed }) as LayerNode);
+              }}
+            >
+              {n.collapsed ? <ChevronRightRegular style={{ fontSize: 12 }} /> : <ChevronDownRegular style={{ fontSize: 12 }} />}
+            </button>
+          ) : (
+            <span className="w-3.5 shrink-0" />
+          )}
+          {group ? (
+            <FolderRegular className="h-4.5 w-4.5 shrink-0 text-fg-mid" />
+          ) : SHAPE_ICONS[n.typeId] ? (
+            <img src={SHAPE_ICONS[n.typeId]} alt="" className="h-4.5 w-4.5 shrink-0" draggable={false} />
+          ) : (
+            <span className="h-4.5 w-4.5 shrink-0" />
+          )}
+          {renaming === n.id ? (
+            <input
+              autoFocus
+              value={renameText}
+              onChange={(e) => setRenameText(e.target.value)}
+              onFocus={(e) => e.currentTarget.select()}
+              onBlur={() => commitRename(n.id)}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter") commitRename(n.id);
+                if (e.key === "Escape") setRenaming(null);
+              }}
+              onClick={(e) => e.stopPropagation()}
+              className="h-[18px] min-w-0 flex-1 border border-accent bg-surface2 px-1 text-base text-fg outline-none"
+            />
+          ) : (
+            <span className="min-w-0 flex-1 truncate">{nodeLabel(n)}</span>
+          )}
+          {isGroup(n) && n.mirror && n.mirror !== "none" ? (
+            <button
+              title={n.mirrorEnabled === false ? "Show mirror" : "Hide mirror"}
+              className={cx(
+                "flex h-[18px] w-[18px] shrink-0 items-center justify-center hover:text-fg",
+                n.mirrorEnabled === false ? "text-fg-mid" : "text-accent",
+              )}
+              onClick={(e) => {
+                e.stopPropagation();
+                patchNode(n.id, (x) => ({ ...x, mirrorEnabled: (x as GroupLayer).mirrorEnabled === false }) as LayerNode);
+              }}
+            >
+              <FlipHorizontalRegular style={{ fontSize: 13 }} />
+            </button>
+          ) : null}
+          <button
+            title={n.locked ? "Unlock" : "Lock (inert on canvas)"}
+            className={cx(
+              "flex h-[18px] w-[18px] shrink-0 items-center justify-center hover:text-fg",
+              n.locked ? "text-accent" : "text-fg-mid",
+            )}
+            onClick={(e) => {
+              e.stopPropagation();
+              patchNode(n.id, (x) => ({ ...x, locked: !x.locked }) as LayerNode);
+            }}
+          >
+            {n.locked ? <LockClosedRegular style={{ fontSize: 13 }} /> : <LockOpenRegular style={{ fontSize: 13 }} />}
+          </button>
+          <button
+            title={n.visible ? "Hide" : "Show"}
+            className="flex h-[18px] w-[18px] shrink-0 items-center justify-center text-fg-mid hover:text-fg"
+            onClick={(e) => {
+              e.stopPropagation();
+              patchNode(n.id, (x) => ({ ...x, visible: !x.visible }) as LayerNode);
+            }}
+          >
+            {n.visible ? <EyeRegular style={{ fontSize: 13 }} /> : <EyeOffRegular style={{ fontSize: 13 }} />}
+          </button>
+        </div>,
+      );
+      if (group && !n.collapsed) walk(n.children, depth + 1);
+    }
+  };
+  walk(layers, 0);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <SectionLabel>Layers</SectionLabel>
-      {shapes.length === 0 ? (
-        <p className="text-sm leading-snug text-fg-mid">No shapes yet.</p>
+      <div className="flex items-center justify-between">
+        <SectionLabel>Layers</SectionLabel>
+        <Button
+          onClick={() => {
+            const o = state.doc.canvas.origin;
+            const g = emptyGroup(crypto.randomUUID());
+            g.transform = { ...g.transform, pos: new Vector3(o.x, o.y, 0) }; // spawn at the origin
+            store.update((d) => ({ ...d, layers: addGroup(d.layers, g) }));
+            store.endGesture();
+            store.select(g.id);
+          }}
+        >
+          + Group
+        </Button>
+      </div>
+      {layers.length === 0 ? (
+        <p className="text-sm leading-snug text-fg-mid">No layers yet.</p>
       ) : (
-        <div ref={listRef} className="relative min-h-0 flex-1 overflow-y-auto">
-          {[...shapes.keys()].reverse().map((i, displayIndex) => {
-            const s = shapes[i]!;
-            const selected = s.id === state.selectedId;
-            return (
-              <div key={s.id} className="relative">
-                {dropGap === displayIndex ? (
-                  <div className="pointer-events-none absolute top-0 right-0 left-0 z-10 h-[2px] bg-accent" />
-                ) : null}
-                <div
-                  role="button"
-                  tabIndex={0}
-                  draggable={renaming !== s.id}
-                  onClick={() => store.select(s.id)}
-                  onDoubleClick={() => {
-                    setRenaming(s.id);
-                    setRenameText(s.name ?? labels[i]!);
-                  }}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    store.select(s.id);
-                    setMenu({ x: e.clientX, y: e.clientY, shapeId: s.id });
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") store.select(s.id);
-                    if (e.key === "F2") {
-                      setRenaming(s.id);
-                      setRenameText(s.name ?? labels[i]!);
-                    }
-                  }}
-                  onDragStart={(e) => {
-                    e.dataTransfer.setData("application/x-lambert-layer", s.id);
-                    e.dataTransfer.effectAllowed = "move";
-                    store.select(s.id);
-                  }}
-                  onDragOver={(e) => {
-                    if (!e.dataTransfer.types.includes("application/x-lambert-layer")) return;
-                    e.preventDefault();
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const below = e.clientY > rect.top + rect.height / 2;
-                    setDropGap(displayIndex + (below ? 1 : 0));
-                  }}
-                  onDrop={(e) => {
-                    const id = e.dataTransfer.getData("application/x-lambert-layer");
-                    if (!id || dropGap === null) return;
-                    e.preventDefault();
-                    e.stopPropagation();
-                    const fromDisplay = shapes.length - 1 - shapes.findIndex((sh) => sh.id === id);
-                    store.update((d) => moveShapeTo(d, id, dropToIndex(fromDisplay, dropGap)));
-                    store.endGesture();
-                    setDropGap(null);
-                  }}
-                  onDragEnd={() => setDropGap(null)}
-                  className={cx(
-                    "group flex h-[24px] cursor-pointer items-center gap-1.5 px-1.5 text-base",
-                    selected ? "bg-list-active text-fg" : "text-fg-mid hover:bg-hover hover:text-fg",
-                    !s.visible && "opacity-50",
-                  )}
-                >
-                  {SHAPE_ICONS[s.typeId] ? (
-                    <img src={SHAPE_ICONS[s.typeId]} alt="" className="h-4.5 w-4.5 shrink-0" draggable={false} />
-                  ) : (
-                    <span className="h-4.5 w-4.5 shrink-0" />
-                  )}
-                  {renaming === s.id ? (
-                    <input
-                      autoFocus
-                      value={renameText}
-                      onChange={(e) => setRenameText(e.target.value)}
-                      onFocus={(e) => e.currentTarget.select()}
-                      onBlur={() => commitRename(s.id)}
-                      onKeyDown={(e) => {
-                        e.stopPropagation();
-                        if (e.key === "Enter") commitRename(s.id);
-                        if (e.key === "Escape") setRenaming(null);
-                      }}
-                      onClick={(e) => e.stopPropagation()}
-                      className="h-[18px] min-w-0 flex-1 border border-accent bg-surface2 px-1 text-base text-fg outline-none"
-                    />
-                  ) : (
-                    <span className="min-w-0 flex-1 truncate">{labels[i]}</span>
-                  )}
-                  {isCarve(s.typeId) ? (
-                    <span className="w-2 shrink-0 text-center font-mono text-sm text-fg-mid" title="carves">
-                      -
-                    </span>
-                  ) : null}
-                  <button
-                    title={s.locked ? "Unlock" : "Lock (inert on canvas)"}
-                    className={cx(
-                      "flex h-[18px] w-[18px] shrink-0 items-center justify-center hover:text-fg",
-                      s.locked ? "text-accent" : "text-fg-mid opacity-0 group-hover:opacity-100",
-                    )}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      patch(s.id, (sh) => ({ ...sh, locked: !sh.locked }));
-                    }}
-                  >
-                    {s.locked ? (
-                      <LockClosedRegular style={{ fontSize: 13 }} />
-                    ) : (
-                      <LockOpenRegular style={{ fontSize: 13 }} />
-                    )}
-                  </button>
-                  <button
-                    title={s.visible ? "Hide" : "Show"}
-                    className="flex h-[18px] w-[18px] shrink-0 items-center justify-center text-fg-mid hover:text-fg"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      patch(s.id, (sh) => ({ ...sh, visible: !sh.visible }));
-                    }}
-                  >
-                    {s.visible ? <EyeRegular style={{ fontSize: 13 }} /> : <EyeOffRegular style={{ fontSize: 13 }} />}
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-          {dropGap === shapes.length ? (
-            <div className="pointer-events-none h-[2px] bg-accent" />
-          ) : null}
+        <div
+          className="relative min-h-0 flex-1 overflow-y-auto"
+          onDragOver={(e) => {
+            if (e.dataTransfer.types.includes(DRAG_MIME)) e.preventDefault();
+          }}
+          onDrop={(e) => {
+            // drop in empty space => move to top level (end = front)
+            const id = e.dataTransfer.getData(DRAG_MIME);
+            if (!id) return;
+            store.update((d) => ({ ...d, layers: moveNode(d.layers, id, null, d.layers.length) }));
+            store.endGesture();
+            setDropId(null);
+          }}
+        >
+          {rows}
         </div>
       )}
-      {menu && menuShape ? (
-        <div
-          className="fixed z-50 min-w-[160px] border border-border-light bg-surface2 py-0.5 shadow-[var(--shadow-popover)]"
-          style={{ left: menu.x, top: menu.y }}
-          onPointerDown={(e) => e.stopPropagation()}
-        >
-          <button
-            className={menuItem}
-            onClick={() => {
-              setRenaming(menuShape.id);
-              setRenameText(menuShape.name ?? getShapeType(menuShape.typeId).name);
-              setMenu(null);
-            }}
-          >
-            Rename
-          </button>
-          <button
-            className={menuItem}
-            onClick={() => {
-              store.update((d) => duplicateShape(d, menuShape.id));
-              store.endGesture();
-              setMenu(null);
-            }}
-          >
-            Duplicate
-          </button>
-          <div className="my-0.5 border-t border-border" />
-          <button
-            className={menuItem}
-            onClick={() => {
-              store.update((d) => moveShapeTo(d, menuShape.id, d.shapes.length - 1));
-              store.endGesture();
-              setMenu(null);
-            }}
-          >
-            Bring to Front
-          </button>
-          <button
-            className={menuItem}
-            onClick={() => {
-              store.update((d) => moveShapeTo(d, menuShape.id, 0));
-              store.endGesture();
-              setMenu(null);
-            }}
-          >
-            Send to Back
-          </button>
-          <div className="my-0.5 border-t border-border" />
-          <button
-            className={cx(menuItem, "text-error hover:bg-error/10")}
-            onClick={() => {
-              store.update((d) => removeShape(d, menuShape.id));
-              store.endGesture();
-              setMenu(null);
-            }}
-          >
-            Delete
-          </button>
-        </div>
+      {menu && menuNode ? (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+          items={[
+            ...(isGroup(menuNode)
+              ? [
+                  {
+                    label: "Ungroup",
+                    onClick: () =>
+                      store.update((d) => {
+                        const next = ungroup(d.layers, menuNode.id);
+                        return next ? { ...d, layers: next } : d;
+                      }),
+                  },
+                ]
+              : [
+                  {
+                    label: menuTargets.length > 1 ? `Group ${menuTargets.length} Layers` : "Group",
+                    onClick: () => {
+                      const gid = crypto.randomUUID();
+                      doOp((d) => ({ ...d, layers: wrapInGroup(d.layers, menuTargets, gid, d.canvas.origin) }));
+                      store.select(gid);
+                    },
+                  },
+                ]),
+            {
+              label: "Rename",
+              hotkey: "F2",
+              onClick: () => {
+                setRenaming(menuNode.id);
+                setRenameText(nodeLabel(menuNode));
+              },
+            },
+            {
+              label: "Duplicate",
+              hotkey: "Ctrl+D",
+              onClick: () => doOp((d) => menuTargets.reduce((acc, tid) => duplicateShape(acc, tid), d)),
+            },
+            "separator",
+            { label: "Bring to Front", onClick: () => doOp((d) => moveShapeTo(d, menuNode.id, Number.MAX_SAFE_INTEGER)) },
+            { label: "Send to Back", onClick: () => doOp((d) => moveShapeTo(d, menuNode.id, 0)) },
+            "separator",
+            {
+              label: menuTargets.length > 1 ? `Delete ${menuTargets.length} Layers` : "Delete",
+              danger: true,
+              hotkey: "⌫",
+              onClick: () => doOp((d) => menuTargets.reduce((acc, tid) => removeShape(acc, tid), d)),
+            },
+          ]}
+        />
       ) : null}
     </div>
   );

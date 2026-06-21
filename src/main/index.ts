@@ -113,6 +113,9 @@ app.whenReady().then(() => {
           { type: "separator" },
           { label: "Duplicate", accelerator: "CmdOrCtrl+D", click: send("duplicate") },
           { label: "Delete", click: send("delete") }, // no accelerator: Del must stay safe in inputs
+          { type: "separator" },
+          { label: "Group", accelerator: "CmdOrCtrl+G", click: send("group") },
+          { label: "Ungroup", accelerator: "CmdOrCtrl+Shift+G", click: send("ungroup") },
         ],
       },
       {
@@ -120,6 +123,8 @@ app.whenReady().then(() => {
         submenu: [
           { label: "Fit", accelerator: "CmdOrCtrl+0", click: send("zoom-fit") },
           { label: "100%", accelerator: "CmdOrCtrl+1", click: send("zoom-100") },
+          { type: "separator" },
+          { label: "Rulers", accelerator: "CmdOrCtrl+R", click: send("toggle-rulers") },
           { type: "separator" },
           { role: "toggleDevTools" },
         ],

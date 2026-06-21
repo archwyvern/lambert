@@ -1,14 +1,42 @@
 import { Vector2, Vector3 } from "@carapace/primitives";
 import type { LambertDoc } from "./schema";
-import { createShapeInstance } from "../field/registry";
-import type { ShapeInstance } from "../field/types";
+import { duplicateNode, findParentId, moveNode, removeNode, siblingsOf, updateNode } from "./layerOps";
+import { deleteVertices } from "../field/controlPoints";
+import { deleteVerts } from "../field/meshOps";
+import { createShapeInstance, getShapeType } from "../field/registry";
+import { isShape, type ShapeInstance } from "../field/types";
+
+/**
+ * Remove `verts` from a shape, dispatching on its kind and guarding each kind's minimum (returns the
+ * shape unchanged if the delete would make it degenerate). Mesh re-triangulates; a ring keeps outer
+ * >= 3 and inner >= 1 and re-derives ringSplit; polygon >= 3, polyline >= 2. Shared by the gizmo
+ * context menu and the Delete key.
+ */
+export function removeShapeVertices(s: ShapeInstance, verts: number[]): ShapeInstance {
+  if (s.mesh) {
+    const r = deleteVerts(s.controlPoints, s.mesh, verts);
+    return r ? { ...s, controlPoints: r.controlPoints, mesh: r.mesh } : s;
+  }
+  const kind = getShapeType(s.typeId).controlPoints.kind;
+  if (kind === "rings") {
+    const split = s.ringSplit ?? (s.controlPoints.length >> 1);
+    const outerLeft = split - verts.filter((i) => i < split).length;
+    const innerLeft = s.controlPoints.length - split - verts.filter((i) => i >= split).length;
+    if (outerLeft < 3 || innerLeft < 1) return s;
+    const keep = deleteVertices(s.controlPoints, verts, 4);
+    return keep ? { ...s, controlPoints: keep, ringSplit: outerLeft } : s;
+  }
+  const min = getShapeType(s.typeId).controlPoints.min ?? (kind === "polyline" ? 2 : 3);
+  const keep = deleteVertices(s.controlPoints, verts, min);
+  return keep ? { ...s, controlPoints: keep } : s;
+}
 
 export function addShape(doc: LambertDoc, typeId: string, pos: Vector2): LambertDoc {
-  return { ...doc, shapes: [...doc.shapes, createShapeInstance(typeId, pos)] };
+  return { ...doc, layers: [...doc.layers, createShapeInstance(typeId, pos)] };
 }
 
 export function removeShape(doc: LambertDoc, id: string): LambertDoc {
-  return { ...doc, shapes: doc.shapes.filter((s) => s.id !== id) };
+  return { ...doc, layers: removeNode(doc.layers, id) };
 }
 
 export function updateShape(
@@ -16,47 +44,43 @@ export function updateShape(
   id: string,
   patch: (s: ShapeInstance) => ShapeInstance,
 ): LambertDoc {
-  return { ...doc, shapes: doc.shapes.map((s) => (s.id === id ? patch(s) : s)) };
+  return { ...doc, layers: updateNode(doc.layers, id, (n) => (isShape(n) ? patch(n) : n)) };
 }
 
-/** Move a shape by delta in z-order (+1 = later = on top). */
+/** Move a node by delta in z-order within its parent (+1 = later = on top). */
 export function reorderShape(doc: LambertDoc, id: string, delta: number): LambertDoc {
-  const idx = doc.shapes.findIndex((s) => s.id === id);
-  if (idx < 0) return doc;
-  const to = Math.min(doc.shapes.length - 1, Math.max(0, idx + delta));
+  const parent = findParentId(doc.layers, id);
+  if (parent === undefined) return doc;
+  const sibs = siblingsOf(doc.layers, id);
+  const idx = sibs.findIndex((n) => n.id === id);
+  const to = Math.min(sibs.length - 1, Math.max(0, idx + delta));
   if (to === idx) return doc;
-  const shapes = [...doc.shapes];
-  const [moved] = shapes.splice(idx, 1);
-  shapes.splice(to, 0, moved!);
-  return { ...doc, shapes };
+  return { ...doc, layers: moveNode(doc.layers, id, parent, to) };
 }
 
-/** Move a shape to a final array index (drag-reorder semantics: remove, then insert). */
+/** Move a node to a final index among its siblings. */
 export function moveShapeTo(doc: LambertDoc, id: string, finalIndex: number): LambertDoc {
-  const from = doc.shapes.findIndex((s) => s.id === id);
-  if (from < 0) return doc;
-  const to = Math.min(doc.shapes.length - 1, Math.max(0, finalIndex));
-  if (to === from) return doc;
-  const shapes = [...doc.shapes];
-  const [moved] = shapes.splice(from, 1);
-  shapes.splice(to, 0, moved!);
-  return { ...doc, shapes };
+  const parent = findParentId(doc.layers, id);
+  if (parent === undefined) return doc;
+  return { ...doc, layers: moveNode(doc.layers, id, parent, finalIndex) };
 }
 
-export function duplicateShape(doc: LambertDoc, id: string): LambertDoc {
-  const src = doc.shapes.find((s) => s.id === id);
-  if (!src) return doc;
-  // Deep-copy the mutable containers (params, mesh arrays); Vector2/Vector3 are immutable so
-  // their refs are safe to share. structuredClone would strip the Vector class prototypes.
-  const copy: ShapeInstance = {
+/**
+ * Deep copy a shape with a fresh id, offset by (dx, dy). Mutable containers (params, control
+ * points, mesh arrays) are cloned; Vector2/Vector3 are immutable so refs are safe to share.
+ * structuredClone would strip the Vector class prototypes, so the copy is built by hand.
+ */
+export function cloneShape(src: ShapeInstance, dx = 5, dy = 5): ShapeInstance {
+  return {
     ...src,
     id: crypto.randomUUID(),
     params: { ...src.params },
     controlPoints: src.controlPoints.slice(),
     bezier: src.bezier?.map((a) => ({ ...a })),
+    masks: src.masks?.map((m) => ({ ...m, anchors: m.anchors.map((a) => ({ ...a })) })),
     transform: {
       ...src.transform,
-      pos: new Vector3(src.transform.pos.x + 5, src.transform.pos.y + 5, src.transform.pos.z),
+      pos: new Vector3(src.transform.pos.x + dx, src.transform.pos.y + dy, src.transform.pos.z),
     },
     mesh: src.mesh
       ? {
@@ -66,5 +90,8 @@ export function duplicateShape(doc: LambertDoc, id: string): LambertDoc {
         }
       : undefined,
   };
-  return { ...doc, shapes: [...doc.shapes, copy] };
+}
+
+export function duplicateShape(doc: LambertDoc, id: string): LambertDoc {
+  return { ...doc, layers: duplicateNode(doc.layers, id).layers };
 }

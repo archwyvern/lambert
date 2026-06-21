@@ -1,9 +1,12 @@
 import { decode } from "fast-png";
+import { flattenLayers, type ResolvedShape } from "../field/flatten";
 import { buildCompositeWgsl } from "../field/gpu/composite";
 import { packShapes } from "../field/gpu/pack";
 import { GpuFieldRenderer } from "../field/gpu/pipeline";
 import { GRID, GRID3D_WGSL, Orbit, orbitMvp, PREVIEW3D_WGSL } from "../field/gpu/preview3d";
-import type { ShapeInstance } from "../field/types";
+import { renderField } from "../field/render";
+import { generateFull } from "../field/skyrat/normalmap";
+import type { LayerNode } from "../field/types";
 import type { Viewport } from "./viewport";
 
 export type ViewMode = "diffuse" | "normal" | "lit";
@@ -11,7 +14,7 @@ export const VIEW_MODES: ViewMode[] = ["diffuse", "normal", "lit"];
 const MODE_INDEX: Record<ViewMode, number> = { diffuse: 0, normal: 1, lit: 2 };
 
 export interface PreviewParams {
-  shapes: ShapeInstance[];
+  layers: LayerNode[];
   viewport: Viewport;
   mode: ViewMode;
   /** Overlay opacity for the normal mode; 1 = pure overlay (still mask-gated). */
@@ -21,6 +24,8 @@ export interface PreviewParams {
   normalSigns: { red: number; green: number };
   /** Raster view: doc-res exported pixels (pixelated). false = crisp display-res vector view. */
   raster: boolean;
+  /** Lit mode only: preview the full Skyrat pipeline (alpha-volume + NX override + radial + gradient). */
+  fullPipeline?: boolean;
   /** Orbit camera for the attached 3D inspection canvas; null/undefined skips the pass. */
   orbit3d?: Orbit | null;
 }
@@ -32,17 +37,27 @@ export class PreviewRenderer {
   private compositePipeline!: GPURenderPipeline;
   private uniforms!: GPUBuffer;
   private sizeKey = "";
-  /** Last folded shape list (immutable from the store): reference equality = no re-fold. */
-  private lastShapes: ShapeInstance[] | null = null;
+  /** Last folded layer tree (immutable from the store): reference equality = no re-fold. */
+  private lastShapes: LayerNode[] | null = null;
   private fieldTex: GPUTexture | null = null;
   private normalTex: GPUTexture | null = null;
   private diffuseTex: GPUTexture | null = null;
+  // full-pipeline (Skyrat) preview: the diffuse RGBA kept for the CPU generator, the baked normal
+  // texture (rgba32float, doc res), a 1x1 placeholder so the binding is always satisfiable, and a
+  // cache key (layer-tree ref + size) so the heavy CPU pass only re-runs when the inputs change.
+  private diffuseRGBA: Uint8Array | null = null;
+  private skyratTex: GPUTexture | null = null;
+  private skyratDummy: GPUTexture | null = null;
+  private skyratKey = "";
+  private skyratShapes: LayerNode[] | null = null;
   // packed shape buffers the analytic 2D composite evaluates per fragment (cached on shape-list ref)
   private recordsBuf: GPUBuffer | null = null;
   private pointsBuf: GPUBuffer | null = null;
   private meshBuf: GPUBuffer | null = null;
+  private maskLoopsBuf: GPUBuffer | null = null;
+  private maskVertsBuf: GPUBuffer | null = null;
   private shapeCount = 0;
-  private lastShapes2d: ShapeInstance[] | null = null;
+  private lastShapes2d: LayerNode[] | null = null;
   private frame: number | null = null;
   private pending: { docW: number; docH: number; params: PreviewParams } | null = null;
   private pipeline3d!: GPURenderPipeline;
@@ -62,7 +77,13 @@ export class PreviewRenderer {
     const adapter = await navigator.gpu.requestAdapter();
     if (!adapter) throw new Error("no WebGPU adapter");
     const device = await adapter.requestDevice({
-      requiredLimits: { maxTextureDimension2D: adapter.limits.maxTextureDimension2D },
+      // raise buffer limits to the adapter's max — large images make the doc-res field/normal textures
+      // (and their upload staging) exceed the default 256MB maxBufferSize, which crashes the device.
+      requiredLimits: {
+        maxTextureDimension2D: adapter.limits.maxTextureDimension2D,
+        maxBufferSize: adapter.limits.maxBufferSize,
+        maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize,
+      },
     });
     const p = new PreviewRenderer(device, canvas);
     p.gpu = await GpuFieldRenderer.create(device);
@@ -228,7 +249,51 @@ export class PreviewRenderer {
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
     });
     this.device.queue.writeTexture({ texture: this.diffuseTex }, rgba, { bytesPerRow: width * 4 }, [width, height]);
+    this.diffuseRGBA = rgba; // kept for the CPU Skyrat generator
+    this.skyratShapes = null; // diffuse changed -> rebake the full-pipeline normals
     this.sizeKey = ""; // force field texture rebuild on next render
+  }
+
+  /** Lazily (re)bake the full Skyrat normal map and upload it as a doc-res rgba32float texture.
+   *  Cached on (layer-tree ref + size); the CPU pass only re-runs when the shapes or diffuse change. */
+  private ensureSkyratNormals(layers: LayerNode[], docW: number, docH: number, signs: { red: number; green: number }): void {
+    if (!this.diffuseRGBA) return;
+    const key = `${docW}x${docH}`;
+    if (this.skyratTex && this.skyratShapes === layers && this.skyratKey === key) return;
+    // Lambert's NX (canonical normals + authored mask) at doc res, then the full Skyrat pipeline.
+    const nx = renderField(flattenLayers(layers), docW, docH, { supersample: 1 });
+    const { normals } = generateFull(this.diffuseRGBA, docW, docH, nx.normals, nx.mask, signs);
+    const rgba = new Float32Array(docW * docH * 4);
+    for (let i = 0, n = docW * docH; i < n; i++) {
+      rgba[i * 4] = normals[i * 3]!;
+      rgba[i * 4 + 1] = normals[i * 3 + 1]!;
+      rgba[i * 4 + 2] = normals[i * 3 + 2]!;
+      rgba[i * 4 + 3] = 1;
+    }
+    if (!this.skyratTex || this.skyratKey !== key) {
+      this.skyratTex?.destroy();
+      this.skyratTex = this.device.createTexture({
+        size: [docW, docH],
+        format: "rgba32float",
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+      });
+    }
+    this.device.queue.writeTexture({ texture: this.skyratTex }, rgba, { bytesPerRow: docW * 16 }, [docW, docH]);
+    this.skyratShapes = layers;
+    this.skyratKey = key;
+  }
+
+  /** 1x1 rgba32float placeholder so binding 8 is always present even when full mode is off. */
+  private skyratPlaceholder(): GPUTexture {
+    if (!this.skyratDummy) {
+      this.skyratDummy = this.device.createTexture({
+        size: [1, 1],
+        format: "rgba32float",
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+      });
+      this.device.queue.writeTexture({ texture: this.skyratDummy }, new Float32Array([0, 0, 1, 1]), { bytesPerRow: 16 }, [1, 1]);
+    }
+    return this.skyratDummy;
   }
 
   /** Coalesce renders to one per animation frame. */
@@ -243,11 +308,13 @@ export class PreviewRenderer {
   }
 
   /** Pack the shape list into the storage buffers the analytic composite reads. */
-  private packShapeBuffers(shapes: ShapeInstance[]): void {
-    const packed = packShapes(shapes);
+  private packShapeBuffers(resolved: ResolvedShape[]): void {
+    const packed = packShapes(resolved);
     this.recordsBuf?.destroy();
     this.pointsBuf?.destroy();
     this.meshBuf?.destroy();
+    this.maskLoopsBuf?.destroy();
+    this.maskVertsBuf?.destroy();
     const mk = (data: Float32Array): GPUBuffer => {
       const buf = this.device.createBuffer({
         size: Math.max(data.byteLength, 16),
@@ -259,6 +326,8 @@ export class PreviewRenderer {
     this.recordsBuf = mk(packed.records);
     this.pointsBuf = mk(packed.points);
     this.meshBuf = mk(packed.meshTris);
+    this.maskLoopsBuf = mk(packed.maskLoops);
+    this.maskVertsBuf = mk(packed.maskVerts);
     this.shapeCount = packed.count;
   }
 
@@ -277,21 +346,25 @@ export class PreviewRenderer {
         this.lastShapes = null;
         this.sizeKey = key;
       }
-      if (!this.fieldTex || !this.normalTex || p.shapes !== this.lastShapes) {
+      if (!this.fieldTex || !this.normalTex || p.layers !== this.lastShapes) {
         const existing =
           this.fieldTex && this.normalTex ? { fieldTex: this.fieldTex, normalTex: this.normalTex } : undefined;
-        const tex = this.gpu.renderToTextures(p.shapes, docW, docH, existing);
+        const tex = this.gpu.renderToTextures(flattenLayers(p.layers), docW, docH, existing);
         this.fieldTex = tex.fieldTex;
         this.normalTex = tex.normalTex;
-        this.lastShapes = p.shapes;
+        this.lastShapes = p.layers;
       }
     }
 
-    // pack the shapes the analytic composite evaluates; re-pack only when the shape list changes
-    if (p.shapes !== this.lastShapes2d || !this.recordsBuf) {
-      this.packShapeBuffers(p.shapes);
-      this.lastShapes2d = p.shapes;
+    // pack the shapes the analytic composite evaluates; re-pack only when the layer tree changes
+    if (p.layers !== this.lastShapes2d || !this.recordsBuf) {
+      this.packShapeBuffers(flattenLayers(p.layers));
+      this.lastShapes2d = p.layers;
     }
+
+    // full-pipeline preview (lit or normal view): bake the Skyrat normals on demand (cached on layers + size)
+    const full = (p.mode === "lit" || p.mode === "normal") && !!p.fullPipeline;
+    if (full) this.ensureSkyratNormals(p.layers, docW, docH, p.normalSigns);
 
     const dpr = this.canvas.width / (this.canvas.getBoundingClientRect().width || this.canvas.width) || 1;
     const ub = new ArrayBuffer(64);
@@ -311,6 +384,7 @@ export class PreviewRenderer {
     f[11] = p.normalSigns.red;
     f[12] = p.normalSigns.green;
     u[13] = p.raster ? 1 : 0;
+    u[14] = full && this.skyratTex ? 1 : 0;
     this.device.queue.writeBuffer(this.uniforms, 0, ub);
 
     const bind = this.device.createBindGroup({
@@ -321,6 +395,9 @@ export class PreviewRenderer {
         { binding: 2, resource: { buffer: this.pointsBuf! } },
         { binding: 4, resource: { buffer: this.meshBuf! } },
         { binding: 5, resource: this.diffuseTex.createView() },
+        { binding: 6, resource: { buffer: this.maskLoopsBuf! } },
+        { binding: 7, resource: { buffer: this.maskVertsBuf! } },
+        { binding: 8, resource: (full && this.skyratTex ? this.skyratTex : this.skyratPlaceholder()).createView() },
       ],
     });
     const enc = this.device.createCommandEncoder();

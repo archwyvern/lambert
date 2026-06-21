@@ -10,6 +10,35 @@ export const snapHalf = (v: number): number => Math.round(v * 2) / 2;
 export const snapVec = (p: Vector2): Vector2 => v2(snapHalf(p.x), snapHalf(p.y));
 
 /**
+ * Snap a point to the nearest guide line on each axis independently: x to the closest vertical
+ * (`v`) guide within `tolDoc`, y to the closest horizontal (`h`) guide within `tolDoc`. An axis
+ * with no guide in range is left unchanged. `tolDoc` is in doc px (callers pass a screen-px
+ * tolerance divided by zoom so the catch radius is constant on screen).
+ */
+export function snapToGuides(p: Vector2, guides: { orient: "v" | "h"; at: number }[], tolDoc: number): Vector2 {
+  let x = p.x;
+  let y = p.y;
+  let bestX = tolDoc;
+  let bestY = tolDoc;
+  for (const g of guides) {
+    if (g.orient === "v") {
+      const d = Math.abs(p.x - g.at);
+      if (d <= bestX) {
+        bestX = d;
+        x = g.at;
+      }
+    } else {
+      const d = Math.abs(p.y - g.at);
+      if (d <= bestY) {
+        bestY = d;
+        y = g.at;
+      }
+    }
+  }
+  return v2(x, y);
+}
+
+/**
  * True when segment a->b is aligned to one of the 8 cardinal/diagonal axes (every 45°) within
  * `tol` — measured as PERPENDICULAR distance from the nearest axis, in the same units as the
  * points. On a ½px grid pass tol = ¼px (half a grid step): a truly-aligned edge has 0 deviation

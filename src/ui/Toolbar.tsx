@@ -12,8 +12,11 @@ export function Toolbar(props: {
   state: EditorState;
   view: ViewState;
   setView: (fn: (v: ViewState) => ViewState) => void;
+  /** Global ½px grid snap (positions, vertices, polygon + curve points). */
+  snap: boolean;
+  setSnap: (fn: (s: boolean) => boolean) => void;
 }): React.JSX.Element {
-  const { store, state, view, setView } = props;
+  const { store, state, view, setView, snap, setSnap } = props;
   const pct = Math.round(view.opacity * 100);
 
   return (
@@ -49,6 +52,17 @@ export function Toolbar(props: {
       ) : null}
 
       <div className="ml-2 flex shrink-0 items-center gap-2">
+        <button
+          title="Snap positions, vertices, and curve points to the ½px grid"
+          aria-pressed={snap}
+          onClick={() => setSnap((s) => !s)}
+          className={cx(
+            "h-[26px] shrink-0 border border-border px-3 text-base",
+            snap ? "bg-list-active text-fg" : "text-fg-mid hover:bg-hover hover:text-fg",
+          )}
+        >
+          snap
+        </button>
         {view.mode === "normal" ? (
           <label className="flex shrink-0 items-center gap-2 text-sm text-fg-mid">
             opacity
@@ -95,6 +109,19 @@ export function Toolbar(props: {
         >
           {view.raster ? "raster" : "vector"}
         </button>
+        {view.mode === "lit" || view.mode === "normal" ? (
+          <button
+            title="Preview the full Skyrat pipeline: alpha-volume bevel + this NX override + radial + gradient"
+            aria-pressed={view.fullPipeline}
+            onClick={() => setView((v) => ({ ...v, fullPipeline: !v.fullPipeline }))}
+            className={cx(
+              "h-[26px] shrink-0 border border-border px-3 text-base",
+              view.fullPipeline ? "bg-list-active text-fg" : "text-fg-mid hover:bg-hover hover:text-fg",
+            )}
+          >
+            full
+          </button>
+        ) : null}
       </div>
     </header>
   );

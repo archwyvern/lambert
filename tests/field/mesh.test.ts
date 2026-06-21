@@ -1,61 +1,63 @@
 import { expect, test } from "vitest";
 import "../../src/field/shapes";
 import { createShapeInstance, getShapeType } from "../../src/field/registry";
-import { canConvertToMesh, convertToMesh } from "../../src/field/meshConvert";
-import { meshGradients } from "../../src/field/meshOps";
-import { evaluateField } from "../../src/field/evalCpu";
+import { meshEdges, meshGradients } from "../../src/field/meshOps";
+import type { MeshData, ShapeInstance } from "../../src/field/types";
 import { v2 } from "../../src/field/vec";
 
-test("convertToMesh: plateau -> mesh keeps transform, builds rings into faces", () => {
-  const plateau = createShapeInstance("plateau", v2(64, 64));
-  expect(canConvertToMesh(plateau)).toBe(true);
-  const mesh = convertToMesh(plateau);
+test("mesh primitive seeds a flat quad: 4 corners at +/-32, uniform height, 2 triangles", () => {
+  const mesh = createShapeInstance("mesh", v2(64, 64));
   expect(mesh.typeId).toBe("mesh");
-  expect(mesh.id).not.toBe(plateau.id);
-  expect(mesh.controlPoints.length).toBe(8); // 4 base + 4 top
-  expect(mesh.mesh!.z).toEqual([0, 0, 0, 0, 24, 24, 24, 24]); // base at 0, top at nominalHeight
-  expect(mesh.mesh!.tris.length).toBe(10); // 2 top + 4 sides * 2
-  expect(canConvertToMesh(mesh)).toBe(false); // a mesh isn't itself convertible
+  expect(mesh.controlPoints).toEqual([v2(-32, -32), v2(32, -32), v2(32, 32), v2(-32, 32)]);
+  expect(mesh.mesh!.z).toEqual([24, 24, 24, 24]);
+  expect(mesh.mesh!.tris).toEqual([
+    [0, 1, 2],
+    [0, 2, 3],
+  ]);
+  expect(mesh.mesh!.edges!.length).toBeGreaterThan(0); // edges derived for the gizmo
 });
 
-test("mesh eval: flat top at full height, sloped sides, zero outside", () => {
-  const mesh = convertToMesh(createShapeInstance("plateau", v2(64, 64)));
+test("mesh eval: flat inside the quad, zero outside with the right outline distance", () => {
+  const mesh = createShapeInstance("mesh", v2(64, 64));
   const type = getShapeType("mesh");
-  // default plateau: base +/-32, top +/-20, height 24
-  expect(type.eval(v2(0, 0), mesh).height).toBeCloseTo(24); // centre of the flat top
-  expect(type.eval(v2(26, 0), mesh).height).toBeCloseTo(12); // mid-slope: base 32, top 20 -> half
+  expect(type.eval(v2(0, 0), mesh).height).toBeCloseTo(24); // centre of the flat quad
+  expect(type.eval(v2(20, 10), mesh).height).toBeCloseTo(24); // anywhere inside is the same height
   const out = type.eval(v2(40, 0), mesh);
   expect(out.height).toBe(0);
-  expect(out.sd).toBeCloseTo(8); // 8px outside the base edge
+  expect(out.sd).toBeCloseTo(8); // 8px outside the +/-32 edge
+});
+
+/** A 5-vertex pyramid mesh: 4 corners on the ground + a centre peak, fanned into 4 facets. */
+function pyramid(): ShapeInstance {
+  const mesh = createShapeInstance("mesh", v2(64, 64));
+  mesh.controlPoints = [v2(-32, -32), v2(32, -32), v2(32, 32), v2(-32, 32), v2(0, 0)];
+  const z = [0, 0, 0, 0, 24];
+  const tris: [number, number, number][] = [
+    [0, 1, 4],
+    [1, 2, 4],
+    [2, 3, 4],
+    [3, 0, 4],
+  ];
+  mesh.mesh = { z, tris, edges: meshEdges({ z, tris } as MeshData) };
+  return mesh;
+}
+
+test("mesh eval: a sloped facet interpolates linearly toward the peak", () => {
+  const type = getShapeType("mesh");
+  // (16,0) is 1/2 of the way from the right-edge midpoint (z 0) to the peak (z 24) -> 12
+  expect(type.eval(v2(16, 0), pyramid()).height).toBeCloseTo(12);
 });
 
 test("mesh smoothness: Phong blend is linear in the slider and bends the facet", () => {
-  const mesh = convertToMesh(createShapeInstance("plateau", v2(64, 64)));
+  const mesh = pyramid();
   const type = getShapeType("mesh");
   // the real path attaches mesh.grad in evalCpu; do the same here for the direct eval
   const grad = meshGradients(mesh.controlPoints, mesh.mesh!.z, mesh.mesh!.tris);
   const withGrad = { ...mesh, mesh: { ...mesh.mesh!, grad } };
-  const at = (sm: number): number => type.eval(v2(26, 0), { ...withGrad, params: { smoothness: sm } }).height;
+  const at = (sm: number): number => type.eval(v2(16, 0), { ...withGrad, params: { smoothness: sm } }).height;
   const flat = at(0);
   const smooth = at(1);
   expect(flat).toBeCloseTo(12); // linear mid-slope
   expect(at(0.5)).toBeCloseTo((flat + smooth) / 2, 4); // h = hL + sm*(hP-hL): linear in the slider
   expect(Math.abs(smooth - flat)).toBeGreaterThan(0.05); // Phong actually curves the surface
-});
-
-test("mesh reproduces the plateau's height field after conversion", () => {
-  const plateau = createShapeInstance("plateau", v2(64, 64));
-  const mesh = convertToMesh(plateau);
-  const a = evaluateField([plateau], 128, 128);
-  const b = evaluateField([mesh], 128, 128);
-  const px = (x: number, y: number): number => y * 128 + x;
-  const probes: Array<[number, number]> = [
-    [64, 64],
-    [80, 64],
-    [64, 80],
-    [50, 50],
-  ];
-  for (const [x, y] of probes) {
-    expect(b.heightMap[px(x, y)]!).toBeCloseTo(a.heightMap[px(x, y)]!, 1);
-  }
 });

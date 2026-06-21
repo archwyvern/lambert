@@ -11,6 +11,22 @@ export function regularPolygon(centroid: Vector2, radius: number, n: number): Ve
   return out;
 }
 
+/** Insert `p` into a flat control-point list right after `afterIndex` (the new vertex is at
+ *  `afterIndex + 1`). Used to add a vertex on a polygon/polyline/ring edge without regenerating. */
+export function insertVertex(points: Vector2[], afterIndex: number, p: Vector2): Vector2[] {
+  const next = points.slice();
+  next.splice(afterIndex + 1, 0, p);
+  return next;
+}
+
+/** Remove the vertices at `indices`, keeping at least `min`. Returns null if the delete would drop
+ *  below `min` (caller leaves the shape unchanged). */
+export function deleteVertices(points: Vector2[], indices: number[], min: number): Vector2[] | null {
+  const drop = new Set(indices);
+  const keep = points.filter((_, i) => !drop.has(i));
+  return keep.length >= min ? keep : null;
+}
+
 /** Centroid + mean vertex radius of an existing footprint (for count regeneration). */
 export function polygonStats(points: Vector2[]): { centroid: Vector2; radius: number } {
   const centroid = v2(

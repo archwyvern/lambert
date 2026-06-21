@@ -3,85 +3,88 @@ import "../../src/field/shapes";
 import { emptyDoc, parseDoc, serializeDoc } from "../../src/document/schema";
 import { addShape, duplicateShape, moveShapeTo, removeShape, reorderShape, updateShape } from "../../src/document/docOps";
 import { DocumentStore } from "../../src/document/store";
+import type { ShapeInstance } from "../../src/field/types";
 import { v2 } from "../../src/field/vec";
 
 const mkStore = () => new DocumentStore(emptyDoc("hull.df.png", 128, 128), null);
+const shape = (d: { layers: unknown[] }, i: number): ShapeInstance => d.layers[i] as ShapeInstance;
 
 test("addShape appends, updateShape patches immutably", () => {
   const doc = emptyDoc("hull.df.png", 128, 128);
   const d1 = addShape(doc, "dome", v2(10, 10));
-  expect(d1.shapes.length).toBe(1);
-  expect(doc.shapes.length).toBe(0); // original untouched
-  const id = d1.shapes[0]!.id;
+  expect(d1.layers.length).toBe(1);
+  expect(doc.layers.length).toBe(0); // original untouched
+  const id = d1.layers[0]!.id;
   const d2 = updateShape(d1, id, (s) => ({ ...s, transform: { ...s.transform, scale: s.transform.scale.withZ(0.5) } }));
-  expect(d2.shapes[0]!.transform.scale.z).toBe(0.5);
-  expect(d1.shapes[0]!.transform.scale.z).toBe(1);
+  expect(shape(d2, 0).transform.scale.z).toBe(0.5);
+  expect(shape(d1, 0).transform.scale.z).toBe(1);
 });
 
-test("removeShape, duplicateShape, reorderShape", () => {
-  let doc = addShape(addShape(emptyDoc("x.png", 64, 64), "dome", v2(0, 0)), "ridge", v2(5, 5));
-  const [a, b] = [doc.shapes[0]!.id, doc.shapes[1]!.id];
+test("removeShape, duplicateShape (identical copy), reorderShape", () => {
+  let doc = addShape(addShape(emptyDoc("x.png", 64, 64), "dome", v2(0, 0)), "capsule", v2(5, 5));
+  const [a, b] = [doc.layers[0]!.id, doc.layers[1]!.id];
   doc = reorderShape(doc, a!, +1);
-  expect(doc.shapes.map((s) => s.id)).toEqual([b, a]);
-  const srcPos = doc.shapes.find((s) => s.id === a)!.transform.pos;
+  expect(doc.layers.map((s) => s.id)).toEqual([b, a]);
+  const srcPos = (doc.layers.find((s) => s.id === a) as ShapeInstance).transform.pos;
   const dup = duplicateShape(doc, a!);
-  expect(dup.shapes.length).toBe(3);
-  expect(dup.shapes[2]!.id).not.toBe(a);
-  expect(dup.shapes[2]!.transform.pos).toEqual({ x: srcPos.x + 5, y: srcPos.y + 5, z: srcPos.z });
-  expect(removeShape(doc, a!).shapes.map((s) => s.id)).toEqual([b]);
+  expect(dup.layers.length).toBe(3);
+  // the copy is inserted right after the original, with an identical (un-offset) position
+  expect(dup.layers[2]!.id).not.toBe(a);
+  expect(shape(dup, 2).transform.pos).toEqual({ x: srcPos.x, y: srcPos.y, z: srcPos.z });
+  expect(removeShape(doc, a!).layers.map((s) => s.id)).toEqual([b]);
 });
 
 test("moveShapeTo: final-index semantics for drag reorder", () => {
   let doc = emptyDoc("x.png", 64, 64);
   doc = addShape(doc, "dome", v2(0, 0));
-  doc = addShape(doc, "ridge", v2(0, 0));
+  doc = addShape(doc, "capsule", v2(0, 0));
   doc = addShape(doc, "groove", v2(0, 0));
-  const [a, b, c] = doc.shapes.map((s) => s.id);
-  expect(moveShapeTo(doc, a!, 2).shapes.map((s) => s.id)).toEqual([b, c, a]);
-  expect(moveShapeTo(doc, c!, 0).shapes.map((s) => s.id)).toEqual([c, a, b]);
-  expect(moveShapeTo(doc, b!, 1).shapes.map((s) => s.id)).toEqual([a, b, c]); // no-op
+  const [a, b, c] = doc.layers.map((s) => s.id);
+  expect(moveShapeTo(doc, a!, 2).layers.map((s) => s.id)).toEqual([b, c, a]);
+  expect(moveShapeTo(doc, c!, 0).layers.map((s) => s.id)).toEqual([c, a, b]);
+  expect(moveShapeTo(doc, b!, 1).layers.map((s) => s.id)).toEqual([a, b, c]); // no-op
   expect(moveShapeTo(doc, "ghost", 0)).toBe(doc);
 });
 
 test("schema: legacy combine settings are stripped on load", () => {
   const doc = addShape(emptyDoc("x.png", 64, 64), "dome", v2(0, 0));
   const raw = JSON.parse(serializeDoc(doc));
-  raw.shapes[0].combine = { op: "add", blend: 6 }; // pre-simplification document
+  raw.layers[0].combine = { op: "add", blend: 6 }; // pre-simplification document
   const back = parseDoc(JSON.stringify(raw));
-  expect("combine" in back.shapes[0]!).toBe(false);
+  expect("combine" in back.layers[0]!).toBe(false);
 });
 
 test("schema: legacy single-ring plateau gains a top rim from slopeWidth", () => {
   const doc = addShape(emptyDoc("x.png", 64, 64), "plateau", v2(0, 0));
   const raw = JSON.parse(serializeDoc(doc));
-  raw.shapes[0].controlPoints = [
+  raw.layers[0].controlPoints = [
     { x: -32, y: -32 }, { x: 32, y: -32 }, { x: 32, y: 32 }, { x: -32, y: 32 },
   ];
-  raw.shapes[0].params = { height: 24, slopeWidth: 12, profile: "linear" };
+  raw.layers[0].params = { height: 24, slopeWidth: 12, profile: "linear" };
   const back = parseDoc(JSON.stringify(raw));
-  const cps = back.shapes[0]!.controlPoints;
+  const cps = shape(back, 0).controlPoints;
   expect(cps.length).toBe(8);
   expect(cps[4]!.x).toBeCloseTo(-20); // apothem 32, inset 12 -> scale 20/32
   expect(cps[4]!.y).toBeCloseTo(-20);
-  expect("slopeWidth" in back.shapes[0]!.params).toBe(false);
+  expect("slopeWidth" in shape(back, 0).params).toBe(false);
 });
 
 test("schema: optional shape name round-trips", () => {
   const doc = addShape(emptyDoc("x.png", 64, 64), "dome", v2(0, 0));
-  doc.shapes[0]!.name = "boss stud";
+  doc.layers[0]!.name = "boss stud";
   const back = parseDoc(serializeDoc(doc));
-  expect(back.shapes[0]!.name).toBe("boss stud");
+  expect(back.layers[0]!.name).toBe("boss stud");
 });
 
 test("store: update pushes undo, redo clears on new edit", () => {
   const store = mkStore();
   store.update((d) => addShape(d, "dome", v2(1, 1)));
-  store.update((d) => addShape(d, "ridge", v2(2, 2)));
-  expect(store.state.doc.shapes.length).toBe(2);
+  store.update((d) => addShape(d, "capsule", v2(2, 2)));
+  expect(store.state.doc.layers.length).toBe(2);
   store.undo();
-  expect(store.state.doc.shapes.length).toBe(1);
+  expect(store.state.doc.layers.length).toBe(1);
   store.redo();
-  expect(store.state.doc.shapes.length).toBe(2);
+  expect(store.state.doc.layers.length).toBe(2);
   store.undo();
   store.update((d) => addShape(d, "groove", v2(3, 3)));
   expect(store.canRedo).toBe(false);
@@ -91,7 +94,7 @@ test("store: coalesced gesture is one undo step", () => {
   const store = mkStore();
   store.update((d) => addShape(d, "dome", v2(0, 0)));
   store.endGesture();
-  const id = store.state.doc.shapes[0]!.id;
+  const id = store.state.doc.layers[0]!.id;
   for (const x of [1, 2, 3, 4]) {
     store.update(
       (d) => updateShape(d, id, (s) => ({ ...s, transform: { ...s.transform, pos: s.transform.pos.withX(x).withY(0) } })),
@@ -99,9 +102,9 @@ test("store: coalesced gesture is one undo step", () => {
     );
   }
   store.endGesture();
-  expect(store.state.doc.shapes[0]!.transform.pos.x).toBe(4);
+  expect(shape(store.state.doc, 0).transform.pos.x).toBe(4);
   store.undo();
-  expect(store.state.doc.shapes[0]!.transform.pos.x).toBe(0); // whole drag undone at once
+  expect(shape(store.state.doc, 0).transform.pos.x).toBe(0); // whole drag undone at once
 });
 
 test("store: selection, dirty, markSaved, subscribe", () => {
@@ -110,7 +113,7 @@ test("store: selection, dirty, markSaved, subscribe", () => {
   const unsub = store.subscribe(() => notified++);
   store.update((d) => addShape(d, "dome", v2(0, 0)));
   expect(store.state.dirty).toBe(true);
-  const id = store.state.doc.shapes[0]!.id;
+  const id = store.state.doc.layers[0]!.id;
   store.select(id);
   expect(store.state.selectedId).toBe(id);
   store.markSaved("/tmp/x.lambert");
@@ -123,7 +126,7 @@ test("store: selection, dirty, markSaved, subscribe", () => {
 test("store: deleting the selected shape deselects", () => {
   const store = mkStore();
   store.update((d) => addShape(d, "dome", v2(0, 0)));
-  const id = store.state.doc.shapes[0]!.id;
+  const id = store.state.doc.layers[0]!.id;
   store.select(id);
   store.update((d) => removeShape(d, id));
   expect(store.state.selectedId).toBe(null);

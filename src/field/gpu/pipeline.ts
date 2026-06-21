@@ -1,5 +1,5 @@
-import { downsampleRender, RenderResult, scaleShapesForSupersample } from "../render";
-import type { ShapeInstance } from "../types";
+import type { ResolvedShape } from "../flatten";
+import { downsampleRender, RenderResult, scaleResolvedForSupersample } from "../render";
 import { packShapes } from "./pack";
 import { buildFoldWgsl, buildNormalWgsl } from "./wgsl";
 
@@ -76,7 +76,14 @@ export class GpuFieldRenderer {
    * conceptual canvas, returning dense arrays. slopeScale feeds the normal pass.
    */
   private async evaluateTile(
-    packed: { records: Float32Array; points: Float32Array; meshTris: Float32Array; count: number },
+    packed: {
+      records: Float32Array;
+      points: Float32Array;
+      meshTris: Float32Array;
+      maskLoops: Float32Array;
+      maskVerts: Float32Array;
+      count: number;
+    },
     originX: number,
     originY: number,
     width: number,
@@ -122,6 +129,16 @@ export class GpuFieldRenderer {
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
     d.queue.writeBuffer(meshBuf, 0, packed.meshTris);
+    const maskLoopsBuf = d.createBuffer({
+      size: packed.maskLoops.byteLength,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+    d.queue.writeBuffer(maskLoopsBuf, 0, packed.maskLoops);
+    const maskVertsBuf = d.createBuffer({
+      size: packed.maskVerts.byteLength,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+    d.queue.writeBuffer(maskVertsBuf, 0, packed.maskVerts);
 
     const normalUniforms = d.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     const nu = new ArrayBuffer(16);
@@ -137,6 +154,8 @@ export class GpuFieldRenderer {
         { binding: 2, resource: { buffer: pointsBuf } },
         { binding: 3, resource: fieldTex.createView() },
         { binding: 4, resource: { buffer: meshBuf } },
+        { binding: 6, resource: { buffer: maskLoopsBuf } },
+        { binding: 7, resource: { buffer: maskVertsBuf } },
       ],
     });
     const normalBind = d.createBindGroup({
@@ -189,13 +208,13 @@ export class GpuFieldRenderer {
     normalRead.unmap();
     fieldTex.destroy();
     normalTex.destroy();
-    for (const b of [uniforms, recordsBuf, pointsBuf, meshBuf, normalUniforms, fieldRead, normalRead]) b.destroy();
+    for (const b of [uniforms, recordsBuf, pointsBuf, meshBuf, maskLoopsBuf, maskVertsBuf, normalUniforms, fieldRead, normalRead]) b.destroy();
     return { width, height, heightMap, mask, normals };
   }
 
   /** Doc-res fold + normals into GPU textures, no readback. Consumed by the 3D preview pass. */
   renderToTextures(
-    shapes: ShapeInstance[],
+    resolved: ResolvedShape[],
     width: number,
     height: number,
     existing?: { fieldTex: GPUTexture; normalTex: GPUTexture },
@@ -215,7 +234,7 @@ export class GpuFieldRenderer {
         format: "rgba32float",
         usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING,
       });
-    const packed = packShapes(shapes);
+    const packed = packShapes(resolved);
 
     const uniforms = d.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     const ub = new ArrayBuffer(32);
@@ -237,6 +256,16 @@ export class GpuFieldRenderer {
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
     d.queue.writeBuffer(meshBuf, 0, packed.meshTris);
+    const maskLoopsBuf = d.createBuffer({
+      size: packed.maskLoops.byteLength,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+    d.queue.writeBuffer(maskLoopsBuf, 0, packed.maskLoops);
+    const maskVertsBuf = d.createBuffer({
+      size: packed.maskVerts.byteLength,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+    d.queue.writeBuffer(maskVertsBuf, 0, packed.maskVerts);
     const normalUniforms = d.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     const nb = new ArrayBuffer(16);
     new Uint32Array(nb).set([width, height], 0);
@@ -251,6 +280,8 @@ export class GpuFieldRenderer {
         { binding: 2, resource: { buffer: pointsBuf } },
         { binding: 3, resource: fieldTex.createView() },
         { binding: 4, resource: { buffer: meshBuf } },
+        { binding: 6, resource: { buffer: maskLoopsBuf } },
+        { binding: 7, resource: { buffer: maskVertsBuf } },
       ],
     });
     const normalBind = d.createBindGroup({
@@ -271,7 +302,7 @@ export class GpuFieldRenderer {
     pass.dispatchWorkgroups(Math.ceil(width / 8), Math.ceil(height / 8));
     pass.end();
     d.queue.submit([enc.finish()]);
-    for (const b of [uniforms, recordsBuf, pointsBuf, meshBuf, normalUniforms]) b.destroy();
+    for (const b of [uniforms, recordsBuf, pointsBuf, meshBuf, maskLoopsBuf, maskVertsBuf, normalUniforms]) b.destroy();
     return { fieldTex, normalTex };
   }
 
@@ -282,7 +313,7 @@ export class GpuFieldRenderer {
    * Canvas-border pixels clamp identically to the CPU reference.
    */
   async evaluate(
-    shapes: ShapeInstance[],
+    resolved: ResolvedShape[],
     width: number,
     height: number,
     opts: GpuEvaluateOptions = {},
@@ -291,7 +322,7 @@ export class GpuFieldRenderer {
     const tileSize = opts.tileSize ?? 2048;
     const hiW = width * f;
     const hiH = height * f;
-    const packed = packShapes(f === 1 ? shapes : scaleShapesForSupersample(shapes, f));
+    const packed = packShapes(f === 1 ? resolved : scaleResolvedForSupersample(resolved, f));
 
     const hiHeight = new Float32Array(hiW * hiH);
     const hiMask = new Float32Array(hiW * hiH);

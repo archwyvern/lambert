@@ -158,11 +158,40 @@ def build_plateau() -> bpy.types.Object:
     return obj
 
 
-def build_ridge() -> bpy.types.Object:
-    # rounded bar: a polyline spine with a round cross-section
+def build_capsule() -> bpy.types.Object:
+    # rounded bar: a cylinder body with hemispherical caps, laid horizontal
+    r = 0.55
+    body_len = 1.5  # body + two r-caps = 2.6 total, matching the cylinder
+    bpy.ops.mesh.primitive_cylinder_add(vertices=48, radius=r, depth=body_len, location=(0.0, 0.0, 0.0))
+    body = smooth(bpy.context.active_object)
+    parts = [body]
+    for zc in (body_len / 2, -body_len / 2):
+        bpy.ops.mesh.primitive_uv_sphere_add(segments=32, ring_count=16, radius=r, location=(0.0, 0.0, zc))
+        parts.append(smooth(bpy.context.active_object))
+    bpy.ops.object.select_all(action="DESELECT")
+    for p in parts:
+        p.select_set(True)
+    bpy.context.view_layer.objects.active = body
+    bpy.ops.object.join()
+    body.rotation_euler = (0.0, math.radians(90), math.radians(20))
+    body.location.z = 0.32
+    return body
+
+
+def build_cylinder() -> bpy.types.Object:
+    # flat-ended bar: a plain cylinder laid horizontal (square caps)
     obj = cyl(0.55, 2.6, z=0.32)
     obj.rotation_euler = (0.0, math.radians(90), math.radians(20))
     return obj
+
+
+def build_frustum() -> bpy.types.Object:
+    # tapered bar: a truncated cone laid horizontal (wide end -> narrow end), flat caps
+    bpy.ops.mesh.primitive_cone_add(vertices=48, radius1=0.62, radius2=0.3, depth=2.6)
+    o = bpy.context.active_object
+    o.rotation_euler = (0.0, math.radians(90), math.radians(20))
+    o.location.z = 0.32
+    return smooth(o)
 
 
 def build_groove() -> bpy.types.Object:
@@ -220,7 +249,9 @@ BUILDERS = {
     "torus": build_torus,
     "plateau": build_plateau,
     # Profiles
-    "ridge": build_ridge,
+    "capsule": build_capsule,
+    "cylinder": build_cylinder,
+    "frustum": build_frustum,
     "groove": build_groove,
     "wedge": build_wedge,
     "fillet": build_fillet,
