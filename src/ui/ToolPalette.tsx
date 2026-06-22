@@ -6,10 +6,8 @@ import {
   CursorRegular,
   PenRegular,
 } from "@fluentui/react-icons";
-import { cx } from "./kit";
+import { IconButton } from "@carapace/shell";
 import type { ToolMode } from "./tools";
-
-const ICON = { fontSize: 16 } as const;
 
 /** The canvas tools as a 2-column vertical palette, docked to the right of the left sidebar.
  *  Keyboard shortcuts (QWERT) are owned by App's keydown handler, not these buttons. */
@@ -28,19 +26,16 @@ export function ToolPalette(props: { tool: ToolMode; setTool: (t: ToolMode) => v
     <div className="shrink-0 bg-bg p-2">
       <div className="grid grid-cols-2 gap-1">
         {TOOLS.map(({ id, key, label, Icon }) => (
-          <button
+          <IconButton
             key={id}
+            size="md"
+            className="h-[30px] w-[30px]"
+            active={tool === id}
+            label={label}
             title={`${label} (${key})`}
+            icon={<Icon />}
             onClick={() => setTool(id)}
-            className={cx(
-              "flex h-[30px] w-[30px] items-center justify-center border",
-              tool === id
-                ? "border-accent bg-list-active text-fg"
-                : "border-border text-fg-mid hover:bg-hover hover:text-fg",
-            )}
-          >
-            <Icon style={ICON} />
-          </button>
+          />
         ))}
       </div>
     </div>

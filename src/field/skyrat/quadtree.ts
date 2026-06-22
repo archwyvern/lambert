@@ -22,7 +22,7 @@ export class QuadTree {
 
   constructor(points: Point[], minX: number, minY: number, maxX: number, maxY: number) {
     const sorted = points.slice().sort((a, b) => (a.y !== b.y ? a.y - b.y : a.x - b.x));
-    this.root = sorted.length === 0 ? buildNode(sorted, minX, minY, maxX, maxY) : buildNode(sorted, minX, minY, maxX, maxY);
+    this.root = buildNode(sorted, minX, minY, maxX, maxY);
   }
 
   /** The closest edge point to (qx, qy); ties break to smaller y, then smaller x. */

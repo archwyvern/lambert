@@ -2,7 +2,12 @@ import { Vector2 } from "@carapace/primitives";
 import type { Transform2D } from "./transform";
 import { v2 } from "./vec";
 
-/** A 2x3 affine map from shape-local to world: world = (a*x + b*y + e, c*x + d*y + f). */
+/** A 2x3 affine map from shape-local to world: world = (a*x + b*y + e, c*x + d*y + f).
+ *
+ *  Deliberately a plain POJO, not carapace `Transform2D`: this is packed field-by-field into the GPU
+ *  shape record (gpu/pack.ts) and applied in the per-pixel CPU eval hot loop (evalCpu.ts), so an
+ *  immutable class with accessor chains would allocate and slow the inner loop. `affineFromTRS` also
+ *  bakes a 3D TRS (z = elevation/tallness) that a flat 2D Transform2D has no slot for. */
 export interface Affine {
   a: number;
   b: number;

@@ -46,7 +46,7 @@ export function dragHandle(
 }
 
 /** A corner = a sharp point with NO tangents (manual mode, zero handles). */
-function isCornerAnchor(a: BezierAnchor): boolean {
+export function isCornerAnchor(a: BezierAnchor): boolean {
   return a.mode === "manual" && a.hIn.x === 0 && a.hIn.y === 0 && a.hOut.x === 0 && a.hOut.y === 0;
 }
 

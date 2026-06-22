@@ -11,16 +11,17 @@ import { isGroup, isShape } from "../field/types";
 import { insertVertex } from "../field/controlPoints";
 import { getShapeType } from "../field/registry";
 import { snapHalf } from "../field/snap";
-import { snapCanvasPoint } from "./snapPoint";
+import { editSnap } from "./snapPoint";
 import { fromLocal, toLocal } from "../field/transform";
 import type { ShapeInstance } from "../field/types";
 import { normalSigns, type NormalDirs } from "../document/schema";
 import { Vector2, Vector3 } from "@carapace/primitives";
+import { EmptyState } from "@carapace/shell";
 import { v2 } from "../field/vec";
 import { ContextMenu, type MenuEntry } from "./kit";
 import { Gizmos } from "./Gizmos";
 import { LightPad } from "./LightPad";
-import { axisScaleFromDrag, constrainAxis, pickShape, pointsInBox, rotationFromDrag, snapAngle } from "./picking";
+import { axisScaleFromDrag, constrainAxis, pickShape, pointsInBox, rotationFromDrag, ROTATE_SNAP, snapAngle } from "./picking";
 import { PreviewRenderer } from "./preview";
 import { RULER, Rulers } from "./Rulers";
 import { guide2D, type GuideContext } from "./keymap";
@@ -29,8 +30,6 @@ import type { Orbit } from "../field/gpu/preview3d";
 import { canvasToScreen, fitViewport, screenToCanvas, Viewport, zoomAt } from "./viewport";
 import type { Placing, ToolMode } from "./tools";
 import type { ViewState } from "./App";
-
-const ROTATE_SNAP = Math.PI / 12; // 15 deg, godot default rotation snap step
 
 type Drag =
   | { kind: "pan"; lastX: number; lastY: number }
@@ -150,8 +149,7 @@ export function CanvasView(props: {
   };
 
   // grid + guide snap for any world point being edited (no-op when both toggles are off)
-  const snapPt = (p: Vector2): Vector2 =>
-    snapCanvasPoint(p, { grid: snap, guides: doc.canvas.snapToGuides, guideLines: doc.canvas.guides, zoom: viewport.zoom });
+  const snapPt = editSnap(doc.canvas, snap, viewport.zoom);
 
   // host-area screen point -> { docX, docY, over } where `over` is "cursor is inside the canvas area"
   const hostPoint = (e: PointerEvent): { docX: number; docY: number; over: boolean } => {
@@ -448,6 +446,10 @@ export function CanvasView(props: {
       // only the pointer picks by clicking; other tools select via the layer panel
       const hit = pickShape(flattenLayers(doc.layers), p);
       if (hit) {
+        // pressing the body (anything that isn't a vertex dot — those stop propagation and never
+        // reach here) drops the vertex selection. Clicking a DIFFERENT shape already clears it via
+        // the selectedId effect; this also covers re-pressing the already-selected shape's body.
+        setSelVerts([]);
         if (e.shiftKey) {
           store.toggleSelect(hit.id); // add/remove from the multi-selection; no drag
           return;
@@ -596,10 +598,9 @@ export function CanvasView(props: {
   const endDrag = (): void => {
     const drag = dragRef.current;
     if (drag?.kind === "marquee" && !drag.moved && !drag.additive) {
-      // plain click (no box): vertex tool just clears the vertex selection (keeps the shape);
-      // select tool deselects the shape entirely
+      // plain empty-canvas click clears the vertex selection but KEEPS the shape selected;
+      // deselecting the whole shape is ESC's job (App keymap), not an empty click
       setSelVerts([]);
-      if (tool !== "vertex") store.select(null);
     }
     setMarquee(null);
     dragRef.current = null;
@@ -705,16 +706,20 @@ export function CanvasView(props: {
       >
         <canvas ref={canvasRef} className="h-full w-full" />
       {gpuError ? (
-        <div className="absolute inset-0 grid place-items-center bg-bg">GPU unavailable: {gpuError}</div>
-      ) : null}
-      {!diffuseBytes && !gpuError ? (
-        <div className="absolute inset-0 grid place-items-center">
-          <div className="border border-border bg-surface px-6 py-4 text-center">
-            <div className="text-md font-semibold text-accent">No document</div>
-            <p className="mt-1 text-sm text-fg-mid">
-              Open a diffuse image (or an existing project) from the File menu to start.
-            </p>
-          </div>
+        <div className="absolute inset-0 bg-bg">
+          <EmptyState status="error" title="GPU unavailable" message={gpuError} />
+        </div>
+      ) : !ready ? (
+        <div className="absolute inset-0 bg-bg">
+          <EmptyState status="loading" message="Initializing renderer…" />
+        </div>
+      ) : !diffuseBytes ? (
+        <div className="absolute inset-0">
+          <EmptyState
+            status="info"
+            title="No document"
+            message="Open a diffuse image (or an existing project) from the File menu to start."
+          />
         </div>
       ) : null}
       {/* guides: teal full-extent lines; when unlocked, a fat invisible hit-line drags / right-clicks each */}

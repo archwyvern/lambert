@@ -26,6 +26,9 @@ export function rotationFromDrag(pivot: Vector2, startPoint: Vector2, currentPoi
   return startRotation + (a1 - a0);
 }
 
+/** 15deg — godot's default rotation snap step (held Shift while rotating a gizmo). */
+export const ROTATE_SNAP = Math.PI / 12;
+
 /** Snap an angle to step increments (godot snap_angle, absolute flavor). */
 export function snapAngle(rad: number, stepRad: number): number {
   return Math.round(rad / stepRad) * stepRad;
@@ -103,6 +106,18 @@ export function groupScaleFactor(pivot: Vector2, startLocal: Vector2, currentLoc
 /** Scale points about a pivot by a per-axis factor (group vertex scale). */
 export function scalePointsAbout(pts: Vector2[], pivot: Vector2, factor: Vector2): Vector2[] {
   return pts.map((p) => v2(pivot.x + (p.x - pivot.x) * factor.x, pivot.y + (p.y - pivot.y) * factor.y));
+}
+
+/** Shift-click selection toggle: drop i if already selected, else add it. */
+export function toggleIndex(selected: number[], i: number): number[] {
+  return selected.includes(i) ? selected.filter((x) => x !== i) : [...selected, i];
+}
+
+/** Plain-click grab group: the indices a drag should act on — the whole selection if i is already in
+ *  it (so the drag moves all), else just [i] (which the caller also makes the new selection). Shared
+ *  by control-point vertices, mask anchors, and cable anchors. */
+export function grabGroup(selected: number[], i: number): number[] {
+  return selected.includes(i) ? selected : [i];
 }
 
 /** Indices of canvas-space points inside the axis-aligned box between a and b (marquee). */

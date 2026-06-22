@@ -1,13 +1,13 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import type { DocumentStore } from "../document/store";
 import { removeShapeVertices, updateShape } from "../document/docOps";
-import { findNode, findParentId, nodeWorldAffine } from "../document/layerOps";
+import { findNode, nodeFrames } from "../document/layerOps";
 import type { LambertDoc } from "../document/schema";
-import { affineApply, affineCompose, affineFromTRS, affineIdentity, affineInvert } from "../field/affine";
+import { affineApply } from "../field/affine";
 
 import { frustumStrip, insertVertex } from "../field/controlPoints";
 import { BezierAnchor, bezierSpine, nearestOnSpine, resolveHandles, splitSegment } from "../field/bezier";
-import { dragHandle, movePoint, toggleMode } from "../field/bezierEdit";
+import { dragHandle, isCornerAnchor as isCorner, movePoint, toggleMode } from "../field/bezierEdit";
 import { CABLE_SUB } from "../field/shapes/cable";
 import {
   alignVertToPlane,
@@ -20,23 +20,45 @@ import {
 } from "../field/meshOps";
 import { getShapeType } from "../field/registry";
 import { alignedToAxis } from "../field/snap";
-import { snapCanvasPoint } from "./snapPoint";
+import { editSnap } from "./snapPoint";
 import { fromLocal } from "../field/transform";
 import { isGroup, isShape, type ShapeInstance } from "../field/types";
 import { GroupGizmo } from "./GroupGizmo";
 import { MaskGizmo } from "./MaskGizmo";
-import { localBounds } from "./shapeBounds";
+import { localBounds, paddedCorners } from "./shapeBounds";
 import { Vector2, Vector3 } from "@carapace/primitives";
 import { v2 } from "../field/vec";
 import { ContextMenu, MenuEntry } from "./kit";
-import { axisScaleFromDrag, groupScaleFactor, pointsBounds, rotationFromDrag, scalePointsAbout, snapAngle } from "./picking";
+import { axisScaleFromDrag, grabGroup, groupScaleFactor, pointsBounds, rotationFromDrag, ROTATE_SNAP, scalePointsAbout, snapAngle, toggleIndex } from "./picking";
 import type { Placing, ToolMode } from "./tools";
-import { canvasToScreen, screenToCanvas, Viewport } from "./viewport";
-
-const ROTATE_SNAP = Math.PI / 12; // 15deg; Shift snaps rotation to this step
+import { canvasToScreen, Viewport } from "./viewport";
+import { eventToCanvas } from "./canvasCoords";
+import { usePointerDrag } from "./usePointerDrag";
+import { AnchorHandles, CornerHandles, GizmoHalo, RotateKnobs } from "./gizmoChrome";
 
 /** Forward of toLocal: scale THEN rotate, then translate (pinned by picking.test.ts). */
 const localToCanvas = (s: ShapeInstance, cp: Vector2): Vector2 => fromLocal(s.transform, cp);
+
+/** The shape transform-handle drag snapshot (corner/edge scale + rotate baseline). */
+interface DragSnap {
+  start: Vector2;
+  rotation: number;
+  scale: Vector3;
+  pos: Vector3;
+  /** Fixed point the scale pivots about (the opposite corner/edge, or centre with Ctrl), local + canvas. */
+  anchorLocal: Vector2;
+  anchorCanvas: Vector2;
+  /** Modifier state at the last (re)baseline — a toggle mid-drag re-baselines so it takes effect live. */
+  shift: boolean;
+  ctrl: boolean;
+}
+
+/** The control-point vertex multi-drag snapshot: the selected indices + their start positions. */
+interface VertSnap {
+  startCanvas: Vector2;
+  starts: { i: number; p: Vector2 }[];
+  pivot: Vector2;
+}
 
 const PAD = 6; // local-px breathing room around the footprint
 
@@ -57,28 +79,16 @@ export function Gizmos(props: {
 }): React.JSX.Element | null {
   const { doc, selectedId, viewport, store, tool, selVerts, setSelVerts, setPlacing, snap } = props;
   // grid + guide snap for any world point being edited (no-op when both toggles are off)
-  const snapPt = (p: Vector2): Vector2 =>
-    snapCanvasPoint(p, { grid: snap, guides: doc.canvas.snapToGuides, guideLines: doc.canvas.guides, zoom: viewport.zoom });
+  const snapPt = editSnap(doc.canvas, snap, viewport.zoom);
   const selNode = selectedId ? findNode(doc.layers, selectedId) : null;
   const unlocked = !selNode?.locked;
   const handles = tool === "select" && unlocked; // shape transform handles (corners/edges)
   const vertHandles = (tool === "select" || tool === "vertex") && unlocked; // vertex dots + group
-  const bezierDrag = useRef<{ kind: "point" | "in" | "out"; i: number } | null>(null); // cable pen edit
-  const dragState = useRef<{
-    start: Vector2;
-    rotation: number;
-    scale: Vector3;
-    pos: Vector3;
-    /** Fixed point the scale pivots about (the opposite corner/edge, or centre with Ctrl), local + canvas. */
-    anchorLocal: Vector2;
-    anchorCanvas: Vector2;
-    /** Modifier state at the last (re)baseline — a toggle mid-drag re-baselines so it takes effect live. */
-    shift: boolean;
-    ctrl: boolean;
-  } | null>(null);
-  const rotDrag = useRef<{ start: Vector2; startRotation: number; pivot: Vector2 } | null>(null);
+  const bezierDrag = usePointerDrag<{ kind: "point" | "in" | "out"; i: number }>(); // cable pen edit
+  const dragState = usePointerDrag<DragSnap>();
+  const rotDrag = usePointerDrag<{ start: Vector2; startRotation: number; pivot: Vector2 }>();
   // multi-vertex selection lives in CanvasView; this is the move/scale drag state
-  const vertDrag = useRef<{ startCanvas: Vector2; starts: { i: number; p: Vector2 }[]; pivot: Vector2 } | null>(null);
+  const vertDrag = usePointerDrag<VertSnap>();
   // true while a vertex is held/dragged — gates the octant alignment guide on the edge lines
   const [draggingVert, setDraggingVert] = useState(false);
   // right-click context menu: `verts` = the set Connect/Merge/Delete act on; `zalign` = align a 4th
@@ -110,11 +120,7 @@ export function Gizmos(props: {
   // shape is nested in groups. parentAffine = the shape's parent frame (local TRS edits live in it);
   // worldAffine = full local->world. For a top-level shape parentAffine is identity and worldAffine
   // equals fromLocal(shape.transform), so all of this reduces to the original (unchanged) behaviour.
-  const parentId = findParentId(doc.layers, shape.id) ?? null;
-  const parentAffine = parentId ? (nodeWorldAffine(doc.layers, parentId) ?? affineIdentity()) : affineIdentity();
-  const invParent = affineInvert(parentAffine);
-  const worldAffine = affineCompose(parentAffine, affineFromTRS(shape.transform));
-  const invWorld = affineInvert(worldAffine);
+  const { parentAffine, invParent, worldAffine, invWorld } = nodeFrames(doc.layers, shape.id);
   /** shape-local point -> screen px (through every ancestor group). */
   const toScreen = (localPt: Vector2): Vector2 => canvasToScreen(viewport, affineApply(worldAffine, localPt));
   /** world/canvas point -> shape-local (inverse of the full chain). */
@@ -122,77 +128,53 @@ export function Gizmos(props: {
 
   const bounds = localBounds(shape);
   const pad = PAD / Math.max(0.0001, (Math.abs(shape.transform.scale.x) + Math.abs(shape.transform.scale.y)) / 2);
-  const cornersLocal = [
-    v2(bounds.min.x - pad, bounds.min.y - pad),
-    v2(bounds.max.x + pad, bounds.min.y - pad),
-    v2(bounds.max.x + pad, bounds.max.y + pad),
-    v2(bounds.min.x - pad, bounds.max.y + pad),
-  ];
+  const cornersLocal = paddedCorners(bounds, pad);
   const corners = cornersLocal.map((c) => toScreen(c));
   // footprint corners (no pad): stable during a scale drag, used as scale anchors
-  const boundsCorners = [
-    v2(bounds.min.x, bounds.min.y),
-    v2(bounds.max.x, bounds.min.y),
-    v2(bounds.max.x, bounds.max.y),
-    v2(bounds.min.x, bounds.max.y),
-  ];
+  const boundsCorners = paddedCorners(bounds, 0);
   const boundsCenter = v2((bounds.min.x + bounds.max.x) / 2, (bounds.min.y + bounds.max.y) / 2);
 
-  const eventCanvasPoint = (e: React.MouseEvent): Vector2 => {
-    const svg = (e.currentTarget as SVGGraphicsElement).ownerSVGElement!;
-    const rect = svg.getBoundingClientRect();
-    return screenToCanvas(viewport, v2(e.clientX - rect.left, e.clientY - rect.top));
-  };
+  const eventCanvasPoint = (e: React.MouseEvent): Vector2 => eventToCanvas(e, viewport);
   // the transform handles edit the shape's LOCAL TRS, which lives in the PARENT frame — so their drag
   // math runs in parent-local coords. (identity parent => same as the world event point.)
   const eventParent = (e: React.MouseEvent): Vector2 => affineApply(invParent, eventCanvasPoint(e));
 
   // anchorFor picks the pinned point: normally the opposite corner/edge, but the centre when Ctrl
   // is held (scale-from-centre). Re-evaluated when a modifier toggles mid-drag (see onPointerMove).
-  const begin = (anchorFor: (e: React.PointerEvent) => Vector2) => (e: React.PointerEvent): void => {
-    e.stopPropagation();
-    e.currentTarget.setPointerCapture(e.pointerId);
-    const anchorLocal = anchorFor(e);
-    dragState.current = {
-      start: eventParent(e),
-      rotation: shape.transform.rotation,
-      scale: shape.transform.scale,
-      pos: shape.transform.pos,
-      anchorLocal,
-      anchorCanvas: localToCanvas(shape, anchorLocal),
-      shift: e.shiftKey,
-      ctrl: e.ctrlKey,
-    };
-  };
-
-  const handleProps = (anchorFor: (e: React.PointerEvent) => Vector2, apply: (p: Vector2, e: React.PointerEvent) => void) => ({
-    onPointerDown: begin(anchorFor),
-    onPointerMove: (e: React.PointerEvent) => {
-      const ds = dragState.current;
-      if (!ds) return;
-      // Shift (uniform) / Ctrl (from-centre) toggled mid-drag: re-baseline from the CURRENT state so
-      // the new mode takes effect immediately and seamlessly (no jump), not just from the next drag.
-      if (e.shiftKey !== ds.shift || e.ctrlKey !== ds.ctrl) {
-        ds.shift = e.shiftKey;
-        ds.ctrl = e.ctrlKey;
-        ds.start = eventParent(e);
-        ds.scale = shape.transform.scale;
-        ds.pos = shape.transform.pos;
-        ds.anchorLocal = anchorFor(e);
-        ds.anchorCanvas = localToCanvas(shape, ds.anchorLocal);
-      }
-      apply(eventParent(e), e);
-    },
-    onPointerUp: (e: React.PointerEvent) => {
-      e.stopPropagation();
-      dragState.current = null;
-      store.endGesture();
-    },
-  });
+  const handleProps = (anchorFor: (e: React.PointerEvent) => Vector2, apply: (p: Vector2, e: React.PointerEvent, ds: DragSnap) => void) =>
+    dragState({
+      onStart: (e) => {
+        const anchorLocal = anchorFor(e);
+        return {
+          start: eventParent(e),
+          rotation: shape.transform.rotation,
+          scale: shape.transform.scale,
+          pos: shape.transform.pos,
+          anchorLocal,
+          anchorCanvas: localToCanvas(shape, anchorLocal),
+          shift: e.shiftKey,
+          ctrl: e.ctrlKey,
+        };
+      },
+      onMove: (e, ds) => {
+        // Shift (uniform) / Ctrl (from-centre) toggled mid-drag: re-baseline from the CURRENT state so
+        // the new mode takes effect immediately and seamlessly (no jump), not just from the next drag.
+        if (e.shiftKey !== ds.shift || e.ctrlKey !== ds.ctrl) {
+          ds.shift = e.shiftKey;
+          ds.ctrl = e.ctrlKey;
+          ds.start = eventParent(e);
+          ds.scale = shape.transform.scale;
+          ds.pos = shape.transform.pos;
+          ds.anchorLocal = anchorFor(e);
+          ds.anchorCanvas = localToCanvas(shape, ds.anchorLocal);
+        }
+        apply(eventParent(e), e, ds);
+      },
+      onEnd: () => store.endGesture(),
+    });
 
   /** Apply a new scale while pinning the drag anchor (opposite corner/edge) in place. */
-  const scaleAround = (sc: Vector3): void => {
-    const ds = dragState.current!;
+  const scaleAround = (sc: Vector3, ds: DragSnap): void => {
     const c = Math.cos(ds.rotation);
     const s = Math.sin(ds.rotation);
     const rx = ds.anchorLocal.x * sc.x;
@@ -209,10 +191,7 @@ export function Gizmos(props: {
   const cornerScale = (i: number) =>
     handleProps(
       (e) => (e.ctrlKey ? boundsCenter : boundsCorners[(i + 2) % 4]!),
-      (p, e) => {
-        const ds = dragState.current!;
-        scaleAround(axisScaleFromDrag(ds.anchorCanvas, ds.rotation, ds.start, p, ds.scale, e.shiftKey));
-      },
+      (p, e, ds) => scaleAround(axisScaleFromDrag(ds.anchorCanvas, ds.rotation, ds.start, p, ds.scale, e.shiftKey), ds),
     );
 
   /** Edge drag: scales the perpendicular axis from the opposite edge (Shift = uniform, Ctrl = from centre). */
@@ -222,45 +201,34 @@ export function Gizmos(props: {
     const oppositeMid = v2((a.x + b.x) / 2, (a.y + b.y) / 2);
     return handleProps(
       (e) => (e.ctrlKey ? boundsCenter : oppositeMid),
-      (p, e) => {
-        const ds = dragState.current!;
+      (p, e, ds) => {
         const sc = axisScaleFromDrag(ds.anchorCanvas, ds.rotation, ds.start, p, ds.scale, e.shiftKey);
-        scaleAround(e.shiftKey ? sc : axis === "x" ? ds.scale.withX(sc.x) : ds.scale.withY(sc.y));
+        scaleAround(e.shiftKey ? sc : axis === "x" ? ds.scale.withX(sc.x) : ds.scale.withY(sc.y), ds);
       },
     );
   };
 
   /** Rotate handle: drag an arm extending from an edge to spin the shape about its pivot (Shift = 15°). */
-  const rotateHandle = () => ({
-    onPointerDown: (e: React.PointerEvent) => {
-      e.stopPropagation();
-      e.currentTarget.setPointerCapture(e.pointerId);
-      rotDrag.current = {
+  const rotateHandle = () =>
+    rotDrag({
+      onStart: (e) => ({
         start: eventParent(e),
         startRotation: shape.transform.rotation,
         pivot: v2(shape.transform.pos.x, shape.transform.pos.y),
-      };
-    },
-    onPointerMove: (e: React.PointerEvent) => {
-      const rd = rotDrag.current;
-      if (!rd) return;
-      let rot = rotationFromDrag(rd.pivot, rd.start, eventParent(e), rd.startRotation);
-      if (e.shiftKey) rot = snapAngle(rot, ROTATE_SNAP);
-      store.update((d) => updateShape(d, shape.id, (s) => ({ ...s, transform: { ...s.transform, rotation: rot } })), {
-        coalesce: `rot:${shape.id}`,
-      });
-    },
-    onPointerUp: (e: React.PointerEvent) => {
-      e.stopPropagation();
-      rotDrag.current = null;
-      store.endGesture();
-    },
-  });
+      }),
+      onMove: (e, rd) => {
+        let rot = rotationFromDrag(rd.pivot, rd.start, eventParent(e), rd.startRotation);
+        if (e.shiftKey) rot = snapAngle(rot, ROTATE_SNAP);
+        store.update((d) => updateShape(d, shape.id, (s) => ({ ...s, transform: { ...s.transform, rotation: rot } })), {
+          coalesce: `rot:${shape.id}`,
+        });
+      },
+      onEnd: () => store.endGesture(),
+    });
 
   // commit a transform of the selected control points (move or scale), keyed by their start
   // positions captured at drag-start so repeated moves don't compound
-  const applyVertDrag = (transformLocal: (start: Vector2) => Vector2): void => {
-    const d = vertDrag.current!;
+  const applyVertDrag = (d: VertSnap, transformLocal: (start: Vector2) => Vector2): void => {
     const byIndex = new Map(d.starts.map((s) => [s.i, s.p]));
     // snap the vertex's CANVAS position (not its local coord), so it lands on the grid / guides
     // the user sees regardless of the shape's scale/rotation
@@ -278,64 +246,56 @@ export function Gizmos(props: {
     );
   };
 
-  const beginVertDrag = (e: React.PointerEvent, indices: number[], pivot: Vector2): void => {
-    e.stopPropagation();
-    e.currentTarget.setPointerCapture(e.pointerId);
-    vertDrag.current = {
-      startCanvas: eventCanvasPoint(e),
-      starts: indices.map((i) => ({ i, p: shape.controlPoints[i]! })),
-      pivot,
-    };
-    setDraggingVert(true);
-  };
-
-  const vertEndProps = {
-    onPointerUp: (e: React.PointerEvent) => {
-      e.stopPropagation();
-      vertDrag.current = null;
-      setDraggingVert(false);
-      store.endGesture();
-    },
-  };
+  const vertSnap = (e: React.PointerEvent, indices: number[], pivot: Vector2): VertSnap => ({
+    startCanvas: eventCanvasPoint(e),
+    starts: indices.map((i) => ({ i, p: shape.controlPoints[i]! })),
+    pivot,
+  });
 
   // a vertex dot: shift-click toggles it in the selection; plain drag moves the selection
   // (selecting just this one first if it wasn't already selected)
-  const vertexHandle = (i: number) => ({
-    ...vertEndProps,
-    onPointerDown: (e: React.PointerEvent) => {
-      if (e.button !== 0) return; // right-click handled by onContextMenu
-      if (e.shiftKey) {
-        e.stopPropagation();
-        setSelVerts((s) => (s.includes(i) ? s.filter((x) => x !== i) : [...s, i]));
-        return;
-      }
-      const group = selVerts.includes(i) ? selVerts : [i];
-      if (!selVerts.includes(i)) setSelVerts([i]);
-      beginVertDrag(e, group, v2(0, 0));
-    },
-    onPointerMove: (e: React.PointerEvent) => {
-      if (!vertDrag.current) return;
-      const d = w2l(eventCanvasPoint(e));
-      const s0 = w2l(vertDrag.current.startCanvas);
-      const dl = v2(d.x - s0.x, d.y - s0.y);
-      applyVertDrag((start) => v2(start.x + dl.x, start.y + dl.y));
-    },
-  });
+  const vertexHandle = (i: number) =>
+    vertDrag({
+      onStart: (e) => {
+        if (e.button !== 0) return null; // right-click handled by onContextMenu
+        if (e.shiftKey) {
+          e.stopPropagation();
+          setSelVerts((s) => toggleIndex(s, i));
+          return null;
+        }
+        const group = grabGroup(selVerts, i);
+        if (!selVerts.includes(i)) setSelVerts([i]);
+        setDraggingVert(true);
+        return vertSnap(e, group, v2(0, 0));
+      },
+      onMove: (e, d) => {
+        const cur = w2l(eventCanvasPoint(e));
+        const s0 = w2l(d.startCanvas);
+        const dl = v2(cur.x - s0.x, cur.y - s0.y);
+        applyVertDrag(d, (start) => v2(start.x + dl.x, start.y + dl.y));
+      },
+      onEnd: () => {
+        setDraggingVert(false);
+        store.endGesture();
+      },
+    });
 
   // group-scale handle on the selection's bbox corner: scales selected verts about centroid
-  const groupScaleHandle = (pivot: Vector2) => ({
-    ...vertEndProps,
-    onPointerDown: (e: React.PointerEvent) => beginVertDrag(e, selVerts, pivot),
-    onPointerMove: (e: React.PointerEvent) => {
-      if (!vertDrag.current) return;
-      const factor = groupScaleFactor(
-        vertDrag.current.pivot,
-        w2l(vertDrag.current.startCanvas),
-        w2l(eventCanvasPoint(e)),
-      );
-      applyVertDrag((start) => scalePointsAbout([start], vertDrag.current!.pivot, factor)[0]!);
-    },
-  });
+  const groupScaleHandle = (pivot: Vector2) =>
+    vertDrag({
+      onStart: (e) => {
+        setDraggingVert(true);
+        return vertSnap(e, selVerts, pivot);
+      },
+      onMove: (e, d) => {
+        const factor = groupScaleFactor(d.pivot, w2l(d.startCanvas), w2l(eventCanvasPoint(e)));
+        applyVertDrag(d, (start) => scalePointsAbout([start], d.pivot, factor)[0]!);
+      },
+      onEnd: () => {
+        setDraggingVert(false);
+        store.endGesture();
+      },
+    });
 
   // --- context-menu / edit operations ---
   // insert a vertex on edge (ia,ib) at parameter t. Mesh splits the edge (new tris); polygon/
@@ -411,7 +371,7 @@ export function Gizmos(props: {
         return;
       }
     }
-    const verts = selVerts.includes(i) ? selVerts : [i];
+    const verts = grabGroup(selVerts, i);
     if (!selVerts.includes(i)) setSelVerts(verts);
     setMenu({ x: e.clientX, y: e.clientY, verts, target: i, zalign: null, edge: null });
   };
@@ -504,39 +464,30 @@ export function Gizmos(props: {
     return items;
   };
   // drag handlers for a vertex point / its in / out tangent handle (mirror on plain drag, Alt breaks)
-  const bezierHandleProps = (kind: "point" | "in" | "out", i: number) => ({
-    onPointerDown: (e: React.PointerEvent) => {
-      if (e.button !== 0) return;
-      e.stopPropagation();
-      e.currentTarget.setPointerCapture(e.pointerId);
-      bezierDrag.current = { kind, i };
-    },
-    onPointerMove: (e: React.PointerEvent) => {
-      const drag = bezierDrag.current;
-      if (!drag || !shape.bezier) return;
-      const canvasPt = eventCanvasPoint(e);
-      if (drag.kind === "point") {
-        // snap the anchor's CANVAS position (grid + guides), like control-point vertices
-        const local = w2l(snapPt(canvasPt));
-        commitBezier(movePoint(shape.bezier, drag.i, local, e.altKey), `bez:${shape.id}`);
-        return;
-      }
-      // tangent drag: symmetric per the anchor's sym flag, Alt inverts it; Shift snaps the angle to 15deg.
-      // Bake the dragged anchor's RESOLVED tangents first (smooth->manual) so an independent drag keeps
-      // the OTHER tangent at its auto-derived value instead of the stored zero (which would vanish).
-      const local = w2l(canvasPt);
-      const r = resolveHandles(shape.bezier)[drag.i]!;
-      const based = shape.bezier.map((a, idx) => (idx === drag.i ? { ...a, hIn: r.hIn, hOut: r.hOut, mode: "manual" as const } : a));
-      const sym = shape.bezier[drag.i]!.sym !== false;
-      const next = dragHandle(based, drag.i, drag.kind, local, sym !== e.altKey, e.shiftKey ? ROTATE_SNAP : undefined);
-      commitBezier(next, `bez:${shape.id}`);
-    },
-    onPointerUp: (e: React.PointerEvent) => {
-      e.stopPropagation();
-      bezierDrag.current = null;
-      store.endGesture();
-    },
-  });
+  const bezierHandleProps = (kind: "point" | "in" | "out", i: number) =>
+    bezierDrag({
+      onStart: (e) => (e.button !== 0 ? null : { kind, i }),
+      onMove: (e, drag) => {
+        if (!shape.bezier) return;
+        const canvasPt = eventCanvasPoint(e);
+        if (drag.kind === "point") {
+          // snap the anchor's CANVAS position (grid + guides), like control-point vertices
+          const local = w2l(snapPt(canvasPt));
+          commitBezier(movePoint(shape.bezier, drag.i, local, e.altKey), `bez:${shape.id}`);
+          return;
+        }
+        // tangent drag: symmetric per the anchor's sym flag, Alt inverts it; Shift snaps the angle to 15deg.
+        // Bake the dragged anchor's RESOLVED tangents first (smooth->manual) so an independent drag keeps
+        // the OTHER tangent at its auto-derived value instead of the stored zero (which would vanish).
+        const local = w2l(canvasPt);
+        const r = resolveHandles(shape.bezier)[drag.i]!;
+        const based = shape.bezier.map((a, idx) => (idx === drag.i ? { ...a, hIn: r.hIn, hOut: r.hOut, mode: "manual" as const } : a));
+        const sym = shape.bezier[drag.i]!.sym !== false;
+        const next = dragHandle(based, drag.i, drag.kind, local, sym !== e.altKey, e.shiftKey ? ROTATE_SNAP : undefined);
+        commitBezier(next, `bez:${shape.id}`);
+      },
+      onEnd: () => store.endGesture(),
+    });
   // click on the curve inserts an anchor WITHOUT changing the curve (de Casteljau split on the
   // resolved path). The three touched anchors are pinned manual so resolveHandles won't re-smooth
   // them and undo the split. The new anchor is selected so Delete/arrows act on it.
@@ -555,19 +506,13 @@ export function Gizmos(props: {
   };
   const bezScreen = (local: Vector2): Vector2 => toScreen(local);
 
-  // a corner = manual anchor with zero-length handles: it has no tangents, so tangent-symmetry verbs
-  // are meaningless for it (a smooth anchor DOES have meaningful sym — its auto-tangent gets dragged).
-  const isCorner = (a: BezierAnchor): boolean =>
-    a.mode === "manual" && a.hIn.x === 0 && a.hIn.y === 0 && a.hOut.x === 0 && a.hOut.y === 0;
 
   return (
     <>
       <svg className="pointer-events-none absolute inset-0 h-full w-full">
       <defs>
         {/* dark halo so handles survive white height maps and saturated normal maps */}
-        <filter id="gizmo-halo" x="-50%" y="-50%" width="200%" height="200%">
-          <feDropShadow dx="0" dy="0" stdDeviation="1.2" floodColor="#000000" floodOpacity="0.9" />
-        </filter>
+        <GizmoHalo id="gizmo-halo" />
       </defs>
       <g filter="url(#gizmo-halo)">
       {/* cable Bézier pen: clickable curve (insert), tangent stalks, vertex + handle dots */}
@@ -584,77 +529,37 @@ export function Gizmos(props: {
               </>
             );
           })()}
-          {resolveHandles(shape.bezier!).map((a, i) => {
-            const pS = bezScreen(a.p);
-            const hasOut = a.hOut.x !== 0 || a.hOut.y !== 0;
-            const hasIn = a.hIn.x !== 0 || a.hIn.y !== 0;
-            const outS = bezScreen(v2(a.p.x + a.hOut.x, a.p.y + a.hOut.y));
-            const inS = bezScreen(v2(a.p.x + a.hIn.x, a.p.y + a.hIn.y));
-            return (
-              <g key={`bz-${i}`}>
-                {hasOut ? <line x1={pS.x} y1={pS.y} x2={outS.x} y2={outS.y} stroke="var(--color-accent)" strokeWidth={1} strokeOpacity={0.6} /> : null}
-                {hasIn ? <line x1={pS.x} y1={pS.y} x2={inS.x} y2={inS.y} stroke="var(--color-accent)" strokeWidth={1} strokeOpacity={0.6} /> : null}
-                {hasOut ? (
-                  <g {...bezierHandleProps("out", i)} style={{ cursor: "move" }}>
-                    <circle cx={outS.x} cy={outS.y} r={11} fill="transparent" style={{ pointerEvents: "auto" }} />
-                    <circle cx={outS.x} cy={outS.y} r={4} fill="#191a1b" stroke="var(--color-accent)" strokeWidth={1.5} style={{ pointerEvents: "none" }} />
-                  </g>
-                ) : null}
-                {hasIn ? (
-                  <g {...bezierHandleProps("in", i)} style={{ cursor: "move" }}>
-                    <circle cx={inS.x} cy={inS.y} r={11} fill="transparent" style={{ pointerEvents: "auto" }} />
-                    <circle cx={inS.x} cy={inS.y} r={4} fill="#191a1b" stroke="var(--color-accent)" strokeWidth={1.5} style={{ pointerEvents: "none" }} />
-                  </g>
-                ) : null}
-                {(() => {
-                  const pointProps = bezierHandleProps("point", i);
-                  const corner = isCorner(shape.bezier![i]!); // diamond only for a true corner (no tangents)
-                  const sel = selVerts.includes(i);
-                  const stroke = sel ? "#ffffff" : "#191a1b";
-                  return (
-                    <g
-                      style={{ cursor: "move" }}
-                      onPointerDown={(e) => {
-                        if (e.button === 0 && e.shiftKey) {
-                          // Shift-toggle into a multi-selection (so the multi-anchor Delete is reachable)
-                          e.stopPropagation();
-                          setSelVerts((s) => (s.includes(i) ? s.filter((x) => x !== i) : [...s, i]));
-                          return;
-                        }
-                        setSelVerts([i]); // select this anchor so Delete/arrows target it
-                        pointProps.onPointerDown(e);
-                      }}
-                      onPointerMove={pointProps.onPointerMove}
-                      onPointerUp={pointProps.onPointerUp}
-                      onContextMenu={(e) => {
-                        // right-click an anchor -> menu (Extend on ends, Make Smooth/Corner, Delete)
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setCableMenu({ x: e.clientX, y: e.clientY, i });
-                      }}
-                    >
-                      <circle cx={pS.x} cy={pS.y} r={12} fill="transparent" style={{ pointerEvents: "auto" }} />
-                      {corner ? (
-                        <rect
-                          x={pS.x - 5}
-                          y={pS.y - 5}
-                          width={10}
-                          height={10}
-                          transform={`rotate(45 ${pS.x} ${pS.y})`}
-                          fill="var(--color-accent)"
-                          stroke={stroke}
-                          strokeWidth={1.5}
-                          style={{ pointerEvents: "none" }}
-                        />
-                      ) : (
-                        <circle cx={pS.x} cy={pS.y} r={5} fill="var(--color-accent)" stroke={stroke} strokeWidth={1.5} style={{ pointerEvents: "none" }} />
-                      )}
-                    </g>
-                  );
-                })()}
-              </g>
-            );
-          })}
+          <AnchorHandles
+            resolved={resolveHandles(shape.bezier!)}
+            toScreen={bezScreen}
+            color="var(--color-accent)"
+            tangentProps={bezierHandleProps}
+            isCorner={(i) => isCorner(shape.bezier![i]!)}
+            isSelected={(i) => selVerts.includes(i)}
+            anchorProps={(i) => {
+              const pointProps = bezierHandleProps("point", i);
+              return {
+                onPointerDown: (e) => {
+                  if (e.button === 0 && e.shiftKey) {
+                    // Shift-toggle into a multi-selection (so the multi-anchor Delete is reachable)
+                    e.stopPropagation();
+                    setSelVerts((s) => toggleIndex(s, i));
+                    return;
+                  }
+                  setSelVerts([i]); // select this anchor so Delete/arrows target it
+                  pointProps.onPointerDown(e);
+                },
+                onPointerMove: pointProps.onPointerMove,
+                onPointerUp: pointProps.onPointerUp,
+                onContextMenu: (e) => {
+                  // right-click an anchor -> menu (Extend on ends, Make Smooth/Corner, Delete)
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setCableMenu({ x: e.clientX, y: e.clientY, i });
+                },
+              };
+            }}
+          />
         </>
       ) : null}
       {/* oriented bounding box: rotates and shears with the shape's transform */}
@@ -686,50 +591,9 @@ export function Gizmos(props: {
             );
           })
         : null}
-      {/* rotate handles: a short arm + knob extending outward from each edge midpoint */}
-      {handles
-        ? corners.map((c, i) => {
-            const n = corners[(i + 1) % 4]!;
-            const mid = v2((c.x + n.x) / 2, (c.y + n.y) / 2);
-            const cx = corners.reduce((a, k) => a + k.x, 0) / corners.length;
-            const cy = corners.reduce((a, k) => a + k.y, 0) / corners.length;
-            let ox = mid.x - cx;
-            let oy = mid.y - cy;
-            const ol = Math.hypot(ox, oy) || 1;
-            ox /= ol;
-            oy /= ol;
-            const knob = v2(mid.x + ox * 20, mid.y + oy * 20);
-            return (
-              <g key={`rot${i}`}>
-                <line x1={mid.x} y1={mid.y} x2={knob.x} y2={knob.y} stroke="var(--color-accent)" strokeWidth={1} strokeOpacity={0.6} />
-                <circle cx={knob.x} cy={knob.y} r={10} fill="transparent" className="pointer-events-auto cursor-rotate" {...rotateHandle()} />
-                <circle cx={knob.x} cy={knob.y} r={4} fill="#191a1b" stroke="var(--color-accent)" strokeWidth={1.5} className="pointer-events-none" />
-              </g>
-            );
-          })
-        : null}
-      {handles
-        ? corners.map((c, i) => {
-            /* scale: on the corner; per-axis, Shift locks uniform, Ctrl scales from centre.
-               Cursor diagonal follows the handle's direction off the box center (screen
-               space, so rotation is accounted for): dx*dy > 0 = NW/SE, < 0 = NE/SW. */
-            const cx = corners.reduce((a, k) => a + k.x, 0) / corners.length;
-            const cy = corners.reduce((a, k) => a + k.y, 0) / corners.length;
-            const nwse = (c.x - cx) * (c.y - cy) > 0;
-            return (
-              <rect
-                key={i}
-                x={c.x - 5}
-                y={c.y - 5}
-                width={10}
-                height={10}
-                fill="var(--color-accent)"
-                className={`pointer-events-auto ${nwse ? "cursor-nwse-resize" : "cursor-nesw-resize"}`}
-                {...cornerScale(i)}
-              />
-            );
-          })
-        : null}
+      {/* rotate knobs + corner scale handles (shared gizmo chrome) */}
+      {handles ? <RotateKnobs corners={corners} handlers={rotateHandle} /> : null}
+      {handles ? <CornerHandles corners={corners} handlers={cornerScale} /> : null}
       {/* group-scale frame: bbox of the selected vertices with corner handles (>=2 selected).
           Gated to control-point shapes (a cable has none — selVerts there are anchor indices) and
           filtered for stale indices: switching shapes re-renders with the new shape but the previous
@@ -742,13 +606,7 @@ export function Gizmos(props: {
             // pad the frame out from the dots (constant ~10 screen px) so corner handles
             // don't sit on top of the vertices and stay grabbable
             const gp = (PAD + 4) / Math.max(0.0001, (Math.abs(shape.transform.scale.x) + Math.abs(shape.transform.scale.y)) / 2);
-            const cl = [
-              v2(b.min.x - gp, b.min.y - gp),
-              v2(b.max.x + gp, b.min.y - gp),
-              v2(b.max.x + gp, b.max.y + gp),
-              v2(b.min.x - gp, b.max.y + gp),
-            ];
-            const cc = cl.map((c) => toScreen(c));
+            const cc = paddedCorners(b, gp).map((c) => toScreen(c));
             return (
               <>
                 <polygon

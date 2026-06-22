@@ -1,8 +1,9 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-
-export function cx(...parts: Array<string | false | null | undefined>): string {
-  return parts.filter(Boolean).join(" ");
-}
+// tailwind-merge-aware cx (clsx semantics + later utilities win), from carapace so a passed
+// `className` reliably overrides a component's built-in classes. Imported here for kit's own use and
+// re-exported so existing `from "./kit"` call sites don't churn.
+import { cx, Menu } from "@carapace/shell";
+import type { MenuItem } from "@carapace/shell";
+export { cx };
 
 /** camelCase identifier -> spaced label ("slopeWidth" -> "slope width"). */
 export function humanizeLabel(key: string): string {
@@ -13,70 +14,26 @@ export type MenuEntry =
   | { label: string; onClick: () => void; danger?: boolean; disabled?: boolean; hotkey?: string }
   | "separator";
 
-/** Cursor-anchored popup menu. Closes on outside pointer/scroll/resize/blur/Escape, and flips so it
- *  never opens off the right/bottom edge of the window. */
+/** Cursor-anchored popup menu: a thin adapter over carapace's floating-ui Menu that keeps lambert's
+ *  ergonomic MenuEntry authoring shape. carapace's Menu portals, positions/flips at the cursor, and
+ *  closes on outside-press/Escape; it also insulates its own pointer events, so it fires correctly
+ *  even when rendered inside the canvas's pointer-capturing surface (the bug that previously kept a
+ *  lambert-local copy here was carapace leaking pointerdown to host gesture handlers — now fixed). */
 export function ContextMenu(props: { x: number; y: number; items: MenuEntry[]; onClose: () => void }): React.JSX.Element {
-  const { onClose } = props;
-  const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ left: props.x, top: props.y });
-  useEffect(() => {
-    const opts = { passive: true } as const;
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("pointerdown", onClose);
-    window.addEventListener("blur", onClose);
-    window.addEventListener("resize", onClose);
-    window.addEventListener("wheel", onClose, opts);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("pointerdown", onClose);
-      window.removeEventListener("blur", onClose);
-      window.removeEventListener("resize", onClose);
-      window.removeEventListener("wheel", onClose);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [onClose]);
-  // flip/clamp within the viewport so edge-of-window right-clicks stay fully reachable
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    const m = 4;
-    const left = props.x + r.width > window.innerWidth - m ? Math.max(m, window.innerWidth - r.width - m) : props.x;
-    const top = props.y + r.height > window.innerHeight - m ? Math.max(m, window.innerHeight - r.height - m) : props.y;
-    setPos({ left, top });
-  }, [props.x, props.y]);
+  const items: MenuItem[] = props.items.map((it) =>
+    it === "separator"
+      ? { separator: true }
+      : { label: it.label, danger: it.danger, enabled: !it.disabled, shortcut: it.hotkey, run: it.onClick },
+  );
   return (
-    <div
-      ref={ref}
-      className="fixed z-50 min-w-[170px] border border-border-light bg-surface2 py-0.5 shadow-[var(--shadow-popover)]"
-      style={{ left: pos.left, top: pos.top }}
-      onPointerDown={(e) => e.stopPropagation()}
-      onContextMenu={(e) => e.preventDefault()}
-    >
-      {props.items.map((it, i) =>
-        it === "separator" ? (
-          <div key={i} className="my-0.5 border-t border-border" />
-        ) : (
-          <button
-            key={i}
-            disabled={it.disabled}
-            onClick={() => {
-              it.onClick();
-              onClose();
-            }}
-            className={cx(
-              "flex w-full items-center justify-between gap-6 px-3 py-1 text-left text-base disabled:opacity-40",
-              it.danger ? "text-error hover:bg-error/10" : "text-fg-mid hover:bg-hover hover:text-fg",
-            )}
-          >
-            <span>{it.label}</span>
-            {it.hotkey ? <span className="font-mono text-sm text-fg-mid">{it.hotkey}</span> : null}
-          </button>
-        ),
-      )}
-    </div>
+    <Menu
+      items={items}
+      open
+      anchor={{ x: props.x, y: props.y }}
+      onOpenChange={(o) => {
+        if (!o) props.onClose();
+      }}
+    />
   );
 }
 
@@ -92,9 +49,9 @@ const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
   danger: "bg-transparent border-error/40 text-error hover:bg-error/15 disabled:opacity-50",
 };
 
-// Button stays lambert-local: carapace's Button has no `danger` variant and uses a
-// rounded/filled look rather than this bordered vscode style. Swap once carapace
-// grows a destructive variant.
+// Button stays lambert-local for the flat, bordered vscode look (BUTTON_BASE). carapace's Button
+// now has matching `ghost`/`danger` variants, but renders rounded + lit-from-above filled; adopt it
+// (or add a `bordered` variant upstream) when that heavier look is wanted here.
 export function Button(
   props: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: ButtonVariant },
 ): React.JSX.Element {
@@ -110,9 +67,4 @@ export function SectionLabel(props: { children: React.ReactNode; className?: str
       {props.children}
     </div>
   );
-}
-
-export interface ToastState {
-  msg: string;
-  tone: "info" | "error";
 }

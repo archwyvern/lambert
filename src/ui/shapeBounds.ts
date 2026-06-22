@@ -30,3 +30,14 @@ export function localBounds(s: ShapeInstance): { min: Vector2; max: Vector2 } {
   }
   return { min: v2(-48, -48), max: v2(48, 48) }; // dome: nominal radius, ellipse via scale
 }
+
+/** The four footprint corners, CCW from min, expanded outward by pad (0 = the bare footprint).
+ *  Shared gizmo-frame geometry for the shape gizmo and the group gizmo. */
+export function paddedCorners(bounds: { min: Vector2; max: Vector2 }, pad: number): Vector2[] {
+  return [
+    v2(bounds.min.x - pad, bounds.min.y - pad),
+    v2(bounds.max.x + pad, bounds.min.y - pad),
+    v2(bounds.max.x + pad, bounds.max.y + pad),
+    v2(bounds.min.x - pad, bounds.max.y + pad),
+  ];
+}

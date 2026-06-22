@@ -1,12 +1,10 @@
 import { ArrowRedoRegular, ArrowUndoRegular } from "@fluentui/react-icons";
-import { Badge } from "@carapace/shell";
+import { Badge, IconButton } from "@carapace/shell";
 import appIcon from "../../build/icon.png";
 import type { DocumentStore, EditorState } from "../document/store";
 import type { ViewState } from "./App";
 import { cx } from "./kit";
 import { VIEW_MODES, ViewMode } from "./preview";
-
-const ICON = { fontSize: 16 } as const;
 
 export function Toolbar(props: {
   store: DocumentStore;
@@ -25,23 +23,25 @@ export function Toolbar(props: {
       <img src={appIcon} alt="" className="ml-1 h-[18px] w-[18px] shrink-0" draggable={false} />
       <span className="mr-1 shrink-0 text-base font-semibold text-fg">Lambert</span>
 
-      <div className="flex shrink-0 items-stretch border border-border">
-        <button
+      <div className="flex shrink-0 items-stretch overflow-hidden border border-border">
+        <IconButton
+          size="md"
+          className="h-[26px] w-[30px] rounded-none border-r border-border"
+          label="Undo"
           title="Undo (Ctrl+Z)"
           disabled={!store.canUndo}
+          icon={<ArrowUndoRegular />}
           onClick={() => store.undo()}
-          className="flex h-[26px] w-[30px] items-center justify-center border-r border-border text-fg-mid hover:bg-hover hover:text-fg disabled:opacity-40"
-        >
-          <ArrowUndoRegular style={ICON} />
-        </button>
-        <button
+        />
+        <IconButton
+          size="md"
+          className="h-[26px] w-[30px] rounded-none"
+          label="Redo"
           title="Redo (Ctrl+Y)"
           disabled={!store.canRedo}
+          icon={<ArrowRedoRegular />}
           onClick={() => store.redo()}
-          className="flex h-[26px] w-[30px] items-center justify-center text-fg-mid hover:bg-hover hover:text-fg disabled:opacity-40"
-        >
-          <ArrowRedoRegular style={ICON} />
-        </button>
+        />
       </div>
 
       <span className="mx-2 min-w-0 flex-1 truncate text-base text-fg-mid" title={state.docPath ?? undefined}>
