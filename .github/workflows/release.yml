@@ -1,17 +1,60 @@
 name: release
 
-# Build + publish installers for Windows (NSIS) and Linux (AppImage) to a GitHub release whenever
-# a v* tag is pushed. electron-builder uploads to a DRAFT release per tag.
+# Cut a release from the command line:
+#   gh workflow run release.yml -f version=0.2.0 -f publish=true
+# Flow: bump package.json + tag -> build installers (Windows NSIS + Linux AppImage) -> upload them
+# to a GitHub release -> publish it (only if `publish` is set; otherwise it stays a DRAFT). Pushing
+# a v* tag by hand still builds a draft too (no version bump, no auto-publish).
 on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. 0.2.0 (creates and pushes tag v0.2.0)"
+        required: true
+        type: string
+      publish:
+        description: "Publish the release now (unchecked = leave it as a draft)"
+        type: boolean
+        default: false
   push:
     tags:
       - "v*"
 
 permissions:
-  contents: write # the GITHUB_TOKEN needs this to create/upload the release
+  contents: write # create/push the tag + create/edit the release
 
 jobs:
-  release:
+  # Manual dispatch only: bump package.json to the requested version, commit, tag, push. electron-
+  # updater compares the running app's version against the release, so every release needs a fresh
+  # version. A tag pushed with GITHUB_TOKEN does NOT re-trigger the push trigger above (GitHub's
+  # recursion guard), so the dispatch flow doesn't double-build.
+  tag:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.cut.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Bump version, commit, tag, push
+        id: cut
+        run: |
+          TAG="v${{ inputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          npm version "${{ inputs.version }}" --no-git-tag-version
+          git add package.json
+          git commit -m "release: ${TAG}"
+          git tag "$TAG"
+          git push origin "HEAD:${{ github.ref_name }}" "$TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: tag
+    # Runs after `tag` on dispatch, and directly on a pushed tag (where `tag` is skipped).
+    if: ${{ always() && (needs.tag.result == 'success' || needs.tag.result == 'skipped') }}
     strategy:
       fail-fast: false
       matrix:
@@ -25,6 +68,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: lambert
+          # On dispatch: the freshly-pushed tag; on a tag push: the pushed tag (ref_name).
+          ref: ${{ needs.tag.outputs.ref || github.ref_name }}
 
       - name: Checkout carapace (sibling)
         uses: actions/checkout@v4
@@ -60,11 +105,23 @@ jobs:
         working-directory: lambert
         run: pnpm build
 
-      # electron-builder targets the host OS's configured target (AppImage / nsis) and publishes to
-      # the tag's draft release.
-      - name: Package + publish
+      # electron-builder targets the host OS's configured target (AppImage / nsis) and uploads to the
+      # tag's draft release (releaseType: draft by default).
+      - name: Package + upload to draft release
         working-directory: lambert
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: pnpm exec electron-builder --publish always
+
+  # Manual dispatch with publish=true: flip the draft to a published (latest) release. electron-
+  # updater only sees a release once it's published, so this is the deliberate "ship to users" gate.
+  publish:
+    needs: build
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "v${{ inputs.version }}" --repo "${{ github.repository }}" --draft=false --latest
