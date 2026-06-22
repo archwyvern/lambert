@@ -21,6 +21,7 @@ import { Inspector } from "./Inspector";
 import { Layers } from "./Layers";
 import { Library } from "./Library";
 import { Button, SectionLabel, ToastState } from "./kit";
+import { UpdateNotice } from "./UpdateNotice";
 import { FileExplorer } from "@carapace/shell";
 import type { DirEntry, FileExplorerProps } from "@carapace/shell";
 import { DocumentRegular, FolderRegular, ImageRegular } from "@fluentui/react-icons";
@@ -677,6 +678,7 @@ export function App(): React.JSX.Element {
         left={toast ? <span className={toast.tone === "error" ? "text-error" : "text-fg-mid"}>{toast.msg}</span> : null}
         right={state ? `${state.doc.source.width}×${state.doc.source.height} · ${flattenLayers(state.doc.layers).length} shapes` : null}
       />
+      <UpdateNotice />
     </div>
   );
 }
