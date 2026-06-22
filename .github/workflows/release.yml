@@ -44,9 +44,13 @@ jobs:
           TAG="v${{ inputs.version }}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          npm version "${{ inputs.version }}" --no-git-tag-version
-          git add package.json
-          git commit -m "release: ${TAG}"
+          # Bump only if it actually changes (so the first release at the current version, or a
+          # re-tag, just tags HEAD instead of failing on "version not changed").
+          if [ "$(node -p "require('./package.json').version")" != "${{ inputs.version }}" ]; then
+            npm version "${{ inputs.version }}" --no-git-tag-version
+            git add package.json
+            git commit -m "release: ${TAG}"
+          fi
           git tag "$TAG"
           git push origin "HEAD:${{ github.ref_name }}" "$TAG"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
