@@ -6,6 +6,14 @@ export interface FileFilter {
   extensions: string[];
 }
 
+export type UpdateEvent =
+  | { type: "checking" }
+  | { type: "available"; version: string }
+  | { type: "not-available" }
+  | { type: "progress"; percent: number }
+  | { type: "downloaded"; version: string }
+  | { type: "error"; message: string };
+
 export interface Host {
   openDialog(opts: { title: string; filters: FileFilter[] }): Promise<string | null>;
   saveDialog(opts: { title: string; defaultPath?: string; filters: FileFilter[] }): Promise<string | null>;
@@ -24,6 +32,11 @@ export interface Host {
   guardClose(): void;
   onConfirmClose(cb: () => void): void;
   respondClose(ok: boolean): void;
+  /** Autoupdate (Windows NSIS + Linux AppImage). No-op offers in dev / unsupported platforms. */
+  checkForUpdates(): Promise<void>;
+  downloadUpdate(): Promise<void>;
+  quitAndInstall(): Promise<void>;
+  onUpdateEvent(cb: (ev: UpdateEvent) => void): void;
 }
 
 interface HostWindow {

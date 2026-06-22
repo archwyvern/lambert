@@ -11,7 +11,7 @@ import { resolve } from "node:path";
 // packaged app needs no runtime node_modules. carapace is a github/link dep with no single-package
 // npm install, so bundling is what makes a distributable build possible. Everything else (electron,
 // node builtins) stays external via externalizeDepsPlugin's defaults.
-const BUNDLE = ["@carapace/shell", "chokidar"];
+const BUNDLE = ["@carapace/shell", "chokidar", "electron-updater"];
 
 export default defineConfig({
   main: { plugins: [externalizeDepsPlugin({ exclude: BUNDLE })] },

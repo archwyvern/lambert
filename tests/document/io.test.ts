@@ -41,6 +41,10 @@ function fakeHost(files: Record<string, Uint8Array>): Host {
     guardClose: () => {},
     onConfirmClose: () => {},
     respondClose: () => {},
+    checkForUpdates: () => Promise.resolve(),
+    downloadUpdate: () => Promise.resolve(),
+    quitAndInstall: () => Promise.resolve(),
+    onUpdateEvent: () => {},
   };
 }
 

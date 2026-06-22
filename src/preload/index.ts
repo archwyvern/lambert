@@ -16,6 +16,11 @@ contextBridge.exposeInMainWorld("lambertHost", {
   guardClose: () => ipcRenderer.send("guard-close"),
   onConfirmClose: (cb: () => void) => ipcRenderer.on("confirm-close", cb),
   respondClose: (ok: boolean) => ipcRenderer.send("close-response", ok),
+  checkForUpdates: () => ipcRenderer.invoke("update:check"),
+  downloadUpdate: () => ipcRenderer.invoke("update:download"),
+  quitAndInstall: () => ipcRenderer.invoke("update:install"),
+  onUpdateEvent: (cb: (ev: unknown) => void) =>
+    ipcRenderer.on("update:event", (_e, ev: unknown) => cb(ev)),
 });
 
 // carapace fs bridge (window.carapaceFs) for the shared <FileExplorer>
