@@ -21,16 +21,19 @@ export interface FieldResult {
 export function evaluateField(resolved: ResolvedShape[], width: number, height: number): FieldResult {
   const heightMap = new Float32Array(width * height);
   const mask = new Float32Array(width * height);
-  const items = resolved.map((rs) => ({
-    rs,
-    type: getShapeType(rs.shape.typeId),
-    op: getShapeType(rs.shape.typeId).defaultCombine ?? ("max" as const),
-    // attach the transient per-vertex gradient a mesh needs for its smoothness pass
-    s: rs.shape.mesh
-      ? { ...rs.shape, mesh: { ...rs.shape.mesh, grad: meshGradients(rs.shape.controlPoints, rs.shape.mesh.z, rs.shape.mesh.tris) } }
-      : rs.shape,
-    baked: rs.masks.length > 0 ? bakeMasks(rs.masks) : [],
-  }));
+  const items = resolved.map((rs) => {
+    const type = getShapeType(rs.shape.typeId);
+    return {
+      rs,
+      type,
+      op: type.defaultCombine ?? ("max" as const),
+      // attach the transient per-vertex gradient a mesh needs for its smoothness pass
+      s: rs.shape.mesh
+        ? { ...rs.shape, mesh: { ...rs.shape.mesh, grad: meshGradients(rs.shape.controlPoints, rs.shape.mesh.z, rs.shape.mesh.tris) } }
+        : rs.shape,
+      baked: rs.masks.length > 0 ? bakeMasks(rs.masks) : [],
+    };
+  });
 
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {

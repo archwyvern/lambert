@@ -29,3 +29,14 @@ export function snapCanvasPoint(p: Vector2, o: SnapOpts): Vector2 {
   }
   return q;
 }
+
+/** The standard edit-time snap closure: grid + guide snapping mapped from the live canvas + the
+ *  toolbar grid toggle. Used at every drag site (a no-op when both toggles are off), so the three
+ *  gizmos and the canvas share one option-mapping instead of re-deriving it. */
+export function editSnap(
+  canvas: { snapToGuides: boolean; guides: SnapOpts["guideLines"] },
+  grid: boolean,
+  zoom: number,
+): (p: Vector2) => Vector2 {
+  return (p) => snapCanvasPoint(p, { grid, guides: canvas.snapToGuides, guideLines: canvas.guides, zoom });
+}

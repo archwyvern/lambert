@@ -1,5 +1,4 @@
 import { defineShapeType } from "../registry";
-import { v2 } from "../vec";
 
 /** Hemisphere: tallness = radius (48), so scale 1 is a true half-sphere and uniform
  *  scaling preserves sphericalness; per-axis scale makes ellipsoids. */
@@ -27,6 +26,3 @@ fn shape_dome(p: vec2f, base: u32) -> vec2f {
     return { height, sd: Math.hypot(p.x, p.y) - R };
   },
 });
-
-export const DOME_RADIUS = R;
-export const domeBounds = () => ({ min: v2(-R, -R), max: v2(R, R) });

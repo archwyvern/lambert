@@ -1,9 +1,59 @@
 import type { ResolvedShape } from "../flatten";
 import { downsampleRender, RenderResult, scaleResolvedForSupersample } from "../render";
-import { packShapes } from "./pack";
+import { packShapes, type PackedShapes } from "./pack";
 import { buildFoldWgsl, buildNormalWgsl } from "./wgsl";
 
 export const padRowBytes = (bytes: number): number => Math.ceil(bytes / 256) * 256;
+
+/** The five fold-stage storage buffers, uploaded from a packed shape stream. */
+interface PackedBuffers {
+  records: GPUBuffer;
+  points: GPUBuffer;
+  mesh: GPUBuffer;
+  maskLoops: GPUBuffer;
+  maskVerts: GPUBuffer;
+}
+
+const storageBuffer = (d: GPUDevice, data: ArrayBufferView): GPUBuffer => {
+  const buf = d.createBuffer({ size: data.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+  d.queue.writeBuffer(buf, 0, data);
+  return buf;
+};
+
+/** Upload the packed shape stream into the five fold storage buffers. */
+const uploadPacked = (d: GPUDevice, packed: PackedShapes): PackedBuffers => ({
+  records: storageBuffer(d, packed.records),
+  points: storageBuffer(d, packed.points),
+  mesh: storageBuffer(d, packed.meshTris),
+  maskLoops: storageBuffer(d, packed.maskLoops),
+  maskVerts: storageBuffer(d, packed.maskVerts),
+});
+
+/** Fold compute-pass bind group: uniforms + the packed buffers + the field output texture. */
+const foldBindGroup = (d: GPUDevice, pipeline: GPUComputePipeline, uniforms: GPUBuffer, bufs: PackedBuffers, fieldTex: GPUTexture): GPUBindGroup =>
+  d.createBindGroup({
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: uniforms } },
+      { binding: 1, resource: { buffer: bufs.records } },
+      { binding: 2, resource: { buffer: bufs.points } },
+      { binding: 3, resource: fieldTex.createView() },
+      { binding: 4, resource: { buffer: bufs.mesh } },
+      { binding: 6, resource: { buffer: bufs.maskLoops } },
+      { binding: 7, resource: { buffer: bufs.maskVerts } },
+    ],
+  });
+
+/** Normal-derivation compute-pass bind group: its uniforms + field input + normal output. */
+const normalBindGroup = (d: GPUDevice, pipeline: GPUComputePipeline, uniforms: GPUBuffer, fieldTex: GPUTexture, normalTex: GPUTexture): GPUBindGroup =>
+  d.createBindGroup({
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: uniforms } },
+      { binding: 1, resource: fieldTex.createView() },
+      { binding: 2, resource: normalTex.createView() },
+    ],
+  });
 
 export function deinterleaveField(
   raw: Float32Array,
@@ -114,31 +164,7 @@ export class GpuFieldRenderer {
     f32[5] = 1; // step: doc-res tiles sample 1 doc px per output px
     d.queue.writeBuffer(uniforms, 0, uniformData);
 
-    const recordsBuf = d.createBuffer({
-      size: packed.records.byteLength,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    });
-    d.queue.writeBuffer(recordsBuf, 0, packed.records);
-    const pointsBuf = d.createBuffer({
-      size: packed.points.byteLength,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    });
-    d.queue.writeBuffer(pointsBuf, 0, packed.points);
-    const meshBuf = d.createBuffer({
-      size: packed.meshTris.byteLength,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    });
-    d.queue.writeBuffer(meshBuf, 0, packed.meshTris);
-    const maskLoopsBuf = d.createBuffer({
-      size: packed.maskLoops.byteLength,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    });
-    d.queue.writeBuffer(maskLoopsBuf, 0, packed.maskLoops);
-    const maskVertsBuf = d.createBuffer({
-      size: packed.maskVerts.byteLength,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    });
-    d.queue.writeBuffer(maskVertsBuf, 0, packed.maskVerts);
+    const bufs = uploadPacked(d, packed);
 
     const normalUniforms = d.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     const nu = new ArrayBuffer(16);
@@ -146,26 +172,8 @@ export class GpuFieldRenderer {
     new Float32Array(nu)[2] = slopeScale;
     d.queue.writeBuffer(normalUniforms, 0, nu);
 
-    const foldBind = d.createBindGroup({
-      layout: this.foldPipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: uniforms } },
-        { binding: 1, resource: { buffer: recordsBuf } },
-        { binding: 2, resource: { buffer: pointsBuf } },
-        { binding: 3, resource: fieldTex.createView() },
-        { binding: 4, resource: { buffer: meshBuf } },
-        { binding: 6, resource: { buffer: maskLoopsBuf } },
-        { binding: 7, resource: { buffer: maskVertsBuf } },
-      ],
-    });
-    const normalBind = d.createBindGroup({
-      layout: this.normalPipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: normalUniforms } },
-        { binding: 1, resource: fieldTex.createView() },
-        { binding: 2, resource: normalTex.createView() },
-      ],
-    });
+    const foldBind = foldBindGroup(d, this.foldPipeline, uniforms, bufs, fieldTex);
+    const normalBind = normalBindGroup(d, this.normalPipeline, normalUniforms, fieldTex, normalTex);
 
     const fieldRowBytes = padRowBytes(width * 8);
     const normalRowBytes = padRowBytes(width * 16);
@@ -208,7 +216,7 @@ export class GpuFieldRenderer {
     normalRead.unmap();
     fieldTex.destroy();
     normalTex.destroy();
-    for (const b of [uniforms, recordsBuf, pointsBuf, meshBuf, maskLoopsBuf, maskVertsBuf, normalUniforms, fieldRead, normalRead]) b.destroy();
+    for (const b of [uniforms, bufs.records, bufs.points, bufs.mesh, bufs.maskLoops, bufs.maskVerts, normalUniforms, fieldRead, normalRead]) b.destroy();
     return { width, height, heightMap, mask, normals };
   }
 
@@ -241,57 +249,15 @@ export class GpuFieldRenderer {
     new Uint32Array(ub).set([width, height, packed.count], 0);
     new Float32Array(ub)[5] = 1; // step = 1: doc-res sampling (origin stays 0)
     d.queue.writeBuffer(uniforms, 0, ub);
-    const recordsBuf = d.createBuffer({
-      size: packed.records.byteLength,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    });
-    d.queue.writeBuffer(recordsBuf, 0, packed.records);
-    const pointsBuf = d.createBuffer({
-      size: packed.points.byteLength,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    });
-    d.queue.writeBuffer(pointsBuf, 0, packed.points);
-    const meshBuf = d.createBuffer({
-      size: packed.meshTris.byteLength,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    });
-    d.queue.writeBuffer(meshBuf, 0, packed.meshTris);
-    const maskLoopsBuf = d.createBuffer({
-      size: packed.maskLoops.byteLength,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    });
-    d.queue.writeBuffer(maskLoopsBuf, 0, packed.maskLoops);
-    const maskVertsBuf = d.createBuffer({
-      size: packed.maskVerts.byteLength,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    });
-    d.queue.writeBuffer(maskVertsBuf, 0, packed.maskVerts);
+    const bufs = uploadPacked(d, packed);
     const normalUniforms = d.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     const nb = new ArrayBuffer(16);
     new Uint32Array(nb).set([width, height], 0);
     new Float32Array(nb)[2] = 1; // slopeScale
     d.queue.writeBuffer(normalUniforms, 0, nb);
 
-    const foldBind = d.createBindGroup({
-      layout: this.foldPipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: uniforms } },
-        { binding: 1, resource: { buffer: recordsBuf } },
-        { binding: 2, resource: { buffer: pointsBuf } },
-        { binding: 3, resource: fieldTex.createView() },
-        { binding: 4, resource: { buffer: meshBuf } },
-        { binding: 6, resource: { buffer: maskLoopsBuf } },
-        { binding: 7, resource: { buffer: maskVertsBuf } },
-      ],
-    });
-    const normalBind = d.createBindGroup({
-      layout: this.normalPipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: normalUniforms } },
-        { binding: 1, resource: fieldTex.createView() },
-        { binding: 2, resource: normalTex.createView() },
-      ],
-    });
+    const foldBind = foldBindGroup(d, this.foldPipeline, uniforms, bufs, fieldTex);
+    const normalBind = normalBindGroup(d, this.normalPipeline, normalUniforms, fieldTex, normalTex);
     const enc = d.createCommandEncoder();
     const pass = enc.beginComputePass();
     pass.setPipeline(this.foldPipeline);
@@ -302,7 +268,7 @@ export class GpuFieldRenderer {
     pass.dispatchWorkgroups(Math.ceil(width / 8), Math.ceil(height / 8));
     pass.end();
     d.queue.submit([enc.finish()]);
-    for (const b of [uniforms, recordsBuf, pointsBuf, meshBuf, maskLoopsBuf, maskVertsBuf, normalUniforms]) b.destroy();
+    for (const b of [uniforms, bufs.records, bufs.points, bufs.mesh, bufs.maskLoops, bufs.maskVerts, normalUniforms]) b.destroy();
     return { fieldTex, normalTex };
   }
 

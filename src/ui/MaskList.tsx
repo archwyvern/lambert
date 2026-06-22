@@ -1,4 +1,5 @@
-import { EyeOffRegular, EyeRegular } from "@fluentui/react-icons";
+import { DismissRegular, EyeOffRegular, EyeRegular } from "@fluentui/react-icons";
+import { FormToggle, IconButton, Select } from "@carapace/shell";
 import type { Mask } from "../field/types";
 import { Button, cx } from "./kit";
 
@@ -29,34 +30,33 @@ export function MaskList(props: {
           {masks.map((m, i) => {
             const visible = m.visible !== false;
             return (
-              <div key={m.id} className={cx("flex items-center gap-1.5 text-sm", !visible && "opacity-50")}>
-                <span className="w-8 shrink-0 text-fg-mid">#{i + 1}</span>
-                <select
-                  className="border border-border bg-surface px-1 py-0.5 text-fg"
+              <div key={m.id} className={cx("flex flex-wrap items-center gap-x-2 gap-y-1 text-sm", !visible && "opacity-50")}>
+                <span className="w-6 shrink-0 text-fg-mid">#{i + 1}</span>
+                <Select
+                  className="w-16"
+                  ariaLabel="Mask mode"
                   value={m.mode}
-                  onChange={(e) => onMode(m.id, e.target.value as "keep" | "cut")}
-                >
-                  <option value="keep">keep</option>
-                  <option value="cut">cut</option>
-                </select>
-                <label className="flex items-center gap-1 text-fg-mid">
-                  <input type="checkbox" checked={m.follow} onChange={(e) => onFollow(m.id, e.target.checked)} />
+                  options={[
+                    { value: "keep", label: "keep" },
+                    { value: "cut", label: "cut" },
+                  ]}
+                  onChange={(v) => onMode(m.id, v as "keep" | "cut")}
+                />
+                <span className="flex items-center gap-1 text-fg-mid">
                   follow
-                </label>
-                <label className="flex items-center gap-1 text-fg-mid" title="Anti-alias the mask edge (off = hard edge)">
-                  <input type="checkbox" checked={m.hard !== true} onChange={(e) => onToggleAA(m.id, e.target.checked)} />
+                  <FormToggle ariaLabel="Mask follows the shape transform" value={m.follow} onChange={(v) => onFollow(m.id, v)} />
+                </span>
+                <span className="flex items-center gap-1 text-fg-mid" title="Anti-alias the mask edge (off = hard edge)">
                   AA
-                </label>
-                <button
-                  title={visible ? "Hide mask (stops trimming)" : "Show mask"}
-                  className="ml-auto flex h-[18px] w-[18px] shrink-0 items-center justify-center text-fg-mid hover:text-fg"
+                  <FormToggle ariaLabel="Anti-alias the mask edge" value={m.hard !== true} onChange={(v) => onToggleAA(m.id, v)} />
+                </span>
+                <IconButton
+                  className="ml-auto"
+                  label={visible ? "Hide mask (stops trimming)" : "Show mask"}
+                  icon={visible ? <EyeRegular /> : <EyeOffRegular />}
                   onClick={() => onToggleVisible(m.id, !visible)}
-                >
-                  {visible ? <EyeRegular style={{ fontSize: 14 }} /> : <EyeOffRegular style={{ fontSize: 14 }} />}
-                </button>
-                <Button variant="danger" onClick={() => onRemove(m.id)}>
-                  ×
-                </Button>
+                />
+                <IconButton variant="danger" label="Delete mask" icon={<DismissRegular />} onClick={() => onRemove(m.id)} />
               </div>
             );
           })}

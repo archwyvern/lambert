@@ -20,13 +20,13 @@ import { getHost } from "./host";
 import { Inspector } from "./Inspector";
 import { Layers } from "./Layers";
 import { Library } from "./Library";
-import { Button, SectionLabel, ToastState } from "./kit";
+import { Button, SectionLabel } from "./kit";
 import { UpdateNotice } from "./UpdateNotice";
 import { FileExplorer } from "@carapace/shell";
 import type { DirEntry, FileExplorerProps } from "@carapace/shell";
 import { DocumentRegular, FolderRegular, ImageRegular } from "@fluentui/react-icons";
 import { usePersistentState } from "./persist";
-import { Sash, EditorTabs, StatusBar } from "@carapace/shell";
+import { Sash, EditorTabs, StatusBar, useConfirm, useToast, EmptyState } from "@carapace/shell";
 import { Toolbar } from "./Toolbar";
 import type { ViewMode } from "./preview";
 import { VIEW_MODES } from "./preview";
@@ -76,7 +76,8 @@ export function App(): React.JSX.Element {
   const [rulers, setRulers] = usePersistentState("rulers", true); // top/left canvas rulers (View > Rulers)
   const [leftWidth, setLeftWidth] = usePersistentState("panel:left", 220);
   const [rightWidth, setRightWidth] = usePersistentState("panel:right", 288);
-  const [toast, setToast] = useState<ToastState | null>(null);
+  const toast = useToast();
+  const confirm = useConfirm();
   const cam3d = use3DCamera();
   const canvas3dRef = useRef<HTMLCanvasElement>(null);
   const [swapped, setSwapped] = usePersistentState("panel:3d:swapped", false);
@@ -87,7 +88,7 @@ export function App(): React.JSX.Element {
   const active = workspace?.active ?? null;
   const state = active?.store.state ?? null;
 
-  const notify = (msg: string, tone: ToastState["tone"] = "info"): void => setToast({ msg, tone });
+  const notify = (msg: string, tone: "info" | "error" = "info"): void => toast.notify(msg, { tone });
   const run = (p: Promise<unknown>): void =>
     void p
       .then((msg) => {
@@ -160,11 +161,20 @@ export function App(): React.JSX.Element {
     );
   };
 
-  const closeImage = (imagePath: string): void => {
+  const closeImage = async (imagePath: string): Promise<void> => {
     const ws = workspaceRef.current;
     if (!ws) return;
     const t = ws.tabs[ws.indexOf(imagePath)];
-    if (t?.store.state.dirty && !confirm(`${basename(imagePath)} has unsaved changes — close anyway?`)) return;
+    if (t?.store.state.dirty) {
+      const r = await confirm({
+        title: `${basename(imagePath)} has unsaved changes`,
+        message: "Close anyway? Your unsaved changes will be lost.",
+        confirmLabel: "Close",
+        cancelLabel: "Cancel",
+        danger: true,
+      });
+      if (r !== "confirm") return;
+    }
     ws.closeTab(imagePath);
   };
 
@@ -306,10 +316,20 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     const host = getHost();
     host.guardClose();
-    host.onConfirmClose(() => {
+    host.onConfirmClose(async () => {
       const ws = workspaceRef.current;
       const anyDirty = ws?.tabs.some((t) => t.store.state.dirty) ?? false;
-      const ok = !anyDirty || confirm("Unsaved changes — close anyway?");
+      let ok = true;
+      if (anyDirty) {
+        const r = await confirm({
+          title: "Unsaved changes",
+          message: "Close anyway? Your unsaved changes will be lost.",
+          confirmLabel: "Close",
+          cancelLabel: "Cancel",
+          danger: true,
+        });
+        ok = r === "confirm";
+      }
       const stash = ok ? buildStash() : null;
       if (stash) void host.saveSession(stash).finally(() => host.respondClose(true));
       else host.respondClose(ok);
@@ -385,7 +405,7 @@ export function App(): React.JSX.Element {
     const q = new URLSearchParams(location.search);
     if (!q.has("demo")) return;
     void Promise.all([import("fast-png"), import("../field/fixtures")])
-      .then(([{ encode }, { goldenShapes, meshShapes }]) => {
+      .then(([{ encode }, { goldenShapes, maskedShapes, meshShapes }]) => {
         const w = 96;
         const h = 96;
         const data = new Uint8Array(w * h * 4);
@@ -395,7 +415,7 @@ export function App(): React.JSX.Element {
           data[i * 4 + 2] = 118;
           data[i * 4 + 3] = 255;
         }
-        const shapes = q.has("mesh") ? meshShapes() : goldenShapes();
+        const shapes = q.has("masked") ? maskedShapes() : q.has("mesh") ? meshShapes() : goldenShapes();
         const doc = { ...emptyDoc("demo.png", w, h), layers: shapes };
         const ws = new Workspace("/demo", { schemaVersion: 1, normalDirs: { red: "right", green: "up" } });
         const tab: Tab = {
@@ -468,6 +488,11 @@ export function App(): React.JSX.Element {
       const key = e.key.toLowerCase();
       if (key in TOOL_KEYS) {
         setTool(TOOL_KEYS[key]!);
+      } else if (e.key === "Escape") {
+        // ESC deselects the whole shape (and any vertex sub-selection); an empty canvas click only
+        // clears the vertex/anchor selection and keeps the shape (see CanvasView endDrag + MaskGizmo)
+        setSelVerts([]);
+        store.select(null);
       } else if ((e.key === "Delete" || e.key === "Backspace") && id) {
         const node = findNode(store.state.doc.layers, id);
         const shape = node && isShape(node) ? node : null;
@@ -658,24 +683,34 @@ export function App(): React.JSX.Element {
               </div>
             </div>
           ) : (
-            <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 bg-[var(--color-viewport-bg)] text-fg-mid">
-              <p className="text-base">{workspace ? "Open an image from the Explorer." : "No project open."}</p>
-              {workspace ? null : (
-                <div className="flex gap-2">
-                  <Button variant="primary" onClick={() => openProject("new")}>
-                    New Project
-                  </Button>
-                  <Button variant="ghost" onClick={() => openProject("open")}>
-                    Open Project
-                  </Button>
-                </div>
-              )}
+            <div className="flex min-h-0 flex-1 bg-[var(--color-viewport-bg)]">
+              <EmptyState
+                status="info"
+                title={workspace ? "No image open" : "No project open"}
+                message={
+                  workspace
+                    ? "Open an image from the Explorer to start placing shapes."
+                    : "Create a new project or open an existing one to start authoring height fields."
+                }
+                action={
+                  workspace ? undefined : (
+                    <div className="flex gap-2">
+                      <Button variant="primary" onClick={() => openProject("new")}>
+                        New Project
+                      </Button>
+                      <Button variant="ghost" onClick={() => openProject("open")}>
+                        Open Project
+                      </Button>
+                    </div>
+                  )
+                }
+              />
             </div>
           )}
         </div>
       </div>
       <StatusBar
-        left={toast ? <span className={toast.tone === "error" ? "text-error" : "text-fg-mid"}>{toast.msg}</span> : null}
+        left={null}
         right={state ? `${state.doc.source.width}×${state.doc.source.height} · ${flattenLayers(state.doc.layers).length} shapes` : null}
       />
       <UpdateNotice />

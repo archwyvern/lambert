@@ -2,10 +2,23 @@ import { expect, test } from "vitest";
 import "../../src/field/shapes";
 import { createShapeInstance } from "../../src/field/registry";
 import { resolveShapes } from "../../src/field/flatten";
-import { axisScaleFromDrag, constrainAxis, groupScaleFactor, pointsBounds, pointsInBox, scalePointsAbout, pickShape, rotationFromDrag, snapAngle } from "../../src/ui/picking";
+import { axisScaleFromDrag, constrainAxis, grabGroup, groupScaleFactor, pointsBounds, pointsInBox, scalePointsAbout, pickShape, rotationFromDrag, snapAngle, toggleIndex } from "../../src/ui/picking";
 import { toLocal } from "../../src/field/transform";
 import { v2 } from "../../src/field/vec";
 import { Vector3 } from "@carapace/primitives";
+
+test("toggleIndex: adds when absent, removes when present", () => {
+  expect(toggleIndex([1, 2], 3)).toEqual([1, 2, 3]);
+  expect(toggleIndex([1, 2, 3], 2)).toEqual([1, 3]);
+  expect(toggleIndex([], 5)).toEqual([5]);
+});
+
+test("grabGroup: keeps the selection when i is in it, else collapses to [i]", () => {
+  const sel = [1, 2, 3];
+  expect(grabGroup(sel, 2)).toBe(sel); // i selected -> whole group (same ref; the drag moves all)
+  expect(grabGroup(sel, 9)).toEqual([9]); // i not selected -> just this one
+  expect(grabGroup([], 4)).toEqual([4]);
+});
 
 test("pickShape: topmost (last in z-order) wins, slop catches near-misses", () => {
   const below = createShapeInstance("dome", v2(50, 50));

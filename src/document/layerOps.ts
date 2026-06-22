@@ -52,6 +52,25 @@ export function nodeWorldAffine(layers: LayerNode[], id: string): Affine | null 
   return nodeWorldComposite(layers, id)?.affine ?? null;
 }
 
+export interface NodeFrames {
+  /** World affine of the node's PARENT (identity for a top-level node) — where the node's local TRS
+   *  edits live. */
+  parentAffine: Affine;
+  invParent: Affine;
+  /** Full local->world affine of the node (= parentAffine ∘ affineFromTRS(node.transform)). */
+  worldAffine: Affine;
+  invWorld: Affine;
+}
+
+/** Parent + world affine frames (and their inverses) for a node — the boilerplate the three gizmos
+ *  each derived by hand (parentId -> nodeWorldAffine -> compose -> invert). */
+export function nodeFrames(layers: LayerNode[], id: string): NodeFrames {
+  const parentId = findParentId(layers, id);
+  const parentAffine = parentId ? (nodeWorldAffine(layers, parentId) ?? affineIdentity()) : affineIdentity();
+  const worldAffine = nodeWorldAffine(layers, id) ?? affineIdentity();
+  return { parentAffine, invParent: affineInvert(parentAffine), worldAffine, invWorld: affineInvert(worldAffine) };
+}
+
 /** The id of a node's parent group, or null if it's top-level, or undefined if not found. */
 export function findParentId(layers: LayerNode[], id: string): string | null | undefined {
   const rec = (arr: LayerNode[], parent: string | null): string | null | undefined => {

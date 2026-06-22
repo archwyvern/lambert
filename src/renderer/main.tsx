@@ -1,5 +1,7 @@
+import "@fontsource-variable/inter";
+import "@fontsource-variable/jetbrains-mono";
 import { createRoot } from "react-dom/client";
-import { ConfirmProvider, HostProvider } from "@carapace/shell";
+import { ConfirmProvider, HostProvider, ToastProvider } from "@carapace/shell";
 import { carapaceHost } from "../ui/host";
 
 const status = document.getElementById("status")!;
@@ -20,7 +22,9 @@ if (params.has("selftest")) {
     createRoot(document.getElementById("root")!).render(
       <HostProvider host={carapaceHost}>
         <ConfirmProvider>
-          <App />
+          <ToastProvider>
+            <App />
+          </ToastProvider>
         </ConfirmProvider>
       </HostProvider>,
     );
