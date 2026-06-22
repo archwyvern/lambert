@@ -75,7 +75,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: archwyvern/carapace
-          ref: main
+          ref: master
           path: carapace
 
       - name: Setup pnpm
