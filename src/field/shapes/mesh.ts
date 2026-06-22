@@ -6,7 +6,7 @@ import type { ShapeInstance } from "../types";
 import { v2 } from "../vec";
 
 const QUAD_R = 32; // half-extent of a fresh mesh (a 64px plane), matching the plateau footprint
-const QUAD_H = 24; // flat starting height (px), so a new mesh is immediately visible to sculpt
+const QUAD_H = 0; // a fresh mesh starts flat on the ground (height 0); sculpt vertices up from there
 
 /** Seed a brand-new mesh as a flat quad: 4 corner vertices, 2 triangles, a uniform starting height. */
 function seedQuad(shape: ShapeInstance): void {

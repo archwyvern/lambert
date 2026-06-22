@@ -8,13 +8,15 @@ import { fromLocal, toLocal } from "./transform";
 import type { Mask, ShapeInstance } from "./types";
 import { v2 } from "./vec";
 
-/** A fresh mask from clicked points (corner anchors: manual, zero handles), keep mode. */
+/** A fresh mask from clicked points (corner anchors: manual, zero handles), keep mode. AA is OFF by
+ *  default (hard edge); enable it per-mask in the inspector. */
 export function createMask(points: Vector2[], follow: boolean): Mask {
   return {
     id: crypto.randomUUID(),
     anchors: points.map((p) => bezierAnchor(v2(p.x, p.y), v2(0, 0), v2(0, 0), "manual")),
     mode: "keep",
     follow,
+    hard: true,
   };
 }
 

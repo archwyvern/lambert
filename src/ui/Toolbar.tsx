@@ -1,5 +1,6 @@
 import { ArrowRedoRegular, ArrowUndoRegular } from "@fluentui/react-icons";
 import { Badge } from "@carapace/shell";
+import appIcon from "../../build/icon.png";
 import type { DocumentStore, EditorState } from "../document/store";
 import type { ViewState } from "./App";
 import { cx } from "./kit";
@@ -21,7 +22,8 @@ export function Toolbar(props: {
 
   return (
     <header className="flex h-control shrink-0 items-center gap-2 border-b border-border bg-bg px-2">
-      <span className="mr-1 shrink-0 px-1 text-base font-semibold text-fg">Lambert</span>
+      <img src={appIcon} alt="" className="ml-1 h-[18px] w-[18px] shrink-0" draggable={false} />
+      <span className="mr-1 shrink-0 text-base font-semibold text-fg">Lambert</span>
 
       <div className="flex shrink-0 items-stretch border border-border">
         <button

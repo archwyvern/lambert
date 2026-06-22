@@ -86,12 +86,12 @@ test("masks: maskLoopStart/Count + vec4 header + verts per loop", () => {
   // loop 0 header: vec4(vertStart, vertCount, flags, scopeId)
   expect(maskLoops[0]).toBe(0); // vertStart
   expect(maskLoops[1]).toBe(4); // vertCount
-  expect(maskLoops[2]).toBe(2); // keep(0) + follow(2) = 2
+  expect(maskLoops[2]).toBe(6); // keep(0) + follow(2) + hard(4) = 6 (createMask defaults hard)
   expect(maskLoops[3]).toBe(0); // scope 0 (shape's own)
   // loop 1 header
   expect(maskLoops[4]).toBe(4); // vertStart (after loop 0's 4 verts)
   expect(maskLoops[5]).toBe(3); // vertCount
-  expect(maskLoops[6]).toBe(1); // cut(1) + world(0) = 1
+  expect(maskLoops[6]).toBe(5); // cut(1) + world(0) + hard(4) = 5
   expect(maskLoops[7]).toBe(0); // scope 0
   expect(maskVerts.length).toBe((4 + 3) * 2);
 });

@@ -5,11 +5,11 @@ import { meshEdges, meshGradients } from "../../src/field/meshOps";
 import type { MeshData, ShapeInstance } from "../../src/field/types";
 import { v2 } from "../../src/field/vec";
 
-test("mesh primitive seeds a flat quad: 4 corners at +/-32, uniform height, 2 triangles", () => {
+test("mesh primitive seeds a flat quad on the ground: 4 corners at +/-32, height 0, 2 triangles", () => {
   const mesh = createShapeInstance("mesh", v2(64, 64));
   expect(mesh.typeId).toBe("mesh");
   expect(mesh.controlPoints).toEqual([v2(-32, -32), v2(32, -32), v2(32, 32), v2(-32, 32)]);
-  expect(mesh.mesh!.z).toEqual([24, 24, 24, 24]);
+  expect(mesh.mesh!.z).toEqual([0, 0, 0, 0]); // a fresh mesh starts flat on the ground
   expect(mesh.mesh!.tris).toEqual([
     [0, 1, 2],
     [0, 2, 3],
@@ -17,11 +17,10 @@ test("mesh primitive seeds a flat quad: 4 corners at +/-32, uniform height, 2 tr
   expect(mesh.mesh!.edges!.length).toBeGreaterThan(0); // edges derived for the gizmo
 });
 
-test("mesh eval: flat inside the quad, zero outside with the right outline distance", () => {
+test("mesh eval: flat-on-ground inside the quad, zero outside with the right outline distance", () => {
   const mesh = createShapeInstance("mesh", v2(64, 64));
   const type = getShapeType("mesh");
-  expect(type.eval(v2(0, 0), mesh).height).toBeCloseTo(24); // centre of the flat quad
-  expect(type.eval(v2(20, 10), mesh).height).toBeCloseTo(24); // anywhere inside is the same height
+  expect(type.eval(v2(0, 0), mesh).height).toBe(0); // flat at the ground until sculpted
   const out = type.eval(v2(40, 0), mesh);
   expect(out.height).toBe(0);
   expect(out.sd).toBeCloseTo(8); // 8px outside the +/-32 edge

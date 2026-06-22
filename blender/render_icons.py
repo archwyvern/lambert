@@ -241,6 +241,28 @@ def build_cable() -> bpy.types.Object:
     return smooth(bpy.context.active_object)
 
 
+def build_plane() -> bpy.types.Object:
+    # a flat polygon tilted into a slope (what the `tilt` control produces) — a thin square sheet
+    o = box(1.6, 1.6, 0.1)
+    o.rotation_euler = (math.radians(22), 0.0, 0.0)
+    o.location.z = 0.5
+    return o
+
+
+def build_mesh() -> bpy.types.Object:
+    # a free triangulated height surface: a subdivided grid sculpted into bumps, left faceted (flat
+    # shaded + triangulated) so the triangle mesh reads vs the smooth primitives
+    bpy.ops.mesh.primitive_grid_add(x_subdivisions=5, y_subdivisions=5, size=2.8)
+    o = bpy.context.active_object
+    for v in o.data.vertices:
+        x, y = v.co.x, v.co.y
+        v.co.z = 0.95 * math.exp(-(x * x + y * y)) + 0.45 * math.exp(-2.5 * ((x - 0.8) ** 2 + (y + 0.7) ** 2))
+    m = o.modifiers.new("tri", "TRIANGULATE")
+    bpy.context.view_layer.objects.active = o
+    bpy.ops.object.modifier_apply(modifier=m.name)
+    return o  # no smooth() — keep the facets visible
+
+
 BUILDERS = {
     # Primitives
     "dome": build_dome,
@@ -248,6 +270,8 @@ BUILDERS = {
     "pyramid": build_pyramid,
     "torus": build_torus,
     "plateau": build_plateau,
+    "plane": build_plane,
+    "mesh": build_mesh,
     # Profiles
     "capsule": build_capsule,
     "cylinder": build_cylinder,
@@ -261,8 +285,13 @@ BUILDERS = {
 
 def main() -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+    # optional shape filter after `--`: `blender -b -P render_icons.py -- mesh plane` renders only those
+    import sys
+
+    only = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
+    builders = {k: v for k, v in BUILDERS.items() if not only or k in only}
     ok, failed = 0, []
-    for name, build in BUILDERS.items():
+    for name, build in builders.items():
         try:
             reset_scene()
             setup_camera_and_light()

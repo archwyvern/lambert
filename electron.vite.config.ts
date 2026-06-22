@@ -19,6 +19,9 @@ export default defineConfig({
   renderer: {
     plugins: [tailwindcss()],
     resolve: {
+      // carapace is aliased to its SOURCE, which imports react itself — force a SINGLE react instance
+      // (else carapace's hooks hit a different react copy: "Invalid hook call / null useState").
+      dedupe: ["react", "react-dom"],
       alias: {
         "@carapace/shell": resolve(import.meta.dirname, "../carapace/packages/shell/src/index.ts"),
         "@carapace/primitives": resolve(import.meta.dirname, "../carapace/packages/primitives/src/index.ts"),

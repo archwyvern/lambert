@@ -11,10 +11,11 @@ export function MaskList(props: {
   onAdd: () => void;
   onMode: (id: string, mode: "keep" | "cut") => void;
   onFollow: (id: string, follow: boolean) => void;
+  onToggleAA: (id: string, aa: boolean) => void;
   onToggleVisible: (id: string, visible: boolean) => void;
   onRemove: (id: string) => void;
 }): React.JSX.Element {
-  const { masks, emptyHint, onAdd, onMode, onFollow, onToggleVisible, onRemove } = props;
+  const { masks, emptyHint, onAdd, onMode, onFollow, onToggleAA, onToggleVisible, onRemove } = props;
   return (
     <div className="px-2">
       <div className="mb-1.5 flex items-center justify-between">
@@ -41,6 +42,10 @@ export function MaskList(props: {
                 <label className="flex items-center gap-1 text-fg-mid">
                   <input type="checkbox" checked={m.follow} onChange={(e) => onFollow(m.id, e.target.checked)} />
                   follow
+                </label>
+                <label className="flex items-center gap-1 text-fg-mid" title="Anti-alias the mask edge (off = hard edge)">
+                  <input type="checkbox" checked={m.hard !== true} onChange={(e) => onToggleAA(m.id, e.target.checked)} />
+                  AA
                 </label>
                 <button
                   title={visible ? "Hide mask (stops trimming)" : "Show mask"}

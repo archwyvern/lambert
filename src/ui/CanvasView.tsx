@@ -68,6 +68,7 @@ export function CanvasView(props: {
   selVerts: number[];
   setSelVerts: (v: number[] | ((p: number[]) => number[])) => void;
   onLightChange: (dir: [number, number, number]) => void;
+  onEnergyChange: (energy: number) => void;
   canvas3dRef: React.RefObject<HTMLCanvasElement | null>;
   orbit3d: Orbit;
   /** Project normal-channel convention (project.lambert), for the normal-view encode. */
@@ -86,7 +87,7 @@ export function CanvasView(props: {
   /** Show the top/left rulers (insets the canvas area). */
   rulers: boolean;
 }): React.JSX.Element {
-  const { store, state, view, tool, diffuseBytes, selVerts, setSelVerts, onLightChange, canvas3dRef, orbit3d, normalDirs, swapped } =
+  const { store, state, view, tool, diffuseBytes, selVerts, setSelVerts, onLightChange, onEnergyChange, canvas3dRef, orbit3d, normalDirs, swapped } =
     props;
   const { imagePath, savedViewport, onViewportChange, setTool, snap, rulers } = props;
   const inset = rulers ? RULER : 0;
@@ -291,6 +292,7 @@ export function CanvasView(props: {
       mode: view.mode,
       opacity: view.opacity,
       lightDir: view.lightDir,
+      lightEnergy: view.lightEnergy,
       normalSigns: normalSigns(normalDirs),
       raster: view.raster,
       fullPipeline: view.fullPipeline,
@@ -879,6 +881,20 @@ export function CanvasView(props: {
         >
           <LightPad lightDir={view.lightDir} onChange={onLightChange} radius={34} />
           <span className="text-sm uppercase tracking-[var(--tracking-tight)] text-fg-mid">light</span>
+          <input
+            type="range"
+            min={0}
+            max={2}
+            step={0.05}
+            value={view.lightEnergy}
+            title={`energy ${view.lightEnergy.toFixed(2)}`}
+            onChange={(e) => onEnergyChange(Number(e.target.value))}
+            className="mt-1 h-[3px] w-[72px] cursor-pointer appearance-none"
+            style={{
+              background: `linear-gradient(to right, var(--color-accent) ${(view.lightEnergy / 2) * 100}%, var(--color-border) ${(view.lightEnergy / 2) * 100}%)`,
+            }}
+          />
+          <span className="text-sm tabular-nums text-fg-mid">energy {view.lightEnergy.toFixed(2)}</span>
         </div>
       ) : null}
       {diffuseBytes && !swapped

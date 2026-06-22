@@ -26,7 +26,7 @@ struct CompositeUniforms {
   greenSign: f32,
   raster: u32,        // 1 = snap to doc pixels + 1-doc-px gradient (exported look); 0 = crisp vector
   full: u32,          // lit mode only: 1 = light the full Skyrat pipeline normals (skyratTex) instead
-  _pad1: f32,
+  lightEnergy: f32,   // lit mode: scales the diffuse light term (1 = default; >1 brightens)
 }
 
 @group(0) @binding(0) var<uniform> cu: CompositeUniforms;
@@ -93,7 +93,7 @@ fn fs(@builtin(position) fragPos: vec4f) -> @location(0) vec4f {
   }
   let l = normalize(vec3f(cu.lightX, cu.lightY, cu.lightZ));
   let lambert = max(dot(n, l), 0.0);
-  let shade = 0.25 + 0.75 * lambert;
+  let shade = 0.25 + 0.75 * cu.lightEnergy * lambert;
   return vec4f(mix(vec3f(1.0, 1.0, 1.0), diffuse.rgb * shade, diffuse.a), 1.0);
 }
 `;

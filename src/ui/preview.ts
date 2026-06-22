@@ -3,7 +3,7 @@ import { flattenLayers, type ResolvedShape } from "../field/flatten";
 import { buildCompositeWgsl } from "../field/gpu/composite";
 import { packShapes } from "../field/gpu/pack";
 import { GpuFieldRenderer } from "../field/gpu/pipeline";
-import { GRID, GRID3D_WGSL, Orbit, orbitMvp, PREVIEW3D_WGSL } from "../field/gpu/preview3d";
+import { GRID3D_WGSL, Orbit, orbitMvp, PREVIEW3D_WGSL } from "../field/gpu/preview3d";
 import { renderField } from "../field/render";
 import { generateFull } from "../field/skyrat/normalmap";
 import type { LayerNode } from "../field/types";
@@ -13,6 +13,10 @@ export type ViewMode = "diffuse" | "normal" | "lit";
 export const VIEW_MODES: ViewMode[] = ["diffuse", "normal", "lit"];
 const MODE_INDEX: Record<ViewMode, number> = { diffuse: 0, normal: 1, lit: 2 };
 
+// 3D displaced-grid resolution cap: the grid is sized to the doc (1 cell ~= 1 doc px) so hard height
+// cliffs read crisply, clamped here so very large docs don't explode the vertex count (512^2*6 ~= 1.5M).
+const GRID_MAX = 512;
+
 export interface PreviewParams {
   layers: LayerNode[];
   viewport: Viewport;
@@ -20,6 +24,8 @@ export interface PreviewParams {
   /** Overlay opacity for the normal mode; 1 = pure overlay (still mask-gated). */
   opacity: number;
   lightDir: [number, number, number];
+  /** Lit-mode light intensity multiplier (1 = default). */
+  lightEnergy: number;
   /** Project channel signs for the normal-view encode (normalSigns(doc.normalDirs)). */
   normalSigns: { red: number; green: number };
   /** Raster view: doc-res exported pixels (pixelated). false = crisp display-res vector view. */
@@ -165,9 +171,14 @@ export class PreviewRenderer {
       });
     }
     const mvp = orbitMvp(p.orbit3d, docW, docH, w / h);
+    // Match the displaced grid to the doc resolution (capped) so one grid cell ~= one doc pixel: a
+    // hard height step (mask cut / silhouette) then renders as a ~1px cliff the cliff-cull discards,
+    // instead of a shallow ramp smeared across a coarse cell. Capped so huge docs stay performant.
+    const gw = Math.min(docW, GRID_MAX);
+    const gh = Math.min(docH, GRID_MAX);
     const ub = new ArrayBuffer(96);
     new Float32Array(ub).set(mvp, 0);
-    new Float32Array(ub).set([GRID, GRID, docW, docH, p.lightDir[0], p.lightDir[1], p.lightDir[2], 1], 16);
+    new Float32Array(ub).set([gw, gh, docW, docH, p.lightDir[0], p.lightDir[1], p.lightDir[2], 1], 16);
     this.device.queue.writeBuffer(this.uniforms3d, 0, ub);
 
     // floor grid: a big quad at y=0 centred on the look-at target (lines are world-locked + fade out)
@@ -216,7 +227,7 @@ export class PreviewRenderer {
     });
     pass.setPipeline(this.pipeline3d);
     pass.setBindGroup(0, bind);
-    pass.draw(GRID * GRID * 6);
+    pass.draw(gw * gh * 6); // matches the gridW/gridH uniform set above
     pass.setPipeline(this.pipelineGrid);
     pass.setBindGroup(0, gridBind);
     pass.draw(6);
@@ -385,6 +396,7 @@ export class PreviewRenderer {
     f[12] = p.normalSigns.green;
     u[13] = p.raster ? 1 : 0;
     u[14] = full && this.skyratTex ? 1 : 0;
+    f[15] = p.lightEnergy;
     this.device.queue.writeBuffer(this.uniforms, 0, ub);
 
     const bind = this.device.createBindGroup({

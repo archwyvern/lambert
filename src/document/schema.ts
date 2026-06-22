@@ -19,6 +19,8 @@ const maskSchema = z.object({
   follow: z.boolean(),
   /** Absent = visible; false = disabled (the mask is kept but doesn't trim). */
   visible: z.boolean().optional(),
+  /** true = hard (non-anti-aliased) edge; absent/false = soft ½px AA. New masks default hard. */
+  hard: z.boolean().optional(),
 });
 
 // pos.z = base elevation (default 0); scale.z = extrude multiplier (default 1).
