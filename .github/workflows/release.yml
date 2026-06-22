@@ -1,15 +1,20 @@
 name: release
 
 # Cut a release from the command line:
-#   gh workflow run release.yml -f version=0.2.0 -f publish=true
-# Flow: bump package.json + tag -> build installers (Windows NSIS + Linux AppImage) -> upload them
-# to a GitHub release -> publish it (only if `publish` is set; otherwise it stays a DRAFT). Pushing
-# a v* tag by hand still builds a draft too (no version bump, no auto-publish).
+#   gh workflow run release.yml -f version=0.1.0 -f publish=true
+# Flow: bump package.json + tag -> build installers (Windows NSIS + Linux AppImage) as ARTIFACTS ->
+# a single job assembles ONE GitHub release from all artifacts -> publish it (only if `publish`;
+# otherwise it stays a DRAFT). Pushing a v* tag by hand also builds a draft (no bump, no publish).
+#
+# Why artifacts + one release job instead of `electron-builder --publish` per matrix leg: two legs
+# publishing to the same draft concurrently race and split assets across duplicate drafts. Packaging
+# with `--publish never` (electron-builder still emits the latest*.yml update feeds) and assembling
+# once is race-free.
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to release, e.g. 0.2.0 (creates and pushes tag v0.2.0)"
+        description: "Version to release, e.g. 0.1.0 (creates and pushes tag v0.1.0)"
         required: true
         type: string
       publish:
@@ -24,10 +29,9 @@ permissions:
   contents: write # create/push the tag + create/edit the release
 
 jobs:
-  # Manual dispatch only: bump package.json to the requested version, commit, tag, push. electron-
-  # updater compares the running app's version against the release, so every release needs a fresh
-  # version. A tag pushed with GITHUB_TOKEN does NOT re-trigger the push trigger above (GitHub's
-  # recursion guard), so the dispatch flow doesn't double-build.
+  # Manual dispatch only: bump package.json to the requested version (skipped if already there, so a
+  # first release at the current version just tags HEAD), commit, tag, push. A tag pushed with
+  # GITHUB_TOKEN does not re-trigger the push trigger above (GitHub's recursion guard).
   tag:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -44,15 +48,14 @@ jobs:
           TAG="v${{ inputs.version }}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # Bump only if it actually changes (so the first release at the current version, or a
-          # re-tag, just tags HEAD instead of failing on "version not changed").
           if [ "$(node -p "require('./package.json').version")" != "${{ inputs.version }}" ]; then
             npm version "${{ inputs.version }}" --no-git-tag-version
             git add package.json
             git commit -m "release: ${TAG}"
+            git push origin "HEAD:${{ github.ref_name }}"
           fi
-          git tag "$TAG"
-          git push origin "HEAD:${{ github.ref_name }}" "$TAG"
+          git rev-parse "$TAG" >/dev/null 2>&1 || git tag "$TAG"
+          git push origin "$TAG"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
   build:
@@ -66,13 +69,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       # Lambert and carapace are checked out as SIBLINGS (carapace/ next to lambert/) because the
-      # renderer bundles @carapace/shell's source and the main process bundles its compiled dist —
-      # the pnpm `link:../carapace` override + the vite alias both resolve to ../carapace.
+      # renderer bundles @carapace/shell's source and the main process bundles its compiled dist.
       - name: Checkout lambert
         uses: actions/checkout@v4
         with:
           path: lambert
-          # On dispatch: the freshly-pushed tag; on a tag push: the pushed tag (ref_name).
           ref: ${{ needs.tag.outputs.ref || github.ref_name }}
 
       - name: Checkout carapace (sibling)
@@ -109,23 +110,51 @@ jobs:
         working-directory: lambert
         run: pnpm build
 
-      # electron-builder targets the host OS's configured target (AppImage / nsis) and uploads to the
-      # tag's draft release (releaseType: draft by default).
-      - name: Package + upload to draft release
+      # Package only — no upload. electron-builder still emits latest*.yml (the electron-updater
+      # feeds) because a publish config is present.
+      - name: Package installers
         working-directory: lambert
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: pnpm exec electron-builder --publish always
+        run: pnpm exec electron-builder --publish never
 
-  # Manual dispatch with publish=true: flip the draft to a published (latest) release. electron-
-  # updater only sees a release once it's published, so this is the deliberate "ship to users" gate.
-  publish:
+      - name: Upload installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.os }}
+          path: |
+            lambert/release/*.AppImage
+            lambert/release/*.exe
+            lambert/release/*.blockmap
+            lambert/release/latest*.yml
+          if-no-files-found: error
+
+  # Single, race-free release assembly: collect every platform's artifacts and create/update ONE
+  # release. Creates it as a draft; publishes only when the dispatch asked for it.
+  release:
     needs: build
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
     runs-on: ubuntu-latest
     steps:
-      - name: Publish the release
+      - name: Download all installers
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Assemble the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          TAG="${{ inputs.version && format('v{0}', inputs.version) || github.ref_name }}"
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --repo "$REPO" --clobber
+          else
+            gh release create "$TAG" dist/* --repo "$REPO" --draft --title "$TAG" --generate-notes
+          fi
+
+      - name: Publish (if requested)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release edit "v${{ inputs.version }}" --repo "${{ github.repository }}" --draft=false --latest
