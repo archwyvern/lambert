@@ -3,6 +3,10 @@ import { access, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { serveFs } from "@carapace/shell/node";
+import electronUpdater from "electron-updater";
+
+// electron-updater is CJS; its named exports come off the default import under bundling.
+const { autoUpdater } = electronUpdater;
 
 // unpackaged dev runs report the app name as "Electron"; pin it so userData
 // (session memory) lands in ~/.config/lambert instead of the shared Electron dir
@@ -26,6 +30,41 @@ const captureIndex = process.argv.indexOf("--capture");
 const capturePath = captureIndex >= 0 ? process.argv[captureIndex + 1] : undefined;
 const queryIndex = process.argv.indexOf("--query");
 const extraQuery = queryIndex >= 0 ? process.argv[queryIndex + 1] : undefined;
+
+// Autoupdate: offers before downloading (autoDownload off). The check IPC + events are always
+// registered; the real autoUpdater only runs in a packaged build (it needs app-update.yml in
+// resources). In dev a manual check just reports "up to date" so the UI stays exercised.
+function setupAutoUpdate(win: BrowserWindow) {
+  const send = (event: Record<string, unknown>) => win.webContents.send("update:event", event);
+
+  ipcMain.handle("update:check", async () => {
+    if (!app.isPackaged) {
+      send({ type: "not-available" });
+      return;
+    }
+    await autoUpdater.checkForUpdates();
+  });
+  ipcMain.handle("update:download", async () => {
+    if (app.isPackaged) await autoUpdater.downloadUpdate();
+  });
+  ipcMain.handle("update:install", async () => {
+    if (app.isPackaged) autoUpdater.quitAndInstall();
+  });
+
+  if (!app.isPackaged) return;
+  autoUpdater.autoDownload = false;
+  autoUpdater.on("checking-for-update", () => send({ type: "checking" }));
+  autoUpdater.on("update-available", (info) => send({ type: "available", version: info.version }));
+  autoUpdater.on("update-not-available", () => send({ type: "not-available" }));
+  autoUpdater.on("download-progress", (p) => send({ type: "progress", percent: p.percent }));
+  autoUpdater.on("update-downloaded", (info) => send({ type: "downloaded", version: info.version }));
+  autoUpdater.on("error", (err) => send({ type: "error", message: String(err?.message ?? err) }));
+
+  // Quiet check shortly after launch (auto checks never surface "up to date").
+  win.webContents.once("did-finish-load", () => {
+    setTimeout(() => void autoUpdater.checkForUpdates().catch(() => {}), 4000);
+  });
+}
 
 app.whenReady().then(() => {
   ipcMain.handle("dialog:open", async (_e, opts: { title: string; filters: Electron.FileFilter[] }) => {
@@ -86,6 +125,8 @@ app.whenReady().then(() => {
   // Default real-path provider (createNodeFs) — Lambert addresses files by absolute path.
   serveFs(ipcMain, { send: (channel, ...args) => win.webContents.send(channel, ...args) });
 
+  setupAutoUpdate(win);
+
   // application menu: file/edit actions route to the renderer as menu:action events;
   // accelerators live here so they are real OS-level shortcuts
   const send = (action: string) => () => win.webContents.send("menu:action", action);
@@ -128,6 +169,10 @@ app.whenReady().then(() => {
           { type: "separator" },
           { role: "toggleDevTools" },
         ],
+      },
+      {
+        label: "Help",
+        submenu: [{ label: "Check for Updates…", click: send("check-updates") }],
       },
     ]),
   );
