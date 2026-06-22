@@ -21,8 +21,7 @@ publish:
 
 linux:
   target:
-    - deb # Debian / Ubuntu
-    - rpm # Fedora / RHEL
+    - AppImage # self-updating Linux format (electron-updater)
   category: Graphics
   maintainer: Archwyvern <codekestrel@googlemail.com>
   synopsis: Shape-based height-field authoring for normal maps.
@@ -35,10 +34,3 @@ nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
   perMachine: false
-
-mac:
-  target:
-    - dmg
-    - zip
-  category: public.app-category.graphics
-  identity: null # alpha builds are unsigned (no Developer ID / notarization yet)

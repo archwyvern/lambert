@@ -1,7 +1,7 @@
 name: release
 
-# Build + publish installers for Windows, Linux (Debian .deb + Fedora .rpm) and macOS to a GitHub
-# release whenever a v* tag is pushed. electron-builder uploads to a DRAFT release per tag.
+# Build + publish installers for Windows (NSIS) and Linux (AppImage) to a GitHub release whenever
+# a v* tag is pushed. electron-builder uploads to a DRAFT release per tag.
 on:
   push:
     tags:
@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       # Lambert and carapace are checked out as SIBLINGS (carapace/ next to lambert/) because the
@@ -56,17 +56,12 @@ jobs:
         working-directory: lambert
         run: pnpm install --frozen-lockfile
 
-      # electron-builder builds .rpm on Linux via the `rpm` tool, which isn't on ubuntu by default.
-      - name: Install rpm tooling (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y rpm
-
       - name: Build renderer/main/preload
         working-directory: lambert
         run: pnpm build
 
-      # electron-builder targets the host OS's configured targets (deb+rpm / nsis / dmg+zip) and
-      # publishes to the tag's draft release. Mac builds are unsigned for alpha.
+      # electron-builder targets the host OS's configured target (AppImage / nsis) and publishes to
+      # the tag's draft release.
       - name: Package + publish
         working-directory: lambert
         env:
