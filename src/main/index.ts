@@ -25,6 +25,12 @@ app.commandLine.appendSwitch("enable-unsafe-webgpu");
 app.commandLine.appendSwitch("enable-features", "Vulkan,VulkanFromANGLE");
 app.commandLine.appendSwitch("use-angle", "vulkan");
 
+// Dev only: never serve the renderer from Electron's on-disk HTTP cache. It can pin a stale build of
+// the UI (e.g. an old toolbar logo) even after the Vite dev server already serves the new code — so
+// fresh `pnpm dev` launches kept showing pre-edit UI, which is maddening to debug. Packaged builds
+// load the renderer from file:// and are unaffected.
+if (!app.isPackaged) app.commandLine.appendSwitch("disable-http-cache");
+
 const selftest = process.argv.includes("--selftest");
 const captureIndex = process.argv.indexOf("--capture");
 const capturePath = captureIndex >= 0 ? process.argv[captureIndex + 1] : undefined;
@@ -183,6 +189,10 @@ app.whenReady().then(() => {
       },
     ]),
   );
+  // The menu is rendered in-window (carapace MenuBar in the toolbar). Keep the native menu set so its
+  // accelerators stay live, but hide the native bar so it isn't shown twice (autoHideMenuBar stays
+  // false, so it won't reappear on Alt either).
+  win.setMenuBarVisibility(false);
 
   // unsaved-changes guard: only armed once the editor renderer registers, so the
   // harness/selftest/capture routes keep closing freely
