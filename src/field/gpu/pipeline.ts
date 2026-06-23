@@ -104,12 +104,6 @@ export interface GpuEvaluateOptions {
 
 const APRON = 1; // normal pass needs 1px neighborhood; tiles overlap by this and drop it
 
-// Max fold-tile edge for the display path. A single fold dispatch over a whole large doc (e.g. a
-// ~20MP image) runs long enough to trip the GPU watchdog and reset the device, freezing the app;
-// bounding each dispatch to this keeps every submission short. The fold is the expensive pass (it
-// loops every shape per pixel) — the normal pass is cheap and stays a single full-doc dispatch.
-const FOLD_TILE = 2048;
-
 export class GpuFieldRenderer {
   private constructor(
     private readonly device: GPUDevice,
@@ -224,84 +218,6 @@ export class GpuFieldRenderer {
     normalTex.destroy();
     for (const b of [uniforms, bufs.records, bufs.points, bufs.mesh, bufs.maskLoops, bufs.maskVerts, normalUniforms, fieldRead, normalRead]) b.destroy();
     return { width, height, heightMap, mask, normals };
-  }
-
-  /** Doc-res fold + normals into GPU textures, no readback. Consumed by the 3D preview pass. */
-  renderToTextures(
-    resolved: ResolvedShape[],
-    width: number,
-    height: number,
-    existing?: { fieldTex: GPUTexture; normalTex: GPUTexture },
-  ): { fieldTex: GPUTexture; normalTex: GPUTexture } {
-    const d = this.device;
-    const fieldTex =
-      existing?.fieldTex ??
-      d.createTexture({
-        size: [width, height],
-        format: "rg32float",
-        usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING,
-      });
-    const normalTex =
-      existing?.normalTex ??
-      d.createTexture({
-        size: [width, height],
-        format: "rgba32float",
-        usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING,
-      });
-    const packed = packShapes(resolved);
-
-    const uniforms = d.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    const bufs = uploadPacked(d, packed);
-    const foldBind = foldBindGroup(d, this.foldPipeline, uniforms, bufs, fieldTex);
-
-    // Fold in bounded tiles, one submit per tile, so no single dispatch runs long enough to trip the
-    // GPU watchdog. Each tile samples at origin (tx, ty) and writes back to the same absolute region
-    // of the shared field texture via writeOffset (see FOLD_MAIN). Reusing one uniform buffer across
-    // submits is safe: queue.writeBuffer is ordered against the submits that follow it.
-    const ub = new ArrayBuffer(32);
-    const u32 = new Uint32Array(ub);
-    const f32 = new Float32Array(ub);
-    u32[2] = packed.count;
-    f32[5] = 1; // step = 1: doc-res sampling
-    for (let ty = 0; ty < height; ty += FOLD_TILE) {
-      for (let tx = 0; tx < width; tx += FOLD_TILE) {
-        const tw = Math.min(FOLD_TILE, width - tx);
-        const th = Math.min(FOLD_TILE, height - ty);
-        u32[0] = tw;
-        u32[1] = th;
-        f32[3] = tx; // sample origin
-        f32[4] = ty;
-        u32[6] = tx; // texture write offset
-        u32[7] = ty;
-        d.queue.writeBuffer(uniforms, 0, ub);
-        const enc = d.createCommandEncoder();
-        const pass = enc.beginComputePass();
-        pass.setPipeline(this.foldPipeline);
-        pass.setBindGroup(0, foldBind);
-        pass.dispatchWorkgroups(Math.ceil(tw / 8), Math.ceil(th / 8));
-        pass.end();
-        d.queue.submit([enc.finish()]);
-      }
-    }
-
-    // One normals pass over the now-complete field: cheap (4 texture loads/pixel) so it's no watchdog
-    // risk, and it must see the whole field so interior seams stay correct (no per-tile apron needed).
-    const normalUniforms = d.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    const nb = new ArrayBuffer(16);
-    new Uint32Array(nb).set([width, height], 0);
-    new Float32Array(nb)[2] = 1; // slopeScale
-    d.queue.writeBuffer(normalUniforms, 0, nb);
-    const normalBind = normalBindGroup(d, this.normalPipeline, normalUniforms, fieldTex, normalTex);
-    const enc = d.createCommandEncoder();
-    const pass = enc.beginComputePass();
-    pass.setPipeline(this.normalPipeline);
-    pass.setBindGroup(0, normalBind);
-    pass.dispatchWorkgroups(Math.ceil(width / 8), Math.ceil(height / 8));
-    pass.end();
-    d.queue.submit([enc.finish()]);
-
-    for (const b of [uniforms, bufs.records, bufs.points, bufs.mesh, bufs.maskLoops, bufs.maskVerts, normalUniforms]) b.destroy();
-    return { fieldTex, normalTex };
   }
 
   /**
