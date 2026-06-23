@@ -31,6 +31,10 @@ const capturePath = captureIndex >= 0 ? process.argv[captureIndex + 1] : undefin
 const queryIndex = process.argv.indexOf("--query");
 const extraQuery = queryIndex >= 0 ? process.argv[queryIndex + 1] : undefined;
 
+// Set just before quitAndInstall so the unsaved-changes close guard lets the window close. Without
+// it, app.quit() is vetoed by the guard, the update never installs, and "Restarting" hangs forever.
+let installingUpdate = false;
+
 // Autoupdate: offers before downloading (autoDownload off). The check IPC + events are always
 // registered; the real autoUpdater only runs in a packaged build (it needs app-update.yml in
 // resources). In dev a manual check just reports "up to date" so the UI stays exercised.
@@ -48,7 +52,10 @@ function setupAutoUpdate(win: BrowserWindow) {
     if (app.isPackaged) await autoUpdater.downloadUpdate();
   });
   ipcMain.handle("update:install", async () => {
-    if (app.isPackaged) autoUpdater.quitAndInstall();
+    if (app.isPackaged) {
+      installingUpdate = true; // bypass the unsaved-changes close guard so the quit actually goes through
+      autoUpdater.quitAndInstall(false, true); // isForceRunAfter: relaunch the new version after install
+    }
   });
 
   if (!app.isPackaged) return;
@@ -191,7 +198,7 @@ app.whenReady().then(() => {
     }
   });
   win.on("close", (e) => {
-    if (!closeGuarded || allowClose || selftest || capturePath) return;
+    if (!closeGuarded || allowClose || selftest || capturePath || installingUpdate) return;
     e.preventDefault();
     win.webContents.send("confirm-close");
   });
