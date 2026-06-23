@@ -28,6 +28,7 @@ import { DocumentRegular, FolderRegular, ImageRegular } from "@fluentui/react-ic
 import { usePersistentState } from "./persist";
 import { Sash, EditorTabs, StatusBar, useConfirm, useToast, EmptyState } from "@carapace/shell";
 import { Toolbar } from "./Toolbar";
+import { LambertMark } from "./LambertMark";
 import type { ViewMode } from "./preview";
 import { VIEW_MODES } from "./preview";
 import { TOOL_KEYS, ToolMode } from "./tools";
@@ -739,7 +740,7 @@ export function App(): React.JSX.Element {
             <div className="flex min-h-0 flex-1 bg-[var(--color-viewport-bg)]">
               <EmptyState
                 status="info"
-                title={workspace ? "No image open" : "No project open"}
+                icon={<LambertMark className="!h-[108px] !w-[108px]" />}
                 message={
                   workspace
                     ? "Open an image from the Explorer to start placing shapes."
