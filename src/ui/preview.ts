@@ -3,7 +3,7 @@ import { flattenLayers, type ResolvedShape } from "../field/flatten";
 import { buildCompositeWgsl } from "../field/gpu/composite";
 import { packShapes } from "../field/gpu/pack";
 import { GpuFieldRenderer } from "../field/gpu/pipeline";
-import { GRID3D_WGSL, Orbit, orbitMvp, PREVIEW3D_WGSL } from "../field/gpu/preview3d";
+import { buildPreview3dWgsl, GRID3D_WGSL, Orbit, orbitMvp } from "../field/gpu/preview3d";
 import { renderField } from "../field/render";
 import { generateFull } from "../field/skyrat/normalmap";
 import type { LayerNode } from "../field/types";
@@ -42,11 +42,6 @@ export class PreviewRenderer {
   private ctx!: GPUCanvasContext;
   private compositePipeline!: GPURenderPipeline;
   private uniforms!: GPUBuffer;
-  private sizeKey = "";
-  /** Last folded layer tree (immutable from the store): reference equality = no re-fold. */
-  private lastShapes: LayerNode[] | null = null;
-  private fieldTex: GPUTexture | null = null;
-  private normalTex: GPUTexture | null = null;
   private diffuseTex: GPUTexture | null = null;
   // full-pipeline (Skyrat) preview: the diffuse RGBA kept for the CPU generator, the baked normal
   // texture (rgba32float, doc res), a 1x1 placeholder so the binding is always satisfiable, and a
@@ -103,7 +98,7 @@ export class PreviewRenderer {
       fragment: { module, entryPoint: "fs", targets: [{ format }] },
     });
     p.uniforms = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    const module3d = device.createShaderModule({ code: PREVIEW3D_WGSL });
+    const module3d = device.createShaderModule({ code: buildPreview3dWgsl() });
     p.pipeline3d = await device.createRenderPipelineAsync({
       layout: "auto",
       vertex: { module: module3d, entryPoint: "vs" },
@@ -111,7 +106,7 @@ export class PreviewRenderer {
       primitive: { topology: "triangle-list", cullMode: "none" },
       depthStencil: { format: "depth24plus", depthWriteEnabled: true, depthCompare: "less" },
     });
-    p.uniforms3d = device.createBuffer({ size: 96, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    p.uniforms3d = device.createBuffer({ size: 112, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     const moduleGrid = device.createShaderModule({ code: GRID3D_WGSL });
     p.pipelineGrid = await device.createRenderPipelineAsync({
       layout: "auto",
@@ -159,7 +154,7 @@ export class PreviewRenderer {
   }
 
   private render3D(docW: number, docH: number, p: PreviewParams): void {
-    if (!this.ctx3d || !this.canvas3d || !p.orbit3d || !this.fieldTex || !this.normalTex || !this.diffuseTex) return;
+    if (!this.ctx3d || !this.canvas3d || !p.orbit3d || !this.diffuseTex || !this.recordsBuf) return;
     const w = this.canvas3d.width;
     const h = this.canvas3d.height;
     if (!this.depth3d || this.depth3d.width !== w || this.depth3d.height !== h) {
@@ -176,9 +171,11 @@ export class PreviewRenderer {
     // instead of a shallow ramp smeared across a coarse cell. Capped so huge docs stay performant.
     const gw = Math.min(docW, GRID_MAX);
     const gh = Math.min(docH, GRID_MAX);
-    const ub = new ArrayBuffer(96);
+    const ub = new ArrayBuffer(112);
     new Float32Array(ub).set(mvp, 0);
     new Float32Array(ub).set([gw, gh, docW, docH, p.lightDir[0], p.lightDir[1], p.lightDir[2], 1], 16);
+    new Uint32Array(ub)[24] = this.shapeCount; // shapeCount (analytic fold loop bound)
+    new Float32Array(ub)[25] = 1; // slopeScale
     this.device.queue.writeBuffer(this.uniforms3d, 0, ub);
 
     // floor grid: a big quad at y=0 centred on the look-at target (lines are world-locked + fade out)
@@ -195,13 +192,18 @@ export class PreviewRenderer {
     gub[22] = halfSize * 0.5; // distance at which the grid fully fades
     this.device.queue.writeBuffer(this.uniformsGrid, 0, gub);
 
+    // analytic field eval reuses the SAME packed shape buffers the 2D composite uploads (records/
+    // points/mesh/masks); no pre-folded field/normal textures. diffuse stays at binding 3.
     const bind = this.device.createBindGroup({
       layout: this.pipeline3d.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: this.uniforms3d } },
-        { binding: 1, resource: this.fieldTex.createView() },
-        { binding: 2, resource: this.normalTex.createView() },
+        { binding: 1, resource: { buffer: this.recordsBuf! } },
+        { binding: 2, resource: { buffer: this.pointsBuf! } },
         { binding: 3, resource: this.diffuseTex.createView() },
+        { binding: 4, resource: { buffer: this.meshBuf! } },
+        { binding: 6, resource: { buffer: this.maskLoopsBuf! } },
+        { binding: 7, resource: { buffer: this.maskVertsBuf! } },
       ],
     });
     const gridBind = this.device.createBindGroup({
@@ -262,7 +264,6 @@ export class PreviewRenderer {
     this.device.queue.writeTexture({ texture: this.diffuseTex }, rgba, { bytesPerRow: width * 4 }, [width, height]);
     this.diffuseRGBA = rgba; // kept for the CPU Skyrat generator
     this.skyratShapes = null; // diffuse changed -> rebake the full-pipeline normals
-    this.sizeKey = ""; // force field texture rebuild on next render
   }
 
   /** Lazily (re)bake the full Skyrat normal map and upload it as a doc-res rgba32float texture.
@@ -345,29 +346,8 @@ export class PreviewRenderer {
   private renderNow(docW: number, docH: number, p: PreviewParams): void {
     if (!this.diffuseTex) return;
 
-    // doc-res field/normal textures: ONLY the 3D pass consumes them now (the 2D editor evaluates the
-    // field analytically in the composite). Fold lazily when 3D is open, cached on shape-list ref.
-    if (p.orbit3d) {
-      const key = `${docW}x${docH}`;
-      if (key !== this.sizeKey) {
-        this.fieldTex?.destroy();
-        this.normalTex?.destroy();
-        this.fieldTex = null;
-        this.normalTex = null;
-        this.lastShapes = null;
-        this.sizeKey = key;
-      }
-      if (!this.fieldTex || !this.normalTex || p.layers !== this.lastShapes) {
-        const existing =
-          this.fieldTex && this.normalTex ? { fieldTex: this.fieldTex, normalTex: this.normalTex } : undefined;
-        const tex = this.gpu.renderToTextures(flattenLayers(p.layers), docW, docH, existing);
-        this.fieldTex = tex.fieldTex;
-        this.normalTex = tex.normalTex;
-        this.lastShapes = p.layers;
-      }
-    }
-
-    // pack the shapes the analytic composite evaluates; re-pack only when the layer tree changes
+    // pack the shapes BOTH analytic passes evaluate (2D composite + 3D preview); re-pack only when the
+    // layer tree changes
     if (p.layers !== this.lastShapes2d || !this.recordsBuf) {
       this.packShapeBuffers(flattenLayers(p.layers));
       this.lastShapes2d = p.layers;

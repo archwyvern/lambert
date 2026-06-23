@@ -1,10 +1,17 @@
 /**
- * 3D inspection preview: a displaced grid over the height texture, lit with the SAME
- * image-space lambert as the 2D lit view (lighting cannot disagree between previews).
+ * 3D inspection preview: a displaced grid over the height field, lit with the SAME image-space
+ * lambert as the 2D lit view (lighting cannot disagree between previews). The field is evaluated
+ * ANALYTICALLY per vertex/fragment via the shared fold_at library — exactly like the 2D composite —
+ * so there is no pre-folded doc-res texture: cost scales with the panel's pixels, not the doc size.
  * Read-only diagnostic — the lit view remains the in-game ground truth.
  */
 
-export const PREVIEW3D_WGSL = /* wgsl */ `
+import { buildFieldLibWgsl } from "./wgsl";
+
+// Header: this pipeline's own uniform + diffuse bindings. The shape buffers (records/points/mesh/
+// masks at bindings 1,2,4,6,7) and fold_at come from buildFieldLibWgsl, spliced in below — the same
+// buffers the 2D composite already uploads, bound read-only here in the vertex + fragment stages.
+const PREVIEW3D_HEADER = /* wgsl */ `
 struct U {
   mvp: mat4x4f,
   gridW: f32,
@@ -15,11 +22,13 @@ struct U {
   lightY: f32,
   lightZ: f32,
   zScale: f32,
+  shapeCount: u32,
+  slopeScale: f32,
+  _pad0: f32,
+  _pad1: f32,
 }
 
 @group(0) @binding(0) var<uniform> u: U;
-@group(0) @binding(1) var fieldTex: texture_2d<f32>;
-@group(0) @binding(2) var normalTex: texture_2d<f32>;
 @group(0) @binding(3) var diffuseTex: texture_2d<f32>;
 
 struct VOut {
@@ -28,20 +37,21 @@ struct VOut {
   @location(1) world: vec3f,
 }
 
-fn height_at(px: vec2i) -> f32 {
-  let c = clamp(px, vec2i(0), vec2i(i32(u.docW) - 1, i32(u.docH) - 1));
-  return textureLoad(fieldTex, c, 0).r;
+// minmod of the two one-sided slopes — keep real slopes, drop cliffs to flat. Must match
+// deriveNormals() (CPU) and the fold normal pass exactly.
+fn minmod(a: f32, b: f32) -> f32 {
+  if (a * b <= 0.0) { return 0.0; }
+  return select(b, a, abs(a) < abs(b));
 }
+`;
 
-fn height_bilinear(p: vec2f) -> f32 {
-  let f = p - vec2f(0.5);
-  let i0 = vec2i(floor(f));
-  let t = fract(f);
-  let h00 = height_at(i0);
-  let h10 = height_at(i0 + vec2i(1, 0));
-  let h01 = height_at(i0 + vec2i(0, 1));
-  let h11 = height_at(i0 + vec2i(1, 1));
-  return mix(mix(h00, h10, t.x), mix(h01, h11, t.x), t.y);
+const PREVIEW3D_BODY = /* wgsl */ `
+// Height at a doc pixel center, clamped to the canvas — the analytic equivalent of sampling the old
+// doc-res field texture at integer coords (the fold shader wrote fold_at((x+0.5, y+0.5)) at texel x,y).
+fn height_at_px(ix: i32, iy: i32) -> f32 {
+  let cx = clamp(ix, 0, i32(u.docW) - 1);
+  let cy = clamp(iy, 0, i32(u.docH) - 1);
+  return fold_at(vec2f(f32(cx) + 0.5, f32(cy) + 0.5), u.shapeCount).x;
 }
 
 @vertex
@@ -62,7 +72,7 @@ fn vs(@builtin(vertex_index) vi: u32) -> VOut {
   let g = vec2f(f32(qx + off.x), f32(qy + off.y));
   let uv = g / vec2f(u.gridW, u.gridH);
   let pcanvas = uv * vec2f(u.docW, u.docH);
-  let h = height_bilinear(pcanvas) * u.zScale;
+  let h = fold_at(pcanvas, u.shapeCount).x * u.zScale;
   // world: x = canvas x (centered), y = height (up), z = canvas y (centered)
   let world = vec3f(pcanvas.x - u.docW * 0.5, h, pcanvas.y - u.docH * 0.5);
   var out: VOut;
@@ -74,27 +84,38 @@ fn vs(@builtin(vertex_index) vi: u32) -> VOut {
 
 @fragment
 fn fs(in: VOut) -> @location(0) vec4f {
-  let px = clamp(
-    vec2i(in.uv * vec2f(u.docW, u.docH)),
-    vec2i(0),
-    vec2i(i32(u.docW) - 1, i32(u.docH) - 1),
-  );
   // hide near-vertical cliff faces (from hard height steps: silhouettes, z-position, scale, masks) so
   // the relief reads like an orthographic bake instead of a walled extrusion. The triangle's geometric
   // normal comes from the screen-space derivatives of its world position; its up-component (.y) is ~0
   // for a vertical wall, ~1 for flat ground. Discarding the walls leaves the floor grid showing through.
   let geoN = normalize(cross(dpdx(in.world), dpdy(in.world)));
   if (abs(geoN.y) < 0.35) { discard; }
-  // lambert entirely in image space: identical shading to the 2D lit composite
+  let px = clamp(
+    vec2i(in.uv * vec2f(u.docW, u.docH)),
+    vec2i(0),
+    vec2i(i32(u.docW) - 1, i32(u.docH) - 1),
+  );
   let diffuse = textureLoad(diffuseTex, px, 0);
   if (diffuse.a < 0.5) { discard; } // transparent diffuse -> see the floor grid through it
-  let n = textureLoad(normalTex, px, 0).xyz;
+  // analytic image-space normal: minmod of one-sided slopes at this doc pixel — identical math to the
+  // 2D lit composite / deriveNormals, so the two previews can never disagree.
+  let c = height_at_px(px.x, px.y);
+  let dx = minmod(height_at_px(px.x + 1, px.y) - c, c - height_at_px(px.x - 1, px.y)) * u.slopeScale;
+  let dy = minmod(height_at_px(px.x, px.y + 1) - c, c - height_at_px(px.x, px.y - 1)) * u.slopeScale;
+  let inv = inverseSqrt(dx * dx + dy * dy + 1.0);
+  let n = vec3f(-dx * inv, -dy * inv, inv);
   let albedo = diffuse.rgb;
   let l = normalize(vec3f(u.lightX, u.lightY, u.lightZ));
   let shade = 0.25 + 0.75 * max(dot(n, l), 0.0);
   return vec4f(albedo * shade, 1.0);
 }
 `;
+
+/** Assemble the 3D preview module: header bindings + the shared field lib (fold_at + shape buffers)
+ *  + the displaced-grid vertex/fragment. */
+export function buildPreview3dWgsl(): string {
+  return PREVIEW3D_HEADER + buildFieldLibWgsl() + PREVIEW3D_BODY;
+}
 
 /**
  * Infinite floor grid: a big quad at y=0 centred on the look-at target. The grid lines are
