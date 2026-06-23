@@ -1,7 +1,7 @@
 import { ArrowRedoRegular, ArrowUndoRegular } from "@fluentui/react-icons";
 import { Badge, IconButton, MenuBar } from "@carapace/shell";
 import type { MenuModel } from "@carapace/shell";
-import appIcon from "../../build/icon.png";
+import { LambertMark } from "./LambertMark";
 import type { DocumentStore, EditorState } from "../document/store";
 import type { ViewState } from "./App";
 import { cx } from "./kit";
@@ -21,7 +21,7 @@ export function Toolbar(props: {
   const { menu, store, state, view, setView, snap, setSnap } = props;
   return (
     <header className="flex h-control shrink-0 items-center gap-2 border-b border-border bg-bg px-2">
-      <img src={appIcon} alt="" className="ml-1 h-[18px] w-[18px] shrink-0" draggable={false} />
+      <LambertMark className="ml-1 h-[18px] w-[18px] shrink-0" />
       <MenuBar menu={menu} />
       {store && state && view && setView ? (
         <FileControls store={store} state={state} view={view} setView={setView} snap={snap} setSnap={setSnap} />
