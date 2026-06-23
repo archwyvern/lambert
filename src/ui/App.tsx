@@ -29,6 +29,7 @@ import { usePersistentState } from "./persist";
 import { Sash, EditorTabs, StatusBar, useConfirm, useToast, EmptyState } from "@carapace/shell";
 import { Toolbar } from "./Toolbar";
 import { LambertMark } from "./LambertMark";
+import { AboutDialog } from "./AboutDialog";
 import type { ViewMode } from "./preview";
 import { VIEW_MODES } from "./preview";
 import { TOOL_KEYS, ToolMode } from "./tools";
@@ -70,6 +71,8 @@ export function App(): React.JSX.Element {
   const [orbits, setOrbits] = useState<Record<string, Orbit>>({}); // per-image 3D camera
   const [tool, setTool] = useState<ToolMode>("select");
   const [selVerts, setSelVerts] = useState<number[]>([]);
+  const [showAbout, setShowAbout] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
   const selVertsRef = useRef(selVerts);
   selVertsRef.current = selVerts;
   const nudgeEndTimer = useRef<ReturnType<typeof setTimeout> | null>(null); // commits a nudge burst's undo group
@@ -96,6 +99,13 @@ export function App(): React.JSX.Element {
         if (typeof msg === "string") notify(msg);
       })
       .catch((err: unknown) => notify(err instanceof Error ? err.message : String(err), "error"));
+  // transient status-bar message (e.g. "Saved …") — replaces the old save toast; auto-clears
+  const statusTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const flashStatus = (msg: string): void => {
+    setStatus(msg);
+    if (statusTimer.current) clearTimeout(statusTimer.current);
+    statusTimer.current = setTimeout(() => setStatus(null), 4000);
+  };
 
   // re-render whenever the workspace structure or the active document changes
   useEffect(() => (workspace ? workspace.subscribe(forceUpdate) : undefined), [workspace]);
@@ -183,19 +193,19 @@ export function App(): React.JSX.Element {
     const ws = workspaceRef.current;
     const t = ws?.active;
     if (!ws || !t) return;
-    run(saveTab(getHost(), t).then((p) => `Saved ${p}`));
+    saveTab(getHost(), t)
+      .then((p) => flashStatus(`Saved ${basename(p)}`))
+      .catch((err: unknown) => notify(err instanceof Error ? err.message : String(err), "error"));
   };
 
   const saveAll = (): void => {
     const ws = workspaceRef.current;
     if (!ws) return;
-    run(
-      (async () => {
-        const dirty = ws.tabs.filter((t) => t.store.state.dirty);
-        for (const t of dirty) await saveTab(getHost(), t);
-        return `Saved ${dirty.length} file${dirty.length === 1 ? "" : "s"}`;
-      })(),
-    );
+    void (async () => {
+      const dirty = ws.tabs.filter((t) => t.store.state.dirty);
+      for (const t of dirty) await saveTab(getHost(), t);
+      flashStatus(`Saved ${dirty.length} file${dirty.length === 1 ? "" : "s"}`);
+    })().catch((err: unknown) => notify(err instanceof Error ? err.message : String(err), "error"));
   };
 
   const exportActive = (): void => {
@@ -614,7 +624,11 @@ export function App(): React.JSX.Element {
     },
     {
       label: "&&Help",
-      items: [{ label: "Check for Updates…", run: () => runMenuAction("check-updates") }],
+      items: [
+        { label: "Check for Updates…", run: () => runMenuAction("check-updates") },
+        { separator: true },
+        { label: "About Lambert", run: () => setShowAbout(true) },
+      ],
     },
   ];
 
@@ -629,6 +643,7 @@ export function App(): React.JSX.Element {
         snap={snap}
         setSnap={setSnap}
       />
+      {showAbout ? <AboutDialog onClose={() => setShowAbout(false)} /> : null}
       <div className="flex min-h-0 flex-1">
         {workspace ? (
           <>
@@ -764,7 +779,7 @@ export function App(): React.JSX.Element {
         </div>
       </div>
       <StatusBar
-        left={null}
+        left={status}
         right={state ? `${state.doc.source.width}×${state.doc.source.height} · ${flattenLayers(state.doc.layers).length} shapes` : null}
       />
       <UpdateNotice />
