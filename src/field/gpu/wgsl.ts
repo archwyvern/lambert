@@ -12,14 +12,14 @@ export const MAX_PARAMS = 8;
 // fragment does NOT include these (it has its own uniforms + a diffuse texture instead).
 const FOLD_IO = /* wgsl */ `
 struct Uniforms {
-  width: u32,
+  width: u32,        // dispatch extent (tile size), NOT the full texture
   height: u32,
   shapeCount: u32,
-  originX: f32,
+  originX: f32,      // world-space sample origin (shifts WHERE we evaluate)
   originY: f32,
-  step: f32, // doc px per output px (1 for doc-res + tiling)
-  _pad1: f32,
-  _pad2: f32,
+  step: f32,         // doc px per output px (1 for doc-res + tiling)
+  writeOffsetX: u32, // texture write offset: tile lands at writeOffset+gid in a shared output texture
+  writeOffsetY: u32, // 0 for the per-tile-texture readback path (evaluateTile)
 }
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -295,7 +295,7 @@ fn fold(@builtin(global_invocation_id) gid: vec3u) {
   if (gid.x >= u.width || gid.y >= u.height) { return; }
   let p = vec2f((f32(gid.x) + 0.5) * u.step + u.originX, (f32(gid.y) + 0.5) * u.step + u.originY);
   let r = fold_at(p, u.shapeCount);
-  textureStore(outField, vec2u(gid.xy), vec4f(r.x, r.y, 0.0, 0.0));
+  textureStore(outField, vec2u(gid.x + u.writeOffsetX, gid.y + u.writeOffsetY), vec4f(r.x, r.y, 0.0, 0.0));
 }
 `;
 
