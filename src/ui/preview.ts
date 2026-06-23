@@ -36,13 +36,18 @@ export interface PreviewParams {
   orbit3d?: Orbit | null;
 }
 
-/** Owns the WebGPU canvas: doc-res field/normal textures + screen composite. */
+/** Owns the WebGPU canvas: the analytic 2D composite + the 3D inspection pass (both evaluate the
+ *  field straight from the packed shape buffers — no pre-folded textures). */
 export class PreviewRenderer {
   private gpu!: GpuFieldRenderer;
   private ctx!: GPUCanvasContext;
   private compositePipeline!: GPURenderPipeline;
   private uniforms!: GPUBuffer;
   private diffuseTex: GPUTexture | null = null;
+  // Decoded diffuse cache keyed on the source byte buffer (stable per open tab). Switching tabs just
+  // rebinds the cached texture instead of re-decoding a multi-MP PNG + re-uploading. Bounded by open
+  // tabs: when a tab closes its bytes are unreachable, so the entry (and its GPU texture) is GC'd.
+  private diffuseCache = new WeakMap<Uint8Array, { tex: GPUTexture; rgba: Uint8Array }>();
   // full-pipeline (Skyrat) preview: the diffuse RGBA kept for the CPU generator, the baked normal
   // texture (rgba32float, doc res), a 1x1 placeholder so the binding is always satisfiable, and a
   // cache key (layer-tree ref + size) so the heavy CPU pass only re-runs when the inputs change.
@@ -243,6 +248,14 @@ export class PreviewRenderer {
   }
 
   setDiffuse(pngBytes: Uint8Array, width: number, height: number): void {
+    // Switching back to an already-decoded tab: rebind its texture, skip the decode/build/upload.
+    const cached = this.diffuseCache.get(pngBytes);
+    if (cached) {
+      this.diffuseTex = cached.tex;
+      this.diffuseRGBA = cached.rgba;
+      this.skyratShapes = null;
+      return;
+    }
     const decoded = decode(pngBytes);
     if (decoded.width !== width || decoded.height !== height) throw new Error("diffuse dims mismatch");
     const rgba = new Uint8Array(width * height * 4);
@@ -255,13 +268,15 @@ export class PreviewRenderer {
       rgba[i * 4 + 2] = ch >= 3 ? decoded.data[s + 2]! : r;
       rgba[i * 4 + 3] = ch === 2 || ch === 4 ? decoded.data[s + ch - 1]! : 255;
     }
-    this.diffuseTex?.destroy();
-    this.diffuseTex = this.device.createTexture({
+    // Don't destroy the outgoing texture: it's owned by the cache (another tab may still need it).
+    const tex = this.device.createTexture({
       size: [width, height],
       format: "rgba8unorm",
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
     });
-    this.device.queue.writeTexture({ texture: this.diffuseTex }, rgba, { bytesPerRow: width * 4 }, [width, height]);
+    this.device.queue.writeTexture({ texture: tex }, rgba, { bytesPerRow: width * 4 }, [width, height]);
+    this.diffuseCache.set(pngBytes, { tex, rgba });
+    this.diffuseTex = tex;
     this.diffuseRGBA = rgba; // kept for the CPU Skyrat generator
     this.skyratShapes = null; // diffuse changed -> rebake the full-pipeline normals
   }
