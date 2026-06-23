@@ -1,17 +1,40 @@
 import { ArrowRedoRegular, ArrowUndoRegular } from "@fluentui/react-icons";
-import { Badge, IconButton } from "@carapace/shell";
+import { Badge, IconButton, MenuBar } from "@carapace/shell";
+import type { MenuModel } from "@carapace/shell";
 import appIcon from "../../build/icon.png";
 import type { DocumentStore, EditorState } from "../document/store";
 import type { ViewState } from "./App";
 import { cx } from "./kit";
 import { VIEW_MODES, ViewMode } from "./preview";
 
+/** Always-present VS Code-style top bar: logo + in-window menu bar. The file-editing controls
+ *  (undo/redo, doc path, view toggles) only appear once an image is open. */
 export function Toolbar(props: {
+  menu: MenuModel;
+  store?: DocumentStore;
+  state?: EditorState;
+  view?: ViewState;
+  setView?: (fn: (v: ViewState) => ViewState) => void;
+  snap: boolean;
+  setSnap: (fn: (s: boolean) => boolean) => void;
+}): React.JSX.Element {
+  const { menu, store, state, view, setView, snap, setSnap } = props;
+  return (
+    <header className="flex h-control shrink-0 items-center gap-2 border-b border-border bg-bg px-2">
+      <img src={appIcon} alt="" className="ml-1 h-[18px] w-[18px] shrink-0" draggable={false} />
+      <MenuBar menu={menu} />
+      {store && state && view && setView ? (
+        <FileControls store={store} state={state} view={view} setView={setView} snap={snap} setSnap={setSnap} />
+      ) : null}
+    </header>
+  );
+}
+
+function FileControls(props: {
   store: DocumentStore;
   state: EditorState;
   view: ViewState;
   setView: (fn: (v: ViewState) => ViewState) => void;
-  /** Global ½px grid snap (positions, vertices, polygon + curve points). */
   snap: boolean;
   setSnap: (fn: (s: boolean) => boolean) => void;
 }): React.JSX.Element {
@@ -19,11 +42,8 @@ export function Toolbar(props: {
   const pct = Math.round(view.opacity * 100);
 
   return (
-    <header className="flex h-control shrink-0 items-center gap-2 border-b border-border bg-bg px-2">
-      <img src={appIcon} alt="" className="ml-1 h-[18px] w-[18px] shrink-0" draggable={false} />
-      <span className="mr-1 shrink-0 text-base font-semibold text-fg">Lambert</span>
-
-      <div className="flex shrink-0 items-stretch overflow-hidden border border-border">
+    <>
+      <div className="ml-1 flex shrink-0 items-stretch overflow-hidden border border-border">
         <IconButton
           size="md"
           className="h-[26px] w-[30px] rounded-none border-r border-border"
@@ -125,6 +145,6 @@ export function Toolbar(props: {
           </button>
         ) : null}
       </div>
-    </header>
+    </>
   );
 }

@@ -23,7 +23,7 @@ import { Library } from "./Library";
 import { Button, SectionLabel } from "./kit";
 import { UpdateNotice } from "./UpdateNotice";
 import { FileExplorer } from "@carapace/shell";
-import type { DirEntry, FileExplorerProps } from "@carapace/shell";
+import type { DirEntry, FileExplorerProps, MenuModel } from "@carapace/shell";
 import { DocumentRegular, FolderRegular, ImageRegular } from "@fluentui/react-icons";
 import { usePersistentState } from "./persist";
 import { Sash, EditorTabs, StatusBar, useConfirm, useToast, EmptyState } from "@carapace/shell";
@@ -247,68 +247,73 @@ export function App(): React.JSX.Element {
     });
   };
 
-  // application-menu actions (accelerators live in the menu, not in keydown)
+  // application-menu actions — shared by the OS-menu accelerators (via onMenuAction) and the
+  // in-window MenuBar (the menuModel built below). Defined in render so it sees fresh state; the
+  // IPC listener calls the latest via a ref so it registers only once.
+  const runMenuAction = (action: string): void => {
+    const t = workspaceRef.current?.active;
+    const ids = t?.store.state.selectedIds ?? [];
+    switch (action) {
+      case "new-project":
+        return openProject("new");
+      case "open-project":
+        return openProject("open");
+      case "save":
+        return saveActive();
+      case "save-all":
+        return saveAll();
+      case "export-nx":
+        return exportActive();
+      case "undo":
+        return t?.store.undo();
+      case "redo":
+        return t?.store.redo();
+      case "duplicate":
+        if (t && ids.length) {
+          t.store.update((d) => ids.reduce((acc, sid) => duplicateShape(acc, sid), d));
+          t.store.endGesture();
+        }
+        return;
+      case "delete":
+        if (t && ids.length) {
+          t.store.update((d) => ids.reduce((acc, sid) => removeShape(acc, sid), d));
+          t.store.endGesture();
+        }
+        return;
+      case "group":
+        if (t && ids.length) {
+          const gid = crypto.randomUUID();
+          t.store.update((d) => ({ ...d, layers: wrapInGroup(d.layers, ids, gid, d.canvas.origin) }));
+          t.store.endGesture();
+          t.store.select(gid);
+        }
+        return;
+      case "ungroup":
+        if (t && ids.length) {
+          // dissolve each selected group (non-groups + shear-blocked ones are left as-is)
+          t.store.update((d) =>
+            ids.reduce((acc, sid) => {
+              const n = findNode(acc.layers, sid);
+              if (!n || !isGroup(n)) return acc;
+              const next = ungroup(acc.layers, sid);
+              return next ? { ...acc, layers: next } : acc;
+            }, d),
+          );
+          t.store.endGesture();
+        }
+        return;
+      case "zoom-fit":
+      case "zoom-100":
+        window.dispatchEvent(new CustomEvent("lambert-zoom", { detail: action }));
+        return;
+      case "toggle-rulers":
+        return setRulers((r) => !r);
+    }
+  };
+  const runMenuActionRef = useRef(runMenuAction);
+  runMenuActionRef.current = runMenuAction;
   useEffect(() => {
-    getHost().onMenuAction((action) => {
-      const t = workspaceRef.current?.active;
-      const ids = t?.store.state.selectedIds ?? [];
-      switch (action) {
-        case "new-project":
-          return openProject("new");
-        case "open-project":
-          return openProject("open");
-        case "save":
-          return saveActive();
-        case "save-all":
-          return saveAll();
-        case "export-nx":
-          return exportActive();
-        case "undo":
-          return t?.store.undo();
-        case "redo":
-          return t?.store.redo();
-        case "duplicate":
-          if (t && ids.length) {
-            t.store.update((d) => ids.reduce((acc, sid) => duplicateShape(acc, sid), d));
-            t.store.endGesture();
-          }
-          return;
-        case "delete":
-          if (t && ids.length) {
-            t.store.update((d) => ids.reduce((acc, sid) => removeShape(acc, sid), d));
-            t.store.endGesture();
-          }
-          return;
-        case "group":
-          if (t && ids.length) {
-            const gid = crypto.randomUUID();
-            t.store.update((d) => ({ ...d, layers: wrapInGroup(d.layers, ids, gid, d.canvas.origin) }));
-            t.store.endGesture();
-            t.store.select(gid);
-          }
-          return;
-        case "ungroup":
-          if (t && ids.length) {
-            // dissolve each selected group (non-groups + shear-blocked ones are left as-is)
-            t.store.update((d) =>
-              ids.reduce((acc, sid) => {
-                const n = findNode(acc.layers, sid);
-                if (!n || !isGroup(n)) return acc;
-                const next = ungroup(acc.layers, sid);
-                return next ? { ...acc, layers: next } : acc;
-              }, d),
-            );
-            t.store.endGesture();
-          }
-          return;
-        case "zoom-fit":
-        case "zoom-100":
-          window.dispatchEvent(new CustomEvent("lambert-zoom", { detail: action }));
-          return;
-        case "toggle-rulers":
-          return setRulers((r) => !r);
-      }
-    });
+    getHost().onMenuAction((a) => runMenuActionRef.current(a));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -570,50 +575,98 @@ export function App(): React.JSX.Element {
     ? workspace.tabs.map((t) => ({ imagePath: t.imagePath, name: basename(t.imagePath), dirty: t.store.state.dirty }))
     : [];
 
+  const hasSel = !!state && state.selectedIds.length > 0;
+  const menuModel: MenuModel = [
+    {
+      label: "&&File",
+      items: [
+        { label: "New Project…", shortcut: "Ctrl+Shift+N", run: () => runMenuAction("new-project") },
+        { label: "Open Project…", shortcut: "Ctrl+O", run: () => runMenuAction("open-project") },
+        { separator: true },
+        { label: "Save", shortcut: "Ctrl+S", enabled: !!active, run: () => runMenuAction("save") },
+        { label: "Save All", shortcut: "Ctrl+Shift+S", enabled: !!workspace, run: () => runMenuAction("save-all") },
+        { separator: true },
+        { label: "Export NX", shortcut: "Ctrl+E", enabled: !!active, run: () => runMenuAction("export-nx") },
+      ],
+    },
+    {
+      label: "&&Edit",
+      items: [
+        { label: "Undo", shortcut: "Ctrl+Z", enabled: !!active?.store.canUndo, run: () => runMenuAction("undo") },
+        { label: "Redo", shortcut: "Ctrl+Y", enabled: !!active?.store.canRedo, run: () => runMenuAction("redo") },
+        { separator: true },
+        { label: "Duplicate", shortcut: "Ctrl+D", enabled: hasSel, run: () => runMenuAction("duplicate") },
+        { label: "Delete", enabled: hasSel, run: () => runMenuAction("delete") },
+        { separator: true },
+        { label: "Group", shortcut: "Ctrl+G", enabled: hasSel, run: () => runMenuAction("group") },
+        { label: "Ungroup", shortcut: "Ctrl+Shift+G", enabled: hasSel, run: () => runMenuAction("ungroup") },
+      ],
+    },
+    {
+      label: "&&View",
+      items: [
+        { label: "Fit", shortcut: "Ctrl+0", enabled: !!active, run: () => runMenuAction("zoom-fit") },
+        { label: "100%", shortcut: "Ctrl+1", enabled: !!active, run: () => runMenuAction("zoom-100") },
+        { separator: true },
+        { label: "Rulers", shortcut: "Ctrl+R", enabled: !!active, run: () => runMenuAction("toggle-rulers") },
+      ],
+    },
+    {
+      label: "&&Help",
+      items: [{ label: "Check for Updates…", run: () => runMenuAction("check-updates") }],
+    },
+  ];
+
   return (
     <div className="flex h-screen flex-col bg-bg text-base text-fg">
-      {active && state ? (
-        <Toolbar store={active.store} state={state} view={activeView} setView={setActiveView} snap={snap} setSnap={setSnap} />
-      ) : (
-        <div className="flex h-[38px] shrink-0 items-center border-b border-border bg-surface2 px-3 text-base font-semibold tracking-wide text-fg-mid">
-          Lambert
-        </div>
-      )}
+      <Toolbar
+        menu={menuModel}
+        store={active?.store}
+        state={active && state ? state : undefined}
+        view={activeView}
+        setView={setActiveView}
+        snap={snap}
+        setSnap={setSnap}
+      />
       <div className="flex min-h-0 flex-1">
-        <aside className="flex shrink-0 flex-col gap-3 bg-bg p-3" style={{ width: leftWidth }}>
-          <Library enabled={!!active} onPick={pickShape} />
-          {active && state ? <Layers store={active.store} state={state} /> : null}
-          {workspace ? (
-            <div className="flex min-h-0 flex-1 flex-col">
-              <SectionLabel>Explorer</SectionLabel>
-              {/* bump just the file tree to 13px (JetBrains-ish) by scoping carapace's
-                  --text-sm token to this subtree; leaves every other text-sm + carapace untouched */}
-              <div className="-mx-1 min-h-0 flex-1 overflow-y-auto" style={{ ["--text-sm" as string]: "0.8125rem" }}>
-                {/* getIcon cast bridges a duplicate @types/react (carapace pins 19.0, lambert
-                    19.2); the ReactNode shapes are identical, only nominally distinct */}
-                <FileExplorer
-                  root={workspace.projectPath}
-                  onOpen={(p) => {
-                    if (/\.png$/i.test(p) && !/\.nx\.png$/i.test(p)) openImage(p);
-                  }}
-                  getIcon={fileIcon as FileExplorerProps["getIcon"]}
-                  exclude={(e) => (e.isDir ? IGNORED_DIRS.has(e.name) : /\.(lnb|flatland)$/i.test(e.name))}
-                  ariaLabel="Project files"
-                  storageKey="lambert.explorer.expanded"
-                />
+        {workspace ? (
+          <>
+            <aside className="flex shrink-0 flex-col gap-3 bg-bg p-3" style={{ width: leftWidth }}>
+              {active ? <Library enabled onPick={pickShape} /> : null}
+              {active && state ? <Layers store={active.store} state={state} /> : null}
+              <div className="flex min-h-0 flex-1 flex-col">
+                <SectionLabel>Explorer</SectionLabel>
+                {/* bump just the file tree to 13px (JetBrains-ish) by scoping carapace's
+                    --text-sm token to this subtree; leaves every other text-sm + carapace untouched */}
+                <div className="-mx-1 min-h-0 flex-1 overflow-y-auto" style={{ ["--text-sm" as string]: "0.8125rem" }}>
+                  {/* getIcon cast bridges a duplicate @types/react (carapace pins 19.0, lambert
+                      19.2); the ReactNode shapes are identical, only nominally distinct */}
+                  <FileExplorer
+                    root={workspace.projectPath}
+                    onOpen={(p) => {
+                      if (/\.png$/i.test(p) && !/\.nx\.png$/i.test(p)) openImage(p);
+                    }}
+                    getIcon={fileIcon as FileExplorerProps["getIcon"]}
+                    exclude={(e) => (e.isDir ? IGNORED_DIRS.has(e.name) : /\.(lnb|flatland)$/i.test(e.name))}
+                    ariaLabel="Project files"
+                    storageKey="lambert.explorer.expanded"
+                  />
+                </div>
               </div>
-            </div>
-          ) : null}
-        </aside>
-        {active ? <ToolPalette tool={tool} setTool={setTool} /> : null}
-        <Sash orientation="vertical" onDrag={(dx) => setLeftWidth((w) => clampPanel(w + dx))} />
+            </aside>
+            {active ? <ToolPalette tool={tool} setTool={setTool} /> : null}
+            <Sash orientation="vertical" onDrag={(dx) => setLeftWidth((w) => clampPanel(w + dx))} />
+          </>
+        ) : null}
         <div className="flex min-w-0 flex-1 flex-col">
-          <EditorTabs
-            tabs={tabInfos.map((t) => ({ id: t.imagePath, title: t.name, dirty: t.dirty }))}
-            activeId={tabInfos[workspace?.activeIndex ?? -1]?.imagePath ?? null}
-            onSelect={(id) => workspaceRef.current?.focus(id)}
-            onClose={closeImage}
-          />
+          {tabInfos.length > 0 ? (
+            <EditorTabs
+              tabs={tabInfos.map((t) => ({ id: t.imagePath, title: t.name, dirty: t.dirty }))}
+              activeId={tabInfos[workspace?.activeIndex ?? -1]?.imagePath ?? null}
+              onSelect={(id) => workspaceRef.current?.focus(id)}
+              onClose={closeImage}
+            />
+          ) : null}
           {active && state ? (
             <div
               className="grid min-h-0 flex-1"
