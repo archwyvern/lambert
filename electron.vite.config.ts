@@ -1,5 +1,6 @@
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig, externalizeDepsPlugin } from "electron-vite";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 // @carapace/shell is a github-declared dependency, but in development the renderer
@@ -13,11 +14,16 @@ import { resolve } from "node:path";
 // node builtins) stays external via externalizeDepsPlugin's defaults.
 const BUNDLE = ["@carapace/shell", "chokidar", "electron-updater"];
 
+// Baked into the renderer for the About dialog; reflects the version electron-builder packages
+// (CI bumps package.json before the build, so this is the released version).
+const appVersion = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")).version;
+
 export default defineConfig({
   main: { plugins: [externalizeDepsPlugin({ exclude: BUNDLE })] },
   preload: { plugins: [externalizeDepsPlugin({ exclude: BUNDLE })] },
   renderer: {
     plugins: [tailwindcss()],
+    define: { __APP_VERSION__: JSON.stringify(appVersion) },
     resolve: {
       // carapace is aliased to its SOURCE, which imports react itself — force a SINGLE react instance
       // (else carapace's hooks hit a different react copy: "Invalid hook call / null useState").
