@@ -26,6 +26,13 @@ linux:
   maintainer: Archwyvern <codekestrel@googlemail.com>
   synopsis: Shape-based height-field authoring for normal maps.
 
+# Version-less AppImage filename. electron-updater can only overwrite the running AppImage IN PLACE
+# when the new file shares its basename; a versioned default name (Lambert-${version}.AppImage)
+# forces a delete-old + write-new-name, which strands the .desktop launcher's Exec at the deleted
+# path (the 0.1.0 -> 0.1.1 "not found in $PATH" failure). A fixed name updates seamlessly forever.
+appImage:
+  artifactName: ${productName}.${ext}
+
 win:
   target:
     - nsis
