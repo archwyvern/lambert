@@ -1,14 +1,13 @@
 import { useState } from "react";
 import type { DocumentStore } from "../document/store";
-import { removeShapeVertices, updateShape } from "../document/docOps";
+import { removeObjectVertices, updateObject } from "../document/docOps";
 import { findNode, nodeFrames } from "../document/layerOps";
 import type { LambertDoc } from "../document/schema";
 import { affineApply } from "../field/affine";
 
-import { frustumStrip, insertVertex } from "../field/controlPoints";
-import { BezierAnchor, bezierSpine, nearestOnSpine, resolveHandles, splitSegment } from "../field/bezier";
+import { insertVertex } from "../field/controlPoints";
+import { bakeMaskLoop, bakeRings, bakeRingsUniform, bezierAnchor, BezierAnchor, bezierSpine, nearestOnSpine, resolveHandles, resolveHandlesClosed, splitSegment, splitSubpaths } from "../field/bezier";
 import { dragHandle, isCornerAnchor as isCorner, movePoint, toggleMode } from "../field/bezierEdit";
-import { CABLE_SUB } from "../field/shapes/cable";
 import {
   alignVertToPlane,
   connectVerts,
@@ -18,14 +17,14 @@ import {
   neighborsOf,
   splitEdge,
 } from "../field/meshOps";
-import { getShapeType } from "../field/registry";
+import { getObjectType, ObjectTypeId } from "../field/registry";
 import { alignedToAxis } from "../field/snap";
 import { editSnap } from "./snapPoint";
 import { fromLocal } from "../field/transform";
-import { isGroup, isShape, type ShapeInstance } from "../field/types";
+import { isGroup, isObject, type ObjectInstance } from "../field/types";
 import { GroupGizmo } from "./GroupGizmo";
 import { MaskGizmo } from "./MaskGizmo";
-import { localBounds, paddedCorners } from "./shapeBounds";
+import { localBounds, paddedCorners } from "./objectBounds";
 import { Vector2, Vector3 } from "@carapace/primitives";
 import { v2 } from "../field/vec";
 import { ContextMenu, MenuEntry } from "./kit";
@@ -37,9 +36,9 @@ import { usePointerDrag } from "./usePointerDrag";
 import { AnchorHandles, CornerHandles, GizmoHalo, RotateKnobs } from "./gizmoChrome";
 
 /** Forward of toLocal: scale THEN rotate, then translate (pinned by picking.test.ts). */
-const localToCanvas = (s: ShapeInstance, cp: Vector2): Vector2 => fromLocal(s.transform, cp);
+const localToCanvas = (s: ObjectInstance, cp: Vector2): Vector2 => fromLocal(s.transform, cp);
 
-/** The shape transform-handle drag snapshot (corner/edge scale + rotate baseline). */
+/** The object transform-handle drag snapshot (corner/edge scale + rotate baseline). */
 interface DragSnap {
   start: Vector2;
   rotation: number;
@@ -82,7 +81,7 @@ export function Gizmos(props: {
   const snapPt = editSnap(doc.canvas, snap, viewport.zoom);
   const selNode = selectedId ? findNode(doc.layers, selectedId) : null;
   const unlocked = !selNode?.locked;
-  const handles = tool === "select" && unlocked; // shape transform handles (corners/edges)
+  const handles = tool === "select" && unlocked; // object transform handles (corners/edges)
   const vertHandles = (tool === "select" || tool === "vertex") && unlocked; // vertex dots + group
   const bezierDrag = usePointerDrag<{ kind: "point" | "in" | "out"; i: number }>(); // cable pen edit
   const dragState = usePointerDrag<DragSnap>();
@@ -102,9 +101,9 @@ export function Gizmos(props: {
     edge: { ia: number; ib: number; t: number } | null;
   } | null>(null);
   const [cableMenu, setCableMenu] = useState<{ x: number; y: number; i: number } | null>(null);
-  const shape = selNode && isShape(selNode) ? selNode : undefined;
-  if (!shape) {
-    // a group has no shape body — render its transform gizmo + its mask editor (edit anchors on canvas)
+  const object = selNode && isObject(selNode) ? selNode : undefined;
+  if (!object) {
+    // a group has no object body — render its transform gizmo + its mask editor (edit anchors on canvas)
     if (!selNode || !isGroup(selNode)) return null;
     return (
       <>
@@ -116,18 +115,18 @@ export function Gizmos(props: {
     );
   }
 
-  // resolve the shape's frames so the gizmo overlay + editing line up with the FIELD even when the
-  // shape is nested in groups. parentAffine = the shape's parent frame (local TRS edits live in it);
-  // worldAffine = full local->world. For a top-level shape parentAffine is identity and worldAffine
-  // equals fromLocal(shape.transform), so all of this reduces to the original (unchanged) behaviour.
-  const { parentAffine, invParent, worldAffine, invWorld } = nodeFrames(doc.layers, shape.id);
-  /** shape-local point -> screen px (through every ancestor group). */
+  // resolve the object's frames so the gizmo overlay + editing line up with the FIELD even when the
+  // object is nested in groups. parentAffine = the object's parent frame (local TRS edits live in it);
+  // worldAffine = full local->world. For a top-level object parentAffine is identity and worldAffine
+  // equals fromLocal(object.transform), so all of this reduces to the original (unchanged) behaviour.
+  const { parentAffine, invParent, worldAffine, invWorld } = nodeFrames(doc.layers, object.id);
+  /** object-local point -> screen px (through every ancestor group). */
   const toScreen = (localPt: Vector2): Vector2 => canvasToScreen(viewport, affineApply(worldAffine, localPt));
-  /** world/canvas point -> shape-local (inverse of the full chain). */
+  /** world/canvas point -> object-local (inverse of the full chain). */
   const w2l = (worldPt: Vector2): Vector2 => affineApply(invWorld, worldPt);
 
-  const bounds = localBounds(shape);
-  const pad = PAD / Math.max(0.0001, (Math.abs(shape.transform.scale.x) + Math.abs(shape.transform.scale.y)) / 2);
+  const bounds = localBounds(object);
+  const pad = PAD / Math.max(0.0001, (Math.abs(object.transform.scale.x) + Math.abs(object.transform.scale.y)) / 2);
   const cornersLocal = paddedCorners(bounds, pad);
   const corners = cornersLocal.map((c) => toScreen(c));
   // footprint corners (no pad): stable during a scale drag, used as scale anchors
@@ -135,7 +134,7 @@ export function Gizmos(props: {
   const boundsCenter = v2((bounds.min.x + bounds.max.x) / 2, (bounds.min.y + bounds.max.y) / 2);
 
   const eventCanvasPoint = (e: React.MouseEvent): Vector2 => eventToCanvas(e, viewport);
-  // the transform handles edit the shape's LOCAL TRS, which lives in the PARENT frame — so their drag
+  // the transform handles edit the object's LOCAL TRS, which lives in the PARENT frame — so their drag
   // math runs in parent-local coords. (identity parent => same as the world event point.)
   const eventParent = (e: React.MouseEvent): Vector2 => affineApply(invParent, eventCanvasPoint(e));
 
@@ -147,11 +146,11 @@ export function Gizmos(props: {
         const anchorLocal = anchorFor(e);
         return {
           start: eventParent(e),
-          rotation: shape.transform.rotation,
-          scale: shape.transform.scale,
-          pos: shape.transform.pos,
+          rotation: object.transform.rotation,
+          scale: object.transform.scale,
+          pos: object.transform.pos,
           anchorLocal,
-          anchorCanvas: localToCanvas(shape, anchorLocal),
+          anchorCanvas: localToCanvas(object, anchorLocal),
           shift: e.shiftKey,
           ctrl: e.ctrlKey,
         };
@@ -163,10 +162,10 @@ export function Gizmos(props: {
           ds.shift = e.shiftKey;
           ds.ctrl = e.ctrlKey;
           ds.start = eventParent(e);
-          ds.scale = shape.transform.scale;
-          ds.pos = shape.transform.pos;
+          ds.scale = object.transform.scale;
+          ds.pos = object.transform.pos;
           ds.anchorLocal = anchorFor(e);
-          ds.anchorCanvas = localToCanvas(shape, ds.anchorLocal);
+          ds.anchorCanvas = localToCanvas(object, ds.anchorLocal);
         }
         apply(eventParent(e), e, ds);
       },
@@ -182,8 +181,8 @@ export function Gizmos(props: {
     // pos shifts so anchorLocal still lands on anchorCanvas under the new scale
     const pos = new Vector3(ds.anchorCanvas.x - (rx * c - ry * s), ds.anchorCanvas.y - (rx * s + ry * c), ds.pos.z);
     store.update(
-      (d) => updateShape(d, shape.id, (sh) => ({ ...sh, transform: { ...sh.transform, scale: sc, pos } })),
-      { coalesce: `scale:${shape.id}` },
+      (d) => updateObject(d, object.id, (sh) => ({ ...sh, transform: { ...sh.transform, scale: sc, pos } })),
+      { coalesce: `scale:${object.id}` },
     );
   };
 
@@ -208,19 +207,19 @@ export function Gizmos(props: {
     );
   };
 
-  /** Rotate handle: drag an arm extending from an edge to spin the shape about its pivot (Shift = 15°). */
+  /** Rotate handle: drag an arm extending from an edge to spin the object about its pivot (Shift = 15°). */
   const rotateHandle = () =>
     rotDrag({
       onStart: (e) => ({
         start: eventParent(e),
-        startRotation: shape.transform.rotation,
-        pivot: v2(shape.transform.pos.x, shape.transform.pos.y),
+        startRotation: object.transform.rotation,
+        pivot: v2(object.transform.pos.x, object.transform.pos.y),
       }),
       onMove: (e, rd) => {
         let rot = rotationFromDrag(rd.pivot, rd.start, eventParent(e), rd.startRotation);
         if (e.shiftKey) rot = snapAngle(rot, ROTATE_SNAP);
-        store.update((d) => updateShape(d, shape.id, (s) => ({ ...s, transform: { ...s.transform, rotation: rot } })), {
-          coalesce: `rot:${shape.id}`,
+        store.update((d) => updateObject(d, object.id, (s) => ({ ...s, transform: { ...s.transform, rotation: rot } })), {
+          coalesce: `rot:${object.id}`,
         });
       },
       onEnd: () => store.endGesture(),
@@ -231,24 +230,24 @@ export function Gizmos(props: {
   const applyVertDrag = (d: VertSnap, transformLocal: (start: Vector2) => Vector2): void => {
     const byIndex = new Map(d.starts.map((s) => [s.i, s.p]));
     // snap the vertex's CANVAS position (not its local coord), so it lands on the grid / guides
-    // the user sees regardless of the shape's scale/rotation
+    // the user sees regardless of the object's scale/rotation
     const place = (local: Vector2): Vector2 => w2l(snapPt(affineApply(worldAffine, local)));
     store.update(
       (doc2) =>
-        updateShape(doc2, shape.id, (s) => ({
+        updateObject(doc2, object.id, (s) => ({
           ...s,
           controlPoints: s.controlPoints.map((cp, ci) => {
             const start = byIndex.get(ci);
             return start ? place(transformLocal(start)) : cp;
           }),
         })),
-      { coalesce: `vgrp:${shape.id}` },
+      { coalesce: `vgrp:${object.id}` },
     );
   };
 
   const vertSnap = (e: React.PointerEvent, indices: number[], pivot: Vector2): VertSnap => ({
     startCanvas: eventCanvasPoint(e),
-    starts: indices.map((i) => ({ i, p: shape.controlPoints[i]! })),
+    starts: indices.map((i) => ({ i, p: object.controlPoints[i]! })),
     pivot,
   });
 
@@ -301,9 +300,9 @@ export function Gizmos(props: {
   // insert a vertex on edge (ia,ib) at parameter t. Mesh splits the edge (new tris); polygon/
   // polyline/ring splice a point between ia and ib (rings bump ringSplit when the edge is outer).
   const opAddVertex = (ia: number, ib: number, t: number): void => {
-    const newIndex = shape.mesh ? shape.controlPoints.length : ia + 1;
+    const newIndex = object.mesh ? object.controlPoints.length : ia + 1;
     store.update((d) =>
-      updateShape(d, shape.id, (s) => {
+      updateObject(d, object.id, (s) => {
         if (s.mesh) {
           const r = splitEdge(s.controlPoints, s.mesh, ia, ib, t);
           return { ...s, controlPoints: r.controlPoints, mesh: r.mesh };
@@ -311,7 +310,7 @@ export function Gizmos(props: {
         const a = s.controlPoints[ia]!;
         const b = s.controlPoints[ib]!;
         const cps = insertVertex(s.controlPoints, ia, v2(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t));
-        if (getShapeType(s.typeId).controlPoints.kind === "rings") {
+        if (getObjectType(s.typeId).controlPoints.kind === "rings") {
           const split = s.ringSplit ?? (s.controlPoints.length >> 1);
           return { ...s, controlPoints: cps, ringSplit: ia < split ? split + 1 : split };
         }
@@ -323,7 +322,7 @@ export function Gizmos(props: {
   };
   const opConnect = (a: number, b: number): void => {
     store.update((d) =>
-      updateShape(d, shape.id, (s) => {
+      updateObject(d, object.id, (s) => {
         const t = s.mesh && connectVerts(s.controlPoints, s.mesh, a, b);
         return t ? { ...s, mesh: t } : s;
       }),
@@ -332,7 +331,7 @@ export function Gizmos(props: {
   };
   const opMerge = (verts: number[], keep: number): void => {
     store.update((d) =>
-      updateShape(d, shape.id, (s) => {
+      updateObject(d, object.id, (s) => {
         const r = s.mesh && mergeVerts(s.controlPoints, s.mesh, verts, keep);
         return r ? { ...s, controlPoints: r.controlPoints, mesh: r.mesh } : s;
       }),
@@ -341,17 +340,17 @@ export function Gizmos(props: {
     setSelVerts([]);
   };
   const opDeleteEdge = (ia: number, ib: number): void => {
-    store.update((d) => updateShape(d, shape.id, (s) => (s.mesh ? { ...s, mesh: deleteEdge(s.mesh, ia, ib) } : s)));
+    store.update((d) => updateObject(d, object.id, (s) => (s.mesh ? { ...s, mesh: deleteEdge(s.mesh, ia, ib) } : s)));
     store.endGesture();
   };
   const opDelete = (verts: number[]): void => {
-    store.update((d) => updateShape(d, shape.id, (s) => removeShapeVertices(s, verts)));
+    store.update((d) => updateObject(d, object.id, (s) => removeObjectVertices(s, verts)));
     store.endGesture();
     setSelVerts([]);
   };
   const opZAlign = (target: number, plane: number[]): void => {
     store.update((d) =>
-      updateShape(d, shape.id, (s) => {
+      updateObject(d, object.id, (s) => {
         if (!s.mesh) return s;
         const z = alignVertToPlane(s.controlPoints, s.mesh.z, [plane[0]!, plane[1]!, plane[2]!], target);
         return z ? { ...s, mesh: { ...s.mesh, z } } : s;
@@ -364,8 +363,8 @@ export function Gizmos(props: {
     e.preventDefault();
     e.stopPropagation();
     // Z align (mesh only): 3 selected (a face) + a connected 4th -> flatten both tris onto one plane
-    if (shape.mesh) {
-      const neigh = neighborsOf(shape.mesh, i);
+    if (object.mesh) {
+      const neigh = neighborsOf(object.mesh, i);
       if (selVerts.length === 3 && !selVerts.includes(i) && selVerts.filter((v) => neigh.has(v)).length >= 2) {
         setMenu({ x: e.clientX, y: e.clientY, verts: [i], target: i, zalign: { target: i, plane: selVerts }, edge: null });
         return;
@@ -378,8 +377,8 @@ export function Gizmos(props: {
   // parameter t of the cursor projected onto edge (ia,ib), clamped to the segment
   const edgeT = (ia: number, ib: number, e: React.MouseEvent): number => {
     const p = w2l(eventCanvasPoint(e));
-    const a = shape.controlPoints[ia]!;
-    const b = shape.controlPoints[ib]!;
+    const a = object.controlPoints[ia]!;
+    const b = object.controlPoints[ib]!;
     const abx = b.x - a.x;
     const aby = b.y - a.y;
     return Math.max(0, Math.min(1, ((p.x - a.x) * abx + (p.y - a.y) * aby) / (abx * abx + aby * aby || 1)));
@@ -407,14 +406,14 @@ export function Gizmos(props: {
     const items: MenuEntry[] = [];
     if (m.zalign) items.push({ label: "Z Align to Face", onClick: () => opZAlign(m.zalign!.target, m.zalign!.plane) });
     const v = m.verts;
-    if (shape.mesh && v.length === 2) items.push({ label: "Connect Vertices", onClick: () => opConnect(v[0]!, v[1]!) });
-    if (shape.mesh && v.length >= 2 && m.target !== null) {
+    if (object.mesh && v.length === 2) items.push({ label: "Connect Vertices", onClick: () => opConnect(v[0]!, v[1]!) });
+    if (object.mesh && v.length >= 2 && m.target !== null) {
       items.push({ label: "Merge Vertices", onClick: () => opMerge(v, m.target!) });
     }
-    const kind = getShapeType(shape.typeId).controlPoints.kind;
+    const kind = getObjectType(object.typeId).controlPoints.kind;
     if (m.target !== null && (kind === "polygon" || kind === "polyline")) {
       // click-to-place a new vertex extending from this one (rubber-band, chains until Esc)
-      items.push({ label: "New Vertex", onClick: () => setPlacing({ kind: "vertex", shapeId: shape.id, afterIndex: m.target! }) });
+      items.push({ label: "New Vertex", onClick: () => setPlacing({ kind: "vertex", objectId: object.id, afterIndex: m.target! }) });
     }
     if (v.length >= 1) {
       if (items.length > 0) items.push("separator");
@@ -423,40 +422,89 @@ export function Gizmos(props: {
     return items;
   };
 
-  // cable Bézier editing
-  const isCable = shape.typeId === "cable" && !!shape.bezier;
+  // any Bézier-bearing object edits via the pen: analytic strokes (Pipe/Berm (Vector), kind "none") and
+  // baked fills (Surface (Vector), kind "polygon"). Fills bake their closed path to controlPoints on edit
+  // so the polygon-fill field stays in sync; strokes are sampled analytically (no controlPoints).
+  const isPath = !!object.bezier;
+  const cpKind = getObjectType(object.typeId).controlPoints.kind;
   const commitBezier = (next: BezierAnchor[], coalesce: string): void => {
-    // unbaked: only the path is stored; the fold samples it directly (no controlPoints)
-    store.update((d) => updateShape(d, shape.id, (sh) => ({ ...sh, bezier: next })), { coalesce });
+    store.update(
+      (d) =>
+        updateObject(d, object.id, (sh) => {
+          const withPath = { ...sh, bezier: next };
+          if (cpKind === "rings") {
+            // Plateau (Vector) lofts its rings -> needs equal dense counts (uniform bake); Surface
+            // (Vector) just CSGs its outer/hole contours -> the optimized bake is fine.
+            const r = object.typeId === ObjectTypeId.PlateauVector ? bakeRingsUniform(next, sh.subpathStarts) : bakeRings(next, sh.subpathStarts);
+            return { ...withPath, controlPoints: r.controlPoints, ringSplit: r.ringSplit, contourCounts: r.contourCounts };
+          }
+          if (cpKind === "polygon") return { ...withPath, controlPoints: bakeMaskLoop(next) };
+          return withPath; // analytic stroke: no baked controlPoints
+        }),
+      { coalesce },
+    );
   };
   // toggle smooth<->corner: going manual bakes the current resolved tangents (no visual jump);
   // going smooth clears them so resolveHandles takes over again
   const toggleAnchorMode = (i: number): void => {
-    commitBezier(toggleMode(shape.bezier!, i), `mode:${shape.id}`);
+    commitBezier(toggleMode(object.bezier!, i), `mode:${object.id}`);
     store.endGesture();
   };
   const toggleAnchorSym = (i: number): void => {
-    commitBezier(shape.bezier!.map((a, idx) => (idx === i ? { ...a, sym: a.sym === false } : a)), `sym:${shape.id}`);
+    commitBezier(object.bezier!.map((a, idx) => (idx === i ? { ...a, sym: a.sym === false } : a)), `sym:${object.id}`);
     store.endGesture();
   };
   const deleteAnchor = (i: number): void => {
-    const b = shape.bezier!;
+    const b = object.bezier!;
     if (b.length <= 2) return; // a cable needs >= 2 anchors
     commitBezier(
       b.filter((_, idx) => idx !== i),
-      `del:${shape.id}`,
+      `del:${object.id}`,
+    );
+    store.endGesture();
+  };
+  // join/unjoin the ends: toggle the path between an open stroke and a closed loop (O-ring). Path-level
+  // (mirrors the mesh-vertex join right-click); needs >= 3 anchors so the loop has >= 3 segments.
+  const toggleClosed = (): void => {
+    store.update((d) => updateObject(d, object.id, (sh) => ({ ...sh, closed: !sh.closed })), { coalesce: `close:${object.id}` });
+    store.endGesture();
+  };
+  // add a hole to a Surface (Vector): another inner loop (subpath), CSG-subtracted from the fill. Each
+  // new hole is nudged off-centre by the existing hole count so they don't stack on top of each other.
+  const addHole = (): void => {
+    const b = object.bezier!;
+    const holeIdx = (object.subpathStarts?.length ?? 1) - 1; // existing holes
+    const cx = b.reduce((s, a) => s + a.p.x, 0) / b.length + holeIdx * 10;
+    const cy = b.reduce((s, a) => s + a.p.y, 0) / b.length;
+    const cn = (dx: number, dy: number) => bezierAnchor(v2(cx + dx, cy + dy), v2(0, 0), v2(0, 0), "manual");
+    const hole = [cn(-10, -10), cn(10, -10), cn(10, 10), cn(-10, 10)];
+    store.update(
+      (d) =>
+        updateObject(d, object.id, (sh) => {
+          const next = [...sh.bezier!, ...hole];
+          const subs = [...(sh.subpathStarts ?? [0]), sh.bezier!.length];
+          const r = bakeRings(next, subs);
+          return { ...sh, bezier: next, subpathStarts: subs, controlPoints: r.controlPoints, ringSplit: r.ringSplit, contourCounts: r.contourCounts };
+        }),
+      { coalesce: `hole:${object.id}` },
     );
     store.endGesture();
   };
   const cableMenuItems = (i: number): MenuEntry[] => {
-    const b = shape.bezier!;
+    const b = object.bezier!;
     const items: MenuEntry[] = [];
-    if (i === 0 || i === b.length - 1) {
-      items.push({ label: "Extend Cable", onClick: () => setPlacing({ kind: "cable-end", shapeId: shape.id, end: i === 0 ? "start" : "end" }) });
+    if (!object.closed && (i === 0 || i === b.length - 1)) {
+      items.push({ label: "Extend Cable", onClick: () => setPlacing({ kind: "cable-end", objectId: object.id, end: i === 0 ? "start" : "end" }) });
     }
     items.push({ label: isCorner(b[i]!) ? "Make Smooth" : "Make Corner", onClick: () => toggleAnchorMode(i) });
     if (!isCorner(b[i]!)) {
       items.push({ label: b[i]!.sym === false ? "Make Tangents Symmetric" : "Make Tangents Independent", onClick: () => toggleAnchorSym(i) });
+    }
+    if (b.length >= 3) {
+      items.push("separator", { label: object.closed ? "Open Path" : "Close Path", onClick: toggleClosed });
+    }
+    if (object.typeId === ObjectTypeId.SurfaceVector && (object.subpathStarts?.length ?? 1) < 7) {
+      items.push({ label: "Add Hole", onClick: addHole }); // up to 6 holes (the spare record slots)
     }
     if (b.length > 2) {
       items.push("separator", { label: "Delete Vertex", danger: true, hotkey: "⌫", onClick: () => deleteAnchor(i) });
@@ -468,23 +516,23 @@ export function Gizmos(props: {
     bezierDrag({
       onStart: (e) => (e.button !== 0 ? null : { kind, i }),
       onMove: (e, drag) => {
-        if (!shape.bezier) return;
+        if (!object.bezier) return;
         const canvasPt = eventCanvasPoint(e);
         if (drag.kind === "point") {
           // snap the anchor's CANVAS position (grid + guides), like control-point vertices
           const local = w2l(snapPt(canvasPt));
-          commitBezier(movePoint(shape.bezier, drag.i, local, e.altKey), `bez:${shape.id}`);
+          commitBezier(movePoint(object.bezier, drag.i, local, e.altKey), `bez:${object.id}`);
           return;
         }
         // tangent drag: symmetric per the anchor's sym flag, Alt inverts it; Shift snaps the angle to 15deg.
         // Bake the dragged anchor's RESOLVED tangents first (smooth->manual) so an independent drag keeps
         // the OTHER tangent at its auto-derived value instead of the stored zero (which would vanish).
         const local = w2l(canvasPt);
-        const r = resolveHandles(shape.bezier)[drag.i]!;
-        const based = shape.bezier.map((a, idx) => (idx === drag.i ? { ...a, hIn: r.hIn, hOut: r.hOut, mode: "manual" as const } : a));
-        const sym = shape.bezier[drag.i]!.sym !== false;
+        const r = resolveHandles(object.bezier)[drag.i]!;
+        const based = object.bezier.map((a, idx) => (idx === drag.i ? { ...a, hIn: r.hIn, hOut: r.hOut, mode: "manual" as const } : a));
+        const sym = object.bezier[drag.i]!.sym !== false;
         const next = dragHandle(based, drag.i, drag.kind, local, sym !== e.altKey, e.shiftKey ? ROTATE_SNAP : undefined);
-        commitBezier(next, `bez:${shape.id}`);
+        commitBezier(next, `bez:${object.id}`);
       },
       onEnd: () => store.endGesture(),
     });
@@ -492,16 +540,16 @@ export function Gizmos(props: {
   // resolved path). The three touched anchors are pinned manual so resolveHandles won't re-smooth
   // them and undo the split. The new anchor is selected so Delete/arrows act on it.
   const insertOnCurve = (e: React.PointerEvent): void => {
-    if (e.button !== 0 || !shape.bezier) return;
+    if (e.button !== 0 || !object.bezier) return;
     e.stopPropagation();
-    const near = nearestOnSpine(shape.bezier, w2l(eventCanvasPoint(e)));
+    const near = nearestOnSpine(object.bezier, w2l(eventCanvasPoint(e)));
     if (!near) return;
-    const split = splitSegment(resolveHandles(shape.bezier), near.seg, near.t);
+    const split = splitSegment(resolveHandles(object.bezier), near.seg, near.t);
     const next = split.map((a, idx) =>
       idx >= near.seg && idx <= near.seg + 2 ? { ...a, mode: "manual" as const } : a,
     );
     setSelVerts([near.seg + 1]);
-    commitBezier(next, `ins:${shape.id}`);
+    commitBezier(next, `ins:${object.id}`);
     store.endGesture();
   };
   const bezScreen = (local: Vector2): Vector2 => toScreen(local);
@@ -516,25 +564,28 @@ export function Gizmos(props: {
       </defs>
       <g filter="url(#gizmo-halo)">
       {/* cable Bézier pen: clickable curve (insert), tangent stalks, vertex + handle dots */}
-      {isCable && vertHandles ? (
+      {isPath && vertHandles ? (
         <>
-          {(() => {
-            const pts = bezierSpine(shape.bezier!, CABLE_SUB).map((cp) => { const s = bezScreen(cp); return `${s.x},${s.y}`; }).join(" ");
+          {/* one centreline per subpath loop (Plateau (Vector) has base + top rings) */}
+          {splitSubpaths(object.bezier!, object.subpathStarts).map((loop, li) => {
+            const pts = bezierSpine(loop, 24, object.closed).map((cp) => { const s = bezScreen(cp); return `${s.x},${s.y}`; }).join(" ");
             return (
-              <>
-                {/* visible centreline (not interactive) so the whole cable path reads at a glance */}
+              <g key={li}>
+                {/* visible centreline (not interactive) so the whole path reads at a glance */}
                 <polyline points={pts} fill="none" stroke="var(--color-accent)" strokeWidth={1.5} strokeOpacity={0.85} style={{ pointerEvents: "none" }} />
                 {/* fat invisible hit strip: click anywhere along the path to insert an anchor */}
                 <polyline points={pts} fill="none" stroke="transparent" strokeWidth={14} style={{ pointerEvents: "stroke", cursor: "copy" }} onPointerDown={insertOnCurve} />
-              </>
+              </g>
             );
-          })()}
+          })}
           <AnchorHandles
-            resolved={resolveHandles(shape.bezier!)}
+            resolved={splitSubpaths(object.bezier!, object.subpathStarts).flatMap((loop) =>
+              object.closed && loop.length >= 3 ? resolveHandlesClosed(loop) : resolveHandles(loop),
+            )}
             toScreen={bezScreen}
             color="var(--color-accent)"
             tangentProps={bezierHandleProps}
-            isCorner={(i) => isCorner(shape.bezier![i]!)}
+            isCorner={(i) => isCorner(object.bezier![i]!)}
             isSelected={(i) => selVerts.includes(i)}
             anchorProps={(i) => {
               const pointProps = bezierHandleProps("point", i);
@@ -562,7 +613,7 @@ export function Gizmos(props: {
           />
         </>
       ) : null}
-      {/* oriented bounding box: rotates and shears with the shape's transform */}
+      {/* oriented bounding box: rotates and shears with the object's transform */}
       <polygon
         points={corners.map((c) => `${c.x},${c.y}`).join(" ")}
         fill="none"
@@ -595,17 +646,17 @@ export function Gizmos(props: {
       {handles ? <RotateKnobs corners={corners} handlers={rotateHandle} /> : null}
       {handles ? <CornerHandles corners={corners} handlers={cornerScale} /> : null}
       {/* group-scale frame: bbox of the selected vertices with corner handles (>=2 selected).
-          Gated to control-point shapes (a cable has none — selVerts there are anchor indices) and
-          filtered for stale indices: switching shapes re-renders with the new shape but the previous
+          Gated to control-point objects (a cable has none — selVerts there are anchor indices) and
+          filtered for stale indices: switching objects re-renders with the new object but the previous
           selection before the clearing effect runs, so an index may be out of range for one frame. */}
-      {vertHandles && getShapeType(shape.typeId).controlPoints.kind !== "none" && selVerts.length >= 2
+      {vertHandles && !isPath && getObjectType(object.typeId).controlPoints.kind !== "none" && selVerts.length >= 2
         ? (() => {
-            const sel = selVerts.map((i) => shape.controlPoints[i]).filter((p): p is Vector2 => p !== undefined);
+            const sel = selVerts.map((i) => object.controlPoints[i]).filter((p): p is Vector2 => p !== undefined);
             if (sel.length < 2) return null;
             const b = pointsBounds(sel);
             // pad the frame out from the dots (constant ~10 screen px) so corner handles
             // don't sit on top of the vertices and stay grabbable
-            const gp = (PAD + 4) / Math.max(0.0001, (Math.abs(shape.transform.scale.x) + Math.abs(shape.transform.scale.y)) / 2);
+            const gp = (PAD + 4) / Math.max(0.0001, (Math.abs(object.transform.scale.x) + Math.abs(object.transform.scale.y)) / 2);
             const cc = paddedCorners(b, gp).map((c) => toScreen(c));
             return (
               <>
@@ -633,10 +684,10 @@ export function Gizmos(props: {
             );
           })()
         : null}
-      {vertHandles && getShapeType(shape.typeId).controlPoints.kind !== "none"
+      {vertHandles && !isPath && getObjectType(object.typeId).controlPoints.kind !== "none"
         ? (() => {
-            const kind = getShapeType(shape.typeId).controlPoints.kind;
-            const pts = shape.controlPoints.map((cp) => toScreen(cp));
+            const kind = getObjectType(object.typeId).controlPoints.kind;
+            const pts = object.controlPoints.map((cp) => toScreen(cp));
             // while dragging a vertex, an edge aligned to a 45° axis (within ¼px on the canvas
             // grid — points are screen-space, so scale the tol by zoom) lights bright white + thick
             const alignTol = 0.25 * viewport.zoom;
@@ -674,7 +725,7 @@ export function Gizmos(props: {
             );
             const lines: React.JSX.Element[] = [];
             if (kind === "rings") {
-              const split = shape.ringSplit ?? (pts.length >> 1);
+              const split = object.ringSplit ?? (pts.length >> 1);
               const outer = pts.slice(0, split);
               const inner = pts.slice(split);
               outer.forEach((p, i) => {
@@ -685,18 +736,16 @@ export function Gizmos(props: {
                 const j = (i + 1) % inner.length;
                 lines.push(seg(p, inner[j]!, `i${i}`), edgeHit(split + i, split + j, p, inner[j]!, `ih${i}`));
               });
-              // the actual strip diagonals — what the slope is triangulated along (any counts)
-              frustumStrip(outer.length, inner.length).connectors.forEach(([oi, ii], k) =>
-                lines.push(seg(outer[oi]!, inner[ii]!, `c${k}`, true)),
-              );
+              // no crease connectors: the slope is an analytic distance ramp (no triangulation), so any
+              // base/top vertex counts are valid — the two ring outlines + the rendered fill show the shape.
             } else if (kind === "polygon") {
               pts.forEach((p, i) => {
                 const j = (i + 1) % pts.length;
                 lines.push(seg(p, pts[j]!, `p${i}`), edgeHit(i, j, p, pts[j]!, `ph${i}`));
               });
-            } else if (kind === "mesh" && shape.mesh) {
+            } else if (kind === "mesh" && object.mesh) {
               // mesh edges: the octant-lit line + a fat hit-line (right-click menu / Alt-click insert)
-              for (const [ia, ib] of meshEdges(shape.mesh)) {
+              for (const [ia, ib] of meshEdges(object.mesh)) {
                 const a = pts[ia]!;
                 const b = pts[ib]!;
                 lines.push(seg(a, b, `m${ia}_${ib}`), edgeHit(ia, ib, a, b, `mh${ia}_${ib}`));
@@ -711,8 +760,8 @@ export function Gizmos(props: {
             return <g className="pointer-events-none">{lines}</g>;
           })()
         : null}
-      {vertHandles &&
-        shape.controlPoints.map((cp, i) => {
+      {vertHandles && !isPath &&
+        object.controlPoints.map((cp, i) => {
           const sp = toScreen(cp);
           const selected = selVerts.includes(i);
           return (
@@ -736,8 +785,8 @@ export function Gizmos(props: {
       {cableMenu ? (
         <ContextMenu x={cableMenu.x} y={cableMenu.y} items={cableMenuItems(cableMenu.i)} onClose={() => setCableMenu(null)} />
       ) : null}
-      {vertHandles && shape.masks?.length ? (
-        <MaskGizmo nodeId={shape.id} masks={shape.masks} doc={doc} viewport={viewport} snap={snap} store={store} />
+      {vertHandles && object.masks?.length ? (
+        <MaskGizmo nodeId={object.id} masks={object.masks} doc={doc} viewport={viewport} snap={snap} store={store} />
       ) : null}
     </>
   );

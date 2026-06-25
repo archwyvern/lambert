@@ -1,20 +1,20 @@
 import { affineApply } from "../field/affine";
-import type { ResolvedShape } from "../field/flatten";
-import { getShapeType } from "../field/registry";
-import type { ShapeInstance } from "../field/types";
+import type { ResolvedObject } from "../field/flatten";
+import { getObjectType } from "../field/registry";
+import type { ObjectInstance } from "../field/types";
 import { Vector2, Vector3 } from "@carapace/primitives";
 import { v2 } from "../field/vec";
 
 const PICK_SLOP_PX = 1;
 
-/** Topmost (last-in-fold) resolved shape whose world footprint (± slop, canvas px) contains the
- *  point. Hidden subtrees are already dropped by flatten; locked shapes are skipped here. */
-export function pickShape(resolved: ResolvedShape[], canvasPoint: Vector2): ShapeInstance | null {
+/** Topmost (last-in-fold) resolved object whose world footprint (± slop, canvas px) contains the
+ *  point. Hidden subtrees are already dropped by flatten; locked objects are skipped here. */
+export function pickObject(resolved: ResolvedObject[], canvasPoint: Vector2): ObjectInstance | null {
   for (let i = resolved.length - 1; i >= 0; i--) {
     const rs = resolved[i]!;
-    if (rs.shape.locked) continue;
-    const sample = getShapeType(rs.shape.typeId).eval(affineApply(rs.invAffine, canvasPoint), rs.shape);
-    if (sample.sd * rs.scaleHint <= PICK_SLOP_PX) return rs.shape;
+    if (rs.object.locked) continue;
+    const sample = getObjectType(rs.object.typeId).eval(affineApply(rs.invAffine, canvasPoint), rs.object);
+    if (sample.sd * rs.scaleHint <= PICK_SLOP_PX) return rs.object;
   }
   return null;
 }
@@ -44,10 +44,10 @@ export function constrainAxis(dx: number, dy: number): { dx: number; dy: number 
 const clampMag = (v: number): number => Math.max(0.05, Math.abs(v));
 
 /**
- * Photoshop-like corner scaling around the shape's pivot. Unlocked (default): each local
+ * Photoshop-like corner scaling around the object's pivot. Unlocked (default): each local
  * footprint axis scales by the drag ratio along that axis (never below ~0 — no mirroring);
  * z (tallness) is untouched. uniform (shift held): the pivot-distance ratio applies to all
- * three axes, so a shape grown 2x also gets 2x taller.
+ * three axes, so an object grown 2x also gets 2x taller.
  */
 export function axisScaleFromDrag(
   pivot: Vector2,
@@ -63,7 +63,7 @@ export function axisScaleFromDrag(
     const ratio = d1 / d0;
     return new Vector3(clampMag(startScale.x * ratio), clampMag(startScale.y * ratio), clampMag(startScale.z * ratio));
   }
-  // un-rotate into the shape's local axes (scale still applied — ratios cancel it out)
+  // un-rotate into the object's local axes (scale still applied — ratios cancel it out)
   const c = Math.cos(-rotation);
   const s = Math.sin(-rotation);
   const unrot = (p: Vector2): Vector2 =>
@@ -77,7 +77,7 @@ export function axisScaleFromDrag(
 
 // --- multi-vertex group editing (move/scale a set of selected control points) ---
 
-/** Axis-aligned bounds + centroid of a set of points (shape-local). */
+/** Axis-aligned bounds + centroid of a set of points (object-local). */
 export function pointsBounds(pts: Vector2[]): { min: Vector2; max: Vector2; centroid: Vector2 } {
   let minX = Infinity;
   let minY = Infinity;

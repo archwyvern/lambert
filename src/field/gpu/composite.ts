@@ -25,15 +25,11 @@ struct CompositeUniforms {
   redSign: f32,       // project normal-direction signs for the normal view encode
   greenSign: f32,
   raster: u32,        // 1 = snap to doc pixels + 1-doc-px gradient (exported look); 0 = crisp vector
-  full: u32,          // lit mode only: 1 = light the full Skyrat pipeline normals (skyratTex) instead
   lightEnergy: f32,   // lit mode: scales the diffuse light term (1 = default; >1 brightens)
 }
 
 @group(0) @binding(0) var<uniform> cu: CompositeUniforms;
 @group(0) @binding(5) var diffuseTex: texture_2d<f32>;
-// Full-pipeline preview: the CPU Skyrat generator's normals at doc res (x,y,z in [-1,1], w unused).
-// Sampled per doc pixel in the lit branch when cu.full == 1.
-@group(0) @binding(8) var skyratTex: texture_2d<f32>;
 `;
 
 const COMPOSITE_MAIN = /* wgsl */ `
@@ -71,26 +67,15 @@ fn fs(@builtin(position) fragPos: vec4f) -> @location(0) vec4f {
   let dHdx = minmod(fold_at(pe + vec2f(e, 0.0), cu.shapeCount).x - hc, hc - fold_at(pe - vec2f(e, 0.0), cu.shapeCount).x) / e;
   let dHdy = minmod(fold_at(pe + vec2f(0.0, e), cu.shapeCount).x - hc, hc - fold_at(pe - vec2f(0.0, e), cu.shapeCount).x) / e;
   let inv = inverseSqrt(dHdx * dHdx + dHdy * dHdy + 1.0);
-  var n = vec3f(-dHdx * inv, -dHdy * inv, inv);
-  // full-pipeline preview: the baked Skyrat normal at this doc px (transparent px (0,0,0) -> flat, no NaN)
-  let s = textureLoad(skyratTex, vec2i(p), 0).xyz;
-  let sl = length(s);
-  let skyN = select(vec3f(0.0, 0.0, 1.0), s / sl, sl > 1e-6);
+  let n = vec3f(-dHdx * inv, -dHdy * inv, inv);
   if (cu.mode == 1u) {
-    // normal view: the height-derived NX, or — when full — the whole pipeline's normals over the sprite
-    if (cu.full == 1u) {
-      let encF = vec3f(0.5 + skyN.x * cu.redSign * 0.5, 0.5 + skyN.y * cu.greenSign * 0.5, 0.5 + skyN.z * 0.5);
-      return vec4f(mix(base, encF, diffuse.a * cu.opacity), 1.0); // gate by sprite opacity, not the authored mask
-    }
+    // normal view: the height-derived NX encoded over the sprite
     let enc = vec3f(0.5 + n.x * cu.redSign * 0.5, 0.5 + n.y * cu.greenSign * 0.5, 0.5 + n.z * 0.5);
     return vec4f(mix(base, enc, mask * cu.opacity), 1.0);
   }
   // lit: light only the diffuse itself, gated by its alpha. Transparent pixels (alpha 0) keep the white
-  // backdrop and are never touched by the light, no matter what shape/normal sits under them — in 2D the
+  // backdrop and are never touched by the light, no matter what object/normal sits under them — in 2D the
   // only thing that gets lit is the visible artwork.
-  if (cu.full == 1u) {
-    n = skyN;
-  }
   let l = normalize(vec3f(cu.lightX, cu.lightY, cu.lightZ));
   let lambert = max(dot(n, l), 0.0);
   let shade = 0.25 + 0.75 * cu.lightEnergy * lambert;

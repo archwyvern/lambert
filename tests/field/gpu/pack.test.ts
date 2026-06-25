@@ -1,19 +1,19 @@
 import { expect, test } from "vitest";
-import "../../../src/field/shapes";
-import { createShapeInstance } from "../../../src/field/registry";
+import "../../../src/field/objects";
+import { createObjectInstance, ObjectTypeId } from "../../../src/field/registry";
 import { createMask } from "../../../src/field/maskOps";
-import { flattenLayers, resolveShapes } from "../../../src/field/flatten";
-import { packShapes } from "../../../src/field/gpu/pack";
+import { flattenLayers, resolveObjects } from "../../../src/field/flatten";
+import { packObjects } from "../../../src/field/gpu/pack";
 import { RECORD_F32 } from "../../../src/field/gpu/wgsl";
 import { toLocal } from "../../../src/field/transform";
 import { v2 } from "../../../src/field/vec";
 import { Vector3 } from "@carapace/primitives";
 
 test("dome record: layout offsets", () => {
-  const dome = createShapeInstance("dome", v2(10, 20));
+  const dome = createObjectInstance(ObjectTypeId.Sphere, v2(10, 20));
   dome.transform.rotation = Math.PI / 2;
   dome.transform.scale = new Vector3(2, 4, 0.5);
-  const { records, points, count } = packShapes(resolveShapes([dome]));
+  const { records, points, count } = packObjects(resolveObjects([dome]));
   expect(count).toBe(1);
   expect(records.length).toBe(RECORD_F32);
   expect(records[0]).toBe(0); // dome registered first -> typeIndex 0
@@ -42,31 +42,31 @@ test("dome record: layout offsets", () => {
 });
 
 test("plateau: control points and enum param index", () => {
-  const plateau = createShapeInstance("plateau", v2(0, 0));
+  const plateau = createObjectInstance(ObjectTypeId.Plateau, v2(0, 0));
   plateau.params.profile = "round";
-  const { records, points } = packShapes(resolveShapes([plateau]));
+  const { records, points } = packObjects(resolveObjects([plateau]));
   expect(records[12]).toBe(8); // 4 base + 4 top-rim vertices
-  expect(records[13]).toBe(2); // profile "round" -> options index 2
+  expect(records[13]).toBe(0); // profile "round" -> options index 0 (round, linear, cove, smooth)
   expect(points[0]).toBe(-32); // first base vertex x
   expect(points[1]).toBe(-32); // first base vertex y
   expect(points[8]).toBe(-20); // first top-rim vertex x
   expect(points.length).toBe(16);
 });
 
-test("multiple shapes: cpStart advances, invisible skipped", () => {
-  const a = createShapeInstance("plateau", v2(0, 0));
-  const hidden = createShapeInstance("dome", v2(0, 0));
+test("multiple objects: cpStart advances, invisible skipped", () => {
+  const a = createObjectInstance(ObjectTypeId.Plateau, v2(0, 0));
+  const hidden = createObjectInstance(ObjectTypeId.Sphere, v2(0, 0));
   hidden.visible = false;
-  const b = createShapeInstance("groove", v2(0, 0));
-  const { records, count } = packShapes(resolveShapes([a, hidden, b]));
+  const b = createObjectInstance(ObjectTypeId.PipeVector, v2(0, 0));
+  const { records, count } = packObjects(resolveObjects([a, hidden, b]));
   expect(count).toBe(2);
   expect(records.length).toBe(2 * RECORD_F32);
-  expect(records[RECORD_F32 + 11]).toBe(8); // groove cpStart after plateau's 8 points
-  expect(records[RECORD_F32 + 12]).toBe(2); // groove polyline 2 points
+  expect(records[RECORD_F32 + 11]).toBe(8); // pipe cpStart after plateau's 8 points
+  expect(records[RECORD_F32 + 12]).toBe(2); // pipe path: 2 anchors
 });
 
 test("empty list still allocates non-empty buffers", () => {
-  const { records, points, maskLoops, maskVerts, count } = packShapes(resolveShapes([]));
+  const { records, points, maskLoops, maskVerts, count } = packObjects(resolveObjects([]));
   expect(count).toBe(0);
   expect(records.length).toBeGreaterThan(0);
   expect(points.length).toBeGreaterThan(0);
@@ -75,19 +75,19 @@ test("empty list still allocates non-empty buffers", () => {
 });
 
 test("masks: maskLoopStart/Count + vec4 header + verts per loop", () => {
-  const s = createShapeInstance("dome", v2(10, 10));
+  const s = createObjectInstance(ObjectTypeId.Sphere, v2(10, 10));
   s.masks = [
     { ...createMask([v2(0, 0), v2(4, 0), v2(4, 4), v2(0, 4)], true), mode: "keep" }, // 4 verts, follow
     { ...createMask([v2(1, 1), v2(2, 1), v2(2, 2)], false), mode: "cut" }, // 3 verts, world
   ];
-  const { records, maskLoops, maskVerts } = packShapes(resolveShapes([s]));
+  const { records, maskLoops, maskVerts } = packObjects(resolveObjects([s]));
   expect(records[24]).toBe(0); // maskLoopStart
   expect(records[25]).toBe(2); // maskLoopCount
   // loop 0 header: vec4(vertStart, vertCount, flags, scopeId)
   expect(maskLoops[0]).toBe(0); // vertStart
   expect(maskLoops[1]).toBe(4); // vertCount
   expect(maskLoops[2]).toBe(6); // keep(0) + follow(2) + hard(4) = 6 (createMask defaults hard)
-  expect(maskLoops[3]).toBe(0); // scope 0 (shape's own)
+  expect(maskLoops[3]).toBe(0); // scope 0 (object's own)
   // loop 1 header
   expect(maskLoops[4]).toBe(4); // vertStart (after loop 0's 4 verts)
   expect(maskLoops[5]).toBe(3); // vertCount
@@ -97,7 +97,7 @@ test("masks: maskLoopStart/Count + vec4 header + verts per loop", () => {
 });
 
 test("group mask: a child carries the group mask at scope 1 (world, follow bit clear)", () => {
-  const child = createShapeInstance("dome", v2(0, 0));
+  const child = createObjectInstance(ObjectTypeId.Sphere, v2(0, 0));
   child.masks = [{ ...createMask([v2(0, 0), v2(4, 0), v2(4, 4), v2(0, 4)], true), mode: "keep" }]; // scope 0
   const g = {
     kind: "group" as const,
@@ -108,9 +108,9 @@ test("group mask: a child carries the group mask at scope 1 (world, follow bit c
     masks: [{ ...createMask([v2(0, 0), v2(8, 0), v2(8, 8), v2(0, 8)], true), mode: "keep" as const }],
     children: [child],
   };
-  const { records, maskLoops } = packShapes(flattenLayers([g]));
-  expect(records[25]).toBe(2); // 2 loops: shape's own + the group's
-  expect(maskLoops[3]).toBe(0); // loop 0 scope 0 (shape's own)
+  const { records, maskLoops } = packObjects(flattenLayers([g]));
+  expect(records[25]).toBe(2); // 2 loops: object's own + the group's
+  expect(maskLoops[3]).toBe(0); // loop 0 scope 0 (object's own)
   expect(maskLoops[7]).toBe(1); // loop 1 scope 1 (group mask)
   expect(maskLoops[6]! & 2).toBe(0); // group mask baked to world -> follow bit clear
 });

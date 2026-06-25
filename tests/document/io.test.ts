@@ -1,10 +1,11 @@
 import { expect, test } from "vitest";
+import { ObjectTypeId } from "../../src/field/objectTypeIds";
 import { encode } from "fast-png";
-import "../../src/field/shapes";
+import "../../src/field/objects";
 import { basename, dirname, joinPath } from "../../src/document/paths";
 import { buildNxExport } from "../../src/document/exports";
 import { DEFAULT_NORMAL_DIRS, emptyDoc, serializeDoc } from "../../src/document/schema";
-import { addShape } from "../../src/document/docOps";
+import { addObject } from "../../src/document/docOps";
 import { flattenLayers } from "../../src/field/flatten";
 import { renderField } from "../../src/field/render";
 import { hasSidecar, openImageTab, saveTab } from "../../src/document/io";
@@ -105,7 +106,7 @@ test("buildNxExport: nx bytes + sibling path + empty-mask warning", () => {
   const empty = buildNxExport(doc, renderField(flattenLayers(doc.layers), 32, 32, { supersample: 1 }), "/p/hull.df.png", DEFAULT_NORMAL_DIRS);
   expect(empty.path).toBe("/p/hull.nx.png");
   expect(empty.warning).toMatch(/empty/);
-  doc = addShape(doc, "dome", v2(16, 16));
+  doc = addObject(doc, ObjectTypeId.Sphere, v2(16, 16));
   const real = buildNxExport(doc, renderField(flattenLayers(doc.layers), 32, 32, { supersample: 1 }), "/p/hull.df.png", DEFAULT_NORMAL_DIRS);
   expect(real.warning).toBe(null);
   expect(real.bytes.length).toBeGreaterThan(0);

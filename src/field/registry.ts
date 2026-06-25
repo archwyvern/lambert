@@ -1,31 +1,34 @@
-import type { ShapeInstance, ShapeType } from "./types";
+import type { ObjectInstance, ObjectType } from "./types";
 import { Vector2, Vector3 } from "@carapace/primitives";
 import { v2 } from "./vec";
 
-const types = new Map<string, ShapeType>();
+export { ObjectTypeId } from "./objectTypeIds";
+export type { ObjectTypeIdValue } from "./objectTypeIds";
 
-export function defineShapeType(t: ShapeType): ShapeType {
-  if (types.has(t.id)) throw new Error(`duplicate shape type: ${t.id}`);
+const types = new Map<string, ObjectType>();
+
+export function defineObjectType(t: ObjectType): ObjectType {
+  if (types.has(t.id)) throw new Error(`duplicate object type: ${t.id}`);
   types.set(t.id, t);
   return t;
 }
 
-export function getShapeType(id: string): ShapeType {
+export function getObjectType(id: string): ObjectType {
   const t = types.get(id);
-  if (!t) throw new Error(`unknown shape type: ${id}`);
+  if (!t) throw new Error(`unknown object type: ${id}`);
   return t;
 }
 
-export function allShapeTypes(): ShapeType[] {
+export function allObjectTypes(): ObjectType[] {
   return [...types.values()];
 }
 
-export function createShapeInstance(typeId: string, pos: Vector2): ShapeInstance {
-  const t = getShapeType(typeId);
+export function createObjectInstance(typeId: string, pos: Vector2): ObjectInstance {
+  const t = getObjectType(typeId);
   const params = Object.fromEntries(
     Object.entries(t.params).map(([key, spec]) => [key, spec.default]),
   );
-  const instance: ShapeInstance = {
+  const instance: ObjectInstance = {
     id: crypto.randomUUID(),
     typeId,
     transform: { pos: new Vector3(pos.x, pos.y, 0), rotation: 0, scale: Vector3.one },
@@ -39,19 +42,19 @@ export function createShapeInstance(typeId: string, pos: Vector2): ShapeInstance
 }
 
 /** Peak |height| in px at scale.z = 1: the type's nominal, or the mesh's tallest vertex. */
-export function shapeMaxHeight(shape: ShapeInstance): number {
-  if (shape.mesh) return shape.mesh.z.reduce((m, z) => Math.max(m, Math.abs(z)), 0);
-  return getShapeType(shape.typeId).nominalHeight ?? 0;
+export function objectMaxHeight(object: ObjectInstance): number {
+  if (object.mesh) return object.mesh.z.reduce((m, z) => Math.max(m, Math.abs(z)), 0);
+  return getObjectType(object.typeId).nominalHeight ?? 0;
 }
 
-export function numParam(shape: ShapeInstance, key: string): number {
-  const value = shape.params[key];
-  if (typeof value !== "number") throw new Error(`param ${key} of ${shape.typeId} is not a number`);
+export function numParam(object: ObjectInstance, key: string): number {
+  const value = object.params[key];
+  if (typeof value !== "number") throw new Error(`param ${key} of ${object.typeId} is not a number`);
   return value;
 }
 
-export function enumParam(shape: ShapeInstance, key: string): string {
-  const value = shape.params[key];
-  if (typeof value !== "string") throw new Error(`param ${key} of ${shape.typeId} is not a string`);
+export function enumParam(object: ObjectInstance, key: string): string {
+  const value = object.params[key];
+  if (typeof value !== "string") throw new Error(`param ${key} of ${object.typeId} is not a string`);
   return value;
 }

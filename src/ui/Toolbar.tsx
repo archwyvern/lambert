@@ -131,19 +131,6 @@ function FileControls(props: {
         >
           {view.raster ? "raster" : "vector"}
         </button>
-        {view.mode === "lit" || view.mode === "normal" ? (
-          <button
-            title="Preview the full Skyrat pipeline: alpha-volume bevel + this NX override + radial + gradient"
-            aria-pressed={view.fullPipeline}
-            onClick={() => setView((v) => ({ ...v, fullPipeline: !v.fullPipeline }))}
-            className={cx(
-              "h-[26px] shrink-0 border border-border px-3 text-base",
-              view.fullPipeline ? "bg-list-active text-fg" : "text-fg-mid hover:bg-hover hover:text-fg",
-            )}
-          >
-            full
-          </button>
-        ) : null}
       </div>
     </>
   );

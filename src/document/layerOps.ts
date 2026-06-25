@@ -2,7 +2,7 @@ import { Vector3 } from "@carapace/primitives";
 import { affineCompose, affineFromTRS, affineIdentity, affineInvert, type Affine } from "../field/affine";
 import { isGroup, type GroupLayer, type LayerNode } from "../field/types";
 import { identityTransform } from "../field/transform";
-import { cloneShape } from "./docOps";
+import { cloneObject } from "./docOps";
 
 /** Find a node by id anywhere in the tree. */
 export function findNode(layers: LayerNode[], id: string): LayerNode | null {
@@ -277,7 +277,7 @@ function cloneNode(n: LayerNode, dx: number, dy: number): LayerNode {
       children: n.children.map((c) => cloneNode(c, 0, 0)),
     };
   }
-  return cloneShape(n, dx, dy);
+  return cloneObject(n, dx, dy);
 }
 
 /** Duplicate a node (deep, fresh ids), inserting the copy right after the original in the same parent.

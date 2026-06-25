@@ -3,7 +3,7 @@ import path from "node:path";
 import { decode } from "fast-png";
 import { emptyProjectConfig, parseDoc, parseProjectConfig } from "../document/schema";
 import { PROJECT_FILE } from "../document/workspace";
-import "../field/shapes";
+import "../field/objects";
 
 /** Walk up from a doc's directory to find the project's normal-channel convention. */
 function resolveNormalDirs(docDir: string): ReturnType<typeof emptyProjectConfig>["normalDirs"] {

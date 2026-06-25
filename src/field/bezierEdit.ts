@@ -17,7 +17,7 @@ export function movePoint(anchors: BezierAnchor[], i: number, localPt: Vector2, 
 
 /** Drag the in/out tangent of anchor i to localPt; mirror keeps the opposite tangent symmetric.
  *  snapAngleStep (radians, e.g. 15deg) snaps the tangent's direction to multiples of that step
- *  while preserving its length — the tangent analogue of shape rotate-snap (Shift). */
+ *  while preserving its length — the tangent analogue of object rotate-snap (Shift). */
 export function dragHandle(
   anchors: BezierAnchor[],
   i: number,

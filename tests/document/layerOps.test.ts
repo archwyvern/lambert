@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { Vector2, Vector3 } from "@carapace/primitives";
-import "../../src/field/shapes";
+import "../../src/field/objects";
 import { addNode, duplicateNode, emptyGroup, findNode, findParentId, moveNode, nodeWorldComposite, ungroup, wrapInGroup } from "../../src/document/layerOps";
 import { affineApply } from "../../src/field/affine";
-import { createShapeInstance } from "../../src/field/registry";
+import { createObjectInstance, ObjectTypeId } from "../../src/field/registry";
 import { isGroup, type GroupLayer, type LayerNode } from "../../src/field/types";
 import { v2 } from "../../src/field/vec";
 
-const shapeAt = (id: string, x = 0, y = 0): LayerNode => {
-  const s = createShapeInstance("dome", v2(x, y));
+const objectAt = (id: string, x = 0, y = 0): LayerNode => {
+  const s = createObjectInstance(ObjectTypeId.Sphere, v2(x, y));
   s.id = id;
   return s;
 };
@@ -16,7 +16,7 @@ const ids = (layers: LayerNode[]): string[] => layers.map((n) => n.id);
 
 describe("layerOps", () => {
   it("wrapInGroup nests the node in a new group at its slot; findParentId tracks it", () => {
-    const layers: LayerNode[] = [shapeAt("a"), shapeAt("b"), shapeAt("c")];
+    const layers: LayerNode[] = [objectAt("a"), objectAt("b"), objectAt("c")];
     const out = wrapInGroup(layers, ["b"], "g1");
     expect(ids(out)).toEqual(["a", "g1", "c"]); // group took b's slot
     const g = findNode(out, "g1")!;
@@ -28,8 +28,8 @@ describe("layerOps", () => {
   });
 
   it("wrapInGroup places the group at the given origin and bakes children so they stay put", () => {
-    const a = shapeAt("a", 80, 60);
-    const b = shapeAt("b", 20, 30);
+    const a = objectAt("a", 80, 60);
+    const b = objectAt("b", 20, 30);
     const layers: LayerNode[] = [a, b];
     const before = { a: nodeWorldComposite(layers, "a")!, b: nodeWorldComposite(layers, "b")! };
     const out = wrapInGroup(layers, ["a", "b"], "g", { x: 50, y: 50 }); // origin at texture centre
@@ -49,9 +49,9 @@ describe("layerOps", () => {
   });
 
   it("moveNode reparents, and refuses to move a group into its own descendant", () => {
-    const inner = shapeAt("x");
+    const inner = objectAt("x");
     const g: GroupLayer = { ...emptyGroup("g"), children: [inner] };
-    const layers: LayerNode[] = [g, shapeAt("a")];
+    const layers: LayerNode[] = [g, objectAt("a")];
     // move a into g
     const m = moveNode(layers, "a", "g", 1);
     expect((findNode(m, "g") as GroupLayer).children.map((n) => n.id)).toEqual(["x", "a"]);
@@ -62,7 +62,7 @@ describe("layerOps", () => {
   });
 
   it("ungroup bakes the group transform into children (uniform scale, no shear)", () => {
-    const child = shapeAt("c", 5, 0);
+    const child = objectAt("c", 5, 0);
     const g: GroupLayer = {
       kind: "group",
       id: "g",
@@ -82,7 +82,7 @@ describe("layerOps", () => {
   });
 
   it("ungroup returns null when a child would shear (non-uniform group + rotated child)", () => {
-    const child = shapeAt("c");
+    const child = objectAt("c");
     child.transform.rotation = 0.6;
     const g: GroupLayer = {
       kind: "group",
@@ -96,7 +96,7 @@ describe("layerOps", () => {
   });
 
   it("moveNode INTO a group preserves the node's world transform (rebases the local)", () => {
-    const a = shapeAt("a", 100, 50);
+    const a = objectAt("a", 100, 50);
     a.transform.rotation = 0.3;
     a.transform.scale = new Vector3(1.5, 1.5, 2);
     a.transform.pos = a.transform.pos.withZ(4);
@@ -123,7 +123,7 @@ describe("layerOps", () => {
   });
 
   it("moveNode OUT of a group to top level also preserves the world transform", () => {
-    const child = shapeAt("c", 8, 0);
+    const child = objectAt("c", 8, 0);
     const g: GroupLayer = {
       kind: "group",
       id: "g",
@@ -144,15 +144,15 @@ describe("layerOps", () => {
   });
 
   it("a same-parent reorder keeps the transform verbatim (no rebase drift)", () => {
-    const layers: LayerNode[] = [shapeAt("a", 5, 5), shapeAt("b", 9, 9)];
+    const layers: LayerNode[] = [objectAt("a", 5, 5), objectAt("b", 9, 9)];
     const moved = moveNode(layers, "b", null, 0);
     const b = findNode(moved, "b")!;
     expect((b as { transform: { pos: Vector3 } }).transform.pos.x).toBe(9); // unchanged exactly
   });
 
   it("duplicateNode deep-copies a subtree with fresh ids, inserted after the original", () => {
-    const g: GroupLayer = { ...emptyGroup("g"), children: [shapeAt("x"), shapeAt("y")] };
-    const layers: LayerNode[] = [g, shapeAt("a")];
+    const g: GroupLayer = { ...emptyGroup("g"), children: [objectAt("x"), objectAt("y")] };
+    const layers: LayerNode[] = [g, objectAt("a")];
     const { layers: out, newId } = duplicateNode(layers, "g");
     expect(out.length).toBe(3);
     expect(out[1]!.id).toBe(newId); // copy right after the original
@@ -164,9 +164,9 @@ describe("layerOps", () => {
 
   it("addNode inserts at top level or into a group", () => {
     const layers: LayerNode[] = [emptyGroup("g")];
-    const t = addNode(layers, shapeAt("a"), "g");
+    const t = addNode(layers, objectAt("a"), "g");
     expect((findNode(t, "g") as GroupLayer).children.map((n) => n.id)).toEqual(["a"]);
-    const u = addNode(layers, shapeAt("b"), null, 0);
+    const u = addNode(layers, objectAt("b"), null, 0);
     expect(ids(u)).toEqual(["b", "g"]);
   });
 });

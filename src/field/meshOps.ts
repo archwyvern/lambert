@@ -112,7 +112,7 @@ export function splitEdge(
 /**
  * Delete a set of vertices: drop them, drop every triangle/edge referencing any of them, and
  * re-index the survivors. Returns null if no triangle would remain to render (caller should
- * delete the whole shape).
+ * delete the whole object).
  */
 export function deleteVerts(
   controlPoints: Vector2[],

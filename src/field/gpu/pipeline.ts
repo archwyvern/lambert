@@ -1,11 +1,11 @@
-import type { ResolvedShape } from "../flatten";
+import type { ResolvedObject } from "../flatten";
 import { downsampleRender, RenderResult, scaleResolvedForSupersample } from "../render";
-import { packShapes, type PackedShapes } from "./pack";
+import { packObjects, type PackedObjects } from "./pack";
 import { buildFoldWgsl, buildNormalWgsl } from "./wgsl";
 
 export const padRowBytes = (bytes: number): number => Math.ceil(bytes / 256) * 256;
 
-/** The five fold-stage storage buffers, uploaded from a packed shape stream. */
+/** The five fold-stage storage buffers, uploaded from a packed object stream. */
 interface PackedBuffers {
   records: GPUBuffer;
   points: GPUBuffer;
@@ -20,8 +20,8 @@ const storageBuffer = (d: GPUDevice, data: ArrayBufferView): GPUBuffer => {
   return buf;
 };
 
-/** Upload the packed shape stream into the five fold storage buffers. */
-const uploadPacked = (d: GPUDevice, packed: PackedShapes): PackedBuffers => ({
+/** Upload the packed object stream into the five fold storage buffers. */
+const uploadPacked = (d: GPUDevice, packed: PackedObjects): PackedBuffers => ({
   records: storageBuffer(d, packed.records),
   points: storageBuffer(d, packed.points),
   mesh: storageBuffer(d, packed.meshTris),
@@ -221,13 +221,13 @@ export class GpuFieldRenderer {
   }
 
   /**
-   * Full evaluate matching renderField() semantics: optional 2x supersample (shapes scaled,
+   * Full evaluate matching renderField() semantics: optional 2x supersample (objects scaled,
    * slopeScale-corrected normals, shared CPU downsample), tiled so 8K x ss2 fits in VRAM.
    * Tiles carry a 1px apron so the normal pass sees true neighbors at interior seams.
    * Canvas-border pixels clamp identically to the CPU reference.
    */
   async evaluate(
-    resolved: ResolvedShape[],
+    resolved: ResolvedObject[],
     width: number,
     height: number,
     opts: GpuEvaluateOptions = {},
@@ -236,7 +236,7 @@ export class GpuFieldRenderer {
     const tileSize = opts.tileSize ?? 2048;
     const hiW = width * f;
     const hiH = height * f;
-    const packed = packShapes(f === 1 ? resolved : scaleResolvedForSupersample(resolved, f));
+    const packed = packObjects(f === 1 ? resolved : scaleResolvedForSupersample(resolved, f));
 
     const hiHeight = new Float32Array(hiW * hiH);
     const hiMask = new Float32Array(hiW * hiH);

@@ -15,7 +15,7 @@ export const identityTransform = (): Transform2D => ({
   scale: Vector3.one,
 });
 
-/** Map a canvas-space point into shape-local space (inverse of the instance transform). */
+/** Map a canvas-space point into object-local space (inverse of the instance transform). */
 export function toLocal(t: Transform2D, p: Vector2): Vector2 {
   const dx = p.x - t.pos.x;
   const dy = p.y - t.pos.y;
@@ -26,7 +26,7 @@ export function toLocal(t: Transform2D, p: Vector2): Vector2 {
   return v2(rx / t.scale.x, ry / t.scale.y);
 }
 
-/** Map a shape-local point into canvas space (forward of toLocal: scale, rotate, translate). */
+/** Map an object-local point into canvas space (forward of toLocal: scale, rotate, translate). */
 export function fromLocal(t: Transform2D, p: Vector2): Vector2 {
   const sx = p.x * t.scale.x;
   const sy = p.y * t.scale.y;
@@ -36,7 +36,7 @@ export function fromLocal(t: Transform2D, p: Vector2): Vector2 {
 }
 
 /**
- * Approximate multiplier converting shape-local distances to canvas px.
+ * Approximate multiplier converting object-local distances to canvas px.
  * Exact for uniform scale; average of |sx|,|sy| otherwise (documented approximation).
  */
 export function distanceScale(t: Transform2D): number {

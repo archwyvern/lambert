@@ -57,7 +57,7 @@ async function resolveSidecar(host: Host, imagePath: string): Promise<string | n
   return null;
 }
 
-/** Whether an image already has authored shape data (badge helper). */
+/** Whether an image already has authored object data (badge helper). */
 export async function hasSidecar(host: Host, imagePath: string): Promise<boolean> {
   return (await resolveSidecar(host, imagePath)) !== null;
 }

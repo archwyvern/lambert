@@ -15,7 +15,7 @@ export type MenuEntry =
   | "separator";
 
 /** Cursor-anchored popup menu: a thin adapter over carapace's floating-ui Menu that keeps lambert's
- *  ergonomic MenuEntry authoring shape. carapace's Menu portals, positions/flips at the cursor, and
+ *  ergonomic MenuEntry authoring object. carapace's Menu portals, positions/flips at the cursor, and
  *  closes on outside-press/Escape; it also insulates its own pointer events, so it fires correctly
  *  even when rendered inside the canvas's pointer-capturing surface (the bug that previously kept a
  *  lambert-local copy here was carapace leaking pointerdown to host gesture handlers — now fixed). */

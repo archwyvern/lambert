@@ -8,7 +8,7 @@
 
 import { buildFieldLibWgsl } from "./wgsl";
 
-// Header: this pipeline's own uniform + diffuse bindings. The shape buffers (records/points/mesh/
+// Header: this pipeline's own uniform + diffuse bindings. The object buffers (records/points/mesh/
 // masks at bindings 1,2,4,6,7) and fold_at come from buildFieldLibWgsl, spliced in below — the same
 // buffers the 2D composite already uploads, bound read-only here in the vertex + fragment stages.
 const PREVIEW3D_HEADER = /* wgsl */ `
@@ -84,12 +84,11 @@ fn vs(@builtin(vertex_index) vi: u32) -> VOut {
 
 @fragment
 fn fs(in: VOut) -> @location(0) vec4f {
-  // hide near-vertical cliff faces (from hard height steps: silhouettes, z-position, scale, masks) so
-  // the relief reads like an orthographic bake instead of a walled extrusion. The triangle's geometric
-  // normal comes from the screen-space derivatives of its world position; its up-component (.y) is ~0
-  // for a vertical wall, ~1 for flat ground. Discarding the walls leaves the floor grid showing through.
+  // vertical cliff faces (from hard height steps: silhouettes, z-position, scale, masks). The triangle's
+  // geometric normal comes from the screen-space derivatives of its world position; its up-component (.y)
+  // is ~0 for a vertical wall, ~1 for flat ground. We SHOW the walls (the 3D view is the true relief; the
+  // 2D bake still flattens them via minmod) and light them by their geometric normal below.
   let geoN = normalize(cross(dpdx(in.world), dpdy(in.world)));
-  if (abs(geoN.y) < 0.35) { discard; }
   let px = clamp(
     vec2i(in.uv * vec2f(u.docW, u.docH)),
     vec2i(0),
@@ -103,7 +102,11 @@ fn fs(in: VOut) -> @location(0) vec4f {
   let dx = minmod(height_at_px(px.x + 1, px.y) - c, c - height_at_px(px.x - 1, px.y)) * u.slopeScale;
   let dy = minmod(height_at_px(px.x, px.y + 1) - c, c - height_at_px(px.x, px.y - 1)) * u.slopeScale;
   let inv = inverseSqrt(dx * dx + dy * dy + 1.0);
-  let n = vec3f(-dx * inv, -dy * inv, inv);
+  let n2d = vec3f(-dx * inv, -dy * inv, inv);
+  // a wall's minmod normal is flat (0), so light cliff faces by the geometric normal instead, remapped
+  // from world (x, up, canvas-y) to the image space (x, canvas-y, up) the 2D lambert lights in.
+  let geoImg = normalize(vec3f(geoN.x, geoN.z, geoN.y));
+  let n = select(n2d, geoImg, abs(geoN.y) < 0.35);
   let albedo = diffuse.rgb;
   let l = normalize(vec3f(u.lightX, u.lightY, u.lightZ));
   let shade = 0.25 + 0.75 * max(dot(n, l), 0.0);
@@ -111,7 +114,7 @@ fn fs(in: VOut) -> @location(0) vec4f {
 }
 `;
 
-/** Assemble the 3D preview module: header bindings + the shared field lib (fold_at + shape buffers)
+/** Assemble the 3D preview module: header bindings + the shared field lib (fold_at + object buffers)
  *  + the displaced-grid vertex/fragment. */
 export function buildPreview3dWgsl(): string {
   return PREVIEW3D_HEADER + buildFieldLibWgsl() + PREVIEW3D_BODY;

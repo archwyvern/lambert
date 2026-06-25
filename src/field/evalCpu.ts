@@ -1,9 +1,9 @@
 import { affineApply } from "./affine";
-import { combineHeight, influence } from "./combine";
-import type { ResolvedShape } from "./flatten";
+import { combineHeight, type CombineOp, influence } from "./combine";
+import type { ResolvedObject } from "./flatten";
 import { bakeMasks, maskCoverage } from "./maskOps";
 import { meshGradients } from "./meshOps";
-import { getShapeType } from "./registry";
+import { getObjectType } from "./registry";
 import { v2 } from "./vec";
 
 export interface FieldResult {
@@ -15,22 +15,28 @@ export interface FieldResult {
   mask: Float32Array;
 }
 
-/** Evaluate the ordered shape fold at every pixel center. The CPU reference implementation. Takes
- *  the flattened, world-resolved shape list (see flattenLayers) — group composition + visibility
+/** Evaluate the ordered object fold at every pixel center. The CPU reference implementation. Takes
+ *  the flattened, world-resolved object list (see flattenLayers) — group composition + visibility
  *  are already applied. */
-export function evaluateField(resolved: ResolvedShape[], width: number, height: number): FieldResult {
+export function evaluateField(resolved: ResolvedObject[], width: number, height: number): FieldResult {
   const heightMap = new Float32Array(width * height);
   const mask = new Float32Array(width * height);
   const items = resolved.map((rs) => {
-    const type = getShapeType(rs.shape.typeId);
+    const type = getObjectType(rs.object.typeId);
     return {
       rs,
       type,
-      op: type.defaultCombine ?? ("max" as const),
+      // op (carve vs max): a type with an `invert` param drives it per-instance (Pipe/Berm); others
+      // fall back to the type-level defaultCombine. Mirrors pack.ts so CPU and GPU folds agree.
+      op: ("invert" in rs.object.params
+        ? rs.object.params.invert === "carve"
+          ? "carve"
+          : "max"
+        : type.defaultCombine ?? "max") as CombineOp,
       // attach the transient per-vertex gradient a mesh needs for its smoothness pass
-      s: rs.shape.mesh
-        ? { ...rs.shape, mesh: { ...rs.shape.mesh, grad: meshGradients(rs.shape.controlPoints, rs.shape.mesh.z, rs.shape.mesh.tris) } }
-        : rs.shape,
+      s: rs.object.mesh
+        ? { ...rs.object, mesh: { ...rs.object.mesh, grad: meshGradients(rs.object.controlPoints, rs.object.mesh.z, rs.object.mesh.tris) } }
+        : rs.object,
       baked: rs.masks.length > 0 ? bakeMasks(rs.masks) : [],
     };
   });
@@ -40,7 +46,7 @@ export function evaluateField(resolved: ResolvedShape[], width: number, height: 
       const p = v2(x + 0.5, y + 0.5);
       let H = 0;
       let M = 0;
-      let covered = false; // has any shape hard-covered this pixel yet?
+      let covered = false; // has any object hard-covered this pixel yet?
       for (const { rs, type, op, s, baked } of items) {
         const sample = type.eval(affineApply(rs.invAffine, p), s);
         const sd = sample.sd * rs.scaleHint;
@@ -48,8 +54,8 @@ export function evaluateField(resolved: ResolvedShape[], width: number, height: 
         if (rs.masks.length > 0) inf *= maskCoverage(rs.masks, baked, rs.invAffine, rs.scaleHint, p);
         if (inf <= 0) continue;
         const h = rs.elevationZ + sample.height * rs.tallnessZ; // composed elevation + extrude
-        // the FIRST shape (a non-carve "max" shape) to cover a pixel SETS the surface, so it can go
-        // below the ground plane — negative Z is allowed. Later overlapping shapes, and carve shapes
+        // the FIRST object (a non-carve "max" object) to cover a pixel SETS the surface, so it can go
+        // below the ground plane — negative Z is allowed. Later overlapping objects, and carve objects
         // (which subtract from the ground), always combine.
         const combined = !covered && op !== "carve" ? h : combineHeight(op, H, h);
         // mask = footprint COVERAGE (AA edge + trim masks), not height change — so a flat region (z=0,

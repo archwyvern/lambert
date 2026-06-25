@@ -1,8 +1,8 @@
 import { expect, test } from "vitest";
-import "../../src/field/shapes";
-import { createShapeInstance } from "../../src/field/registry";
-import { resolveShapes } from "../../src/field/flatten";
-import { axisScaleFromDrag, constrainAxis, grabGroup, groupScaleFactor, pointsBounds, pointsInBox, scalePointsAbout, pickShape, rotationFromDrag, snapAngle, toggleIndex } from "../../src/ui/picking";
+import "../../src/field/objects";
+import { createObjectInstance, ObjectTypeId } from "../../src/field/registry";
+import { resolveObjects } from "../../src/field/flatten";
+import { axisScaleFromDrag, constrainAxis, grabGroup, groupScaleFactor, pointsBounds, pointsInBox, scalePointsAbout, pickObject, rotationFromDrag, snapAngle, toggleIndex } from "../../src/ui/picking";
 import { toLocal } from "../../src/field/transform";
 import { v2 } from "../../src/field/vec";
 import { Vector3 } from "@carapace/primitives";
@@ -20,22 +20,22 @@ test("grabGroup: keeps the selection when i is in it, else collapses to [i]", ()
   expect(grabGroup([], 4)).toEqual([4]);
 });
 
-test("pickShape: topmost (last in z-order) wins, slop catches near-misses", () => {
-  const below = createShapeInstance("dome", v2(50, 50));
-  const above = createShapeInstance("plateau", v2(60, 50));
-  expect(pickShape(resolveShapes([below, above]),v2(62, 50))?.id).toBe(above.id); // inside both -> above
-  expect(pickShape(resolveShapes([below, above]),v2(20, 50))?.id).toBe(below.id); // only dome
-  expect(pickShape(resolveShapes([below, above]),v2(50, 99.5))).toBe(null); // dome rim at 98; 1px slop misses
-  expect(pickShape(resolveShapes([below, above]),v2(50, 98.5))?.id).toBe(below.id); // within slop
+test("pickObject: topmost (last in z-order) wins, slop catches near-misses", () => {
+  const below = createObjectInstance(ObjectTypeId.Sphere, v2(50, 50));
+  const above = createObjectInstance(ObjectTypeId.Plateau, v2(60, 50));
+  expect(pickObject(resolveObjects([below, above]),v2(62, 50))?.id).toBe(above.id); // inside both -> above
+  expect(pickObject(resolveObjects([below, above]),v2(20, 50))?.id).toBe(below.id); // only dome
+  expect(pickObject(resolveObjects([below, above]),v2(50, 99.5))).toBe(null); // dome rim at 98; 1px slop misses
+  expect(pickObject(resolveObjects([below, above]),v2(50, 98.5))?.id).toBe(below.id); // within slop
 });
 
-test("pickShape skips invisible and locked shapes", () => {
-  const a = createShapeInstance("dome", v2(0, 0));
+test("pickObject skips invisible and locked objects", () => {
+  const a = createObjectInstance(ObjectTypeId.Sphere, v2(0, 0));
   a.visible = false;
-  const b = createShapeInstance("dome", v2(0, 0));
+  const b = createObjectInstance(ObjectTypeId.Sphere, v2(0, 0));
   b.locked = true;
-  expect(pickShape(resolveShapes([a]), v2(0, 0))).toBe(null);
-  expect(pickShape(resolveShapes([b]), v2(0, 0))).toBe(null);
+  expect(pickObject(resolveObjects([a]), v2(0, 0))).toBe(null);
+  expect(pickObject(resolveObjects([b]), v2(0, 0))).toBe(null);
 });
 
 test("rotationFromDrag: quarter turn around the pivot", () => {
@@ -57,8 +57,8 @@ test("axisScaleFromDrag: uniform lock scales all three axes (tallness follows)",
   expect(s.z).toBeCloseTo(2);
 });
 
-test("axisScaleFromDrag: axes follow the shape's rotation", () => {
-  // shape rotated +90deg: its local +x axis points down-screen (+y canvas)
+test("axisScaleFromDrag: axes follow the object's rotation", () => {
+  // object rotated +90deg: its local +x axis points down-screen (+y canvas)
   const s = axisScaleFromDrag(v2(0, 0), Math.PI / 2, v2(0, 10), v2(0, 20), new Vector3(1, 1, 1), false);
   expect(s.x).toBeCloseTo(2); // dragged along local x
   expect(s.y).toBeCloseTo(1);

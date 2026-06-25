@@ -1,5 +1,5 @@
 import { fromLocal, toLocal } from "./transform";
-import type { ShapeInstance } from "./types";
+import type { ObjectInstance } from "./types";
 import { Vector2, Vector3 } from "@carapace/primitives";
 import { v2 } from "./vec";
 
@@ -53,13 +53,13 @@ export function alignedToAxis(a: Vector2, b: Vector2, tol: number): boolean {
 }
 
 /**
- * Snap a shape to the ½px CANVAS grid: its position, and every vertex's *canvas* (world)
+ * Snap an object to the ½px CANVAS grid: its position, and every vertex's *canvas* (world)
  * position — so the rasterized vertices land on the grid the user sees, independent of the
- * shape's scale/rotation. (Snapping the local coordinate instead would step the canvas
- * position by 0.5×scale, giving 1px steps on a 2× shape.) Control points are stored back in
+ * object's scale/rotation. (Snapping the local coordinate instead would step the canvas
+ * position by 0.5×scale, giving 1px steps on a 2× object.) Control points are stored back in
  * local space under the snapped transform. Scale/rotation are left alone (not pixel grids).
  */
-export function snapShapeToGrid(s: ShapeInstance): ShapeInstance {
+export function snapObjectToGrid(s: ObjectInstance): ObjectInstance {
   const pos = new Vector3(snapHalf(s.transform.pos.x), snapHalf(s.transform.pos.y), snapHalf(s.transform.pos.z));
   const snapped = { ...s.transform, pos };
   return {
