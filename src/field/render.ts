@@ -1,5 +1,5 @@
 import { evaluateField, FieldResult } from "./evalCpu";
-import type { ResolvedShape } from "./flatten";
+import type { ResolvedObject } from "./flatten";
 import { deriveNormals } from "./normals";
 import { v2 } from "./vec";
 
@@ -18,13 +18,13 @@ export interface RenderOptions {
 }
 
 /**
- * Scale resolved shapes onto a canvas f times larger: the world point grows by f, so the inverse
+ * Scale resolved objects onto a canvas f times larger: the world point grows by f, so the inverse
  * affine's linear part divides by f (translation unchanged — `local = invAffine·(p_hi/f)`), and the
  * scale hint grows by f. Tallness/elevation (z) do NOT scale — the normal derivation compensates
  * with slopeScale = f. World (non-follow) masks are canvas coords and scale by f; follow masks live
- * in shape-local space (scale-invariant — scaleHint carries f).
+ * in object-local space (scale-invariant — scaleHint carries f).
  */
-export function scaleResolvedForSupersample(resolved: ResolvedShape[], f: number): ResolvedShape[] {
+export function scaleResolvedForSupersample(resolved: ResolvedObject[], f: number): ResolvedObject[] {
   return resolved.map((rs) => {
     const inv = rs.invAffine;
     return {
@@ -92,9 +92,9 @@ export function downsampleRender(hi: FieldResult, hiNormals: Float32Array, f: nu
 }
 
 /** Full CPU render. The reference implementation the GPU path is drift-tested against. Takes the
- *  flattened, world-resolved shape list (see flattenLayers). */
+ *  flattened, world-resolved object list (see flattenLayers). */
 export function renderField(
-  resolved: ResolvedShape[],
+  resolved: ResolvedObject[],
   width: number,
   height: number,
   opts: RenderOptions,

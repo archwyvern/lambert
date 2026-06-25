@@ -1,10 +1,11 @@
 import "./styles.css";
 import { useEffect, useReducer, useRef, useState } from "react";
 import { DocumentStore } from "../document/store";
-import { addShape, duplicateShape, removeShape, removeShapeVertices, updateShape } from "../document/docOps";
+import { addInstance, duplicateObject, removeObject, removeObjectVertices, updateObject } from "../document/docOps";
+import { createFromPreset } from "../field/presets";
 import { findNode, ungroup, wrapInGroup } from "../document/layerOps";
 import { flattenLayers } from "../field/flatten";
-import { isGroup, isShape } from "../field/types";
+import { isGroup, isObject } from "../field/types";
 import { emptyDoc, NormalDirs, parseProjectConfig, serializeProjectConfig } from "../document/schema";
 import { exportTabNx, hasSidecar, newProjectFlow, openImageTab, openProjectFlow, saveTab } from "../document/io";
 import { basename, dirname, joinPath } from "../document/paths";
@@ -58,11 +59,9 @@ export interface ViewState {
   lightEnergy: number;
   /** Raster view: the pixelated exported output instead of the crisp display-res vector view. */
   raster: boolean;
-  /** Lit view: preview the full Skyrat pipeline (alpha-volume + NX override + radial + gradient). */
-  fullPipeline: boolean;
 }
 
-const DEFAULT_VIEW: ViewState = { mode: "lit", opacity: 1, lightDir: [-0.5, -0.5, 0.7], lightEnergy: 1, raster: false, fullPipeline: false };
+const DEFAULT_VIEW: ViewState = { mode: "lit", opacity: 1, lightDir: [-0.5, -0.5, 0.7], lightEnergy: 1, raster: false };
 
 export function App(): React.JSX.Element {
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
@@ -225,12 +224,12 @@ export function App(): React.JSX.Element {
     );
   };
 
-  // add a shape from the library popover, at the document origin
-  const pickShape = (typeId: string): void => {
+  // add an object from the library popover (a palette preset), at the document origin
+  const pickObject = (presetId: string): void => {
     const t = workspaceRef.current?.active;
     if (!t) return;
     const o = t.store.state.doc.canvas.origin;
-    t.store.update((d) => addShape(d, typeId, v2(o.x, o.y)));
+    t.store.update((d) => addInstance(d, createFromPreset(presetId, v2(o.x, o.y))));
     const layers = t.store.state.doc.layers;
     t.store.select(layers[layers.length - 1]?.id ?? null);
     t.store.endGesture();
@@ -281,13 +280,13 @@ export function App(): React.JSX.Element {
         return t?.store.redo();
       case "duplicate":
         if (t && ids.length) {
-          t.store.update((d) => ids.reduce((acc, sid) => duplicateShape(acc, sid), d));
+          t.store.update((d) => ids.reduce((acc, sid) => duplicateObject(acc, sid), d));
           t.store.endGesture();
         }
         return;
       case "delete":
         if (t && ids.length) {
-          t.store.update((d) => ids.reduce((acc, sid) => removeShape(acc, sid), d));
+          t.store.update((d) => ids.reduce((acc, sid) => removeObject(acc, sid), d));
           t.store.endGesture();
         }
         return;
@@ -421,7 +420,7 @@ export function App(): React.JSX.Element {
     const q = new URLSearchParams(location.search);
     if (!q.has("demo")) return;
     void Promise.all([import("fast-png"), import("../field/fixtures")])
-      .then(([{ encode }, { goldenShapes, maskedShapes, meshShapes }]) => {
+      .then(([{ encode }, { goldenObjects, maskedObjects, meshObjects }]) => {
         const w = 96;
         const h = 96;
         const data = new Uint8Array(w * h * 4);
@@ -431,8 +430,8 @@ export function App(): React.JSX.Element {
           data[i * 4 + 2] = 118;
           data[i * 4 + 3] = 255;
         }
-        const shapes = q.has("masked") ? maskedShapes() : q.has("mesh") ? meshShapes() : goldenShapes();
-        const doc = { ...emptyDoc("demo.png", w, h), layers: shapes };
+        const objects = q.has("masked") ? maskedObjects() : q.has("mesh") ? meshObjects() : goldenObjects();
+        const doc = { ...emptyDoc("demo.png", w, h), layers: objects };
         const ws = new Workspace("/demo", { schemaVersion: 1, normalDirs: { red: "right", green: "up" } });
         const tab: Tab = {
           imagePath: "/demo/demo.png",
@@ -505,30 +504,30 @@ export function App(): React.JSX.Element {
       if (key in TOOL_KEYS) {
         setTool(TOOL_KEYS[key]!);
       } else if (e.key === "Escape") {
-        // ESC deselects the whole shape (and any vertex sub-selection); an empty canvas click only
-        // clears the vertex/anchor selection and keeps the shape (see CanvasView endDrag + MaskGizmo)
+        // ESC deselects the whole object (and any vertex sub-selection); an empty canvas click only
+        // clears the vertex/anchor selection and keeps the object (see CanvasView endDrag + MaskGizmo)
         setSelVerts([]);
         store.select(null);
       } else if ((e.key === "Delete" || e.key === "Backspace") && id) {
         const node = findNode(store.state.doc.layers, id);
-        const shape = node && isShape(node) ? node : null;
+        const object = node && isObject(node) ? node : null;
         const verts = selVertsRef.current;
-        if (shape?.bezier && verts.length > 0) {
+        if (object?.bezier && verts.length > 0) {
           // delete the selected cable anchor(s) — never below the 2-anchor minimum (don't nuke the cable)
-          if (shape.bezier.length - verts.length >= 2) {
+          if (object.bezier.length - verts.length >= 2) {
             store.update((d) =>
-              updateShape(d, id, (s) => ({ ...s, bezier: s.bezier?.filter((_, i) => !verts.includes(i)) })),
+              updateObject(d, id, (s) => ({ ...s, bezier: s.bezier?.filter((_, i) => !verts.includes(i)) })),
             );
             setSelVerts([]);
           }
-        } else if (shape && verts.length > 0 && shape.controlPoints.length > 0) {
+        } else if (object && verts.length > 0 && object.controlPoints.length > 0) {
           // delete selected vertices (mesh / polygon / polyline / ring), guarded per kind
-          store.update((d) => updateShape(d, id, (s) => removeShapeVertices(s, verts)));
+          store.update((d) => updateObject(d, id, (s) => removeObjectVertices(s, verts)));
           setSelVerts([]);
         } else {
           // no vertex sub-selection: delete every selected layer
           const sel = store.state.selectedIds;
-          store.update((d) => sel.reduce((acc, sid) => removeShape(acc, sid), d));
+          store.update((d) => sel.reduce((acc, sid) => removeObject(acc, sid), d));
         }
         store.endGesture();
       } else if (key === "v") {
@@ -539,23 +538,23 @@ export function App(): React.JSX.Element {
         const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
         const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
         const node = findNode(store.state.doc.layers, id);
-        const shape = node && isShape(node) ? node : null;
+        const object = node && isObject(node) ? node : null;
         const verts = selVertsRef.current;
-        if (shape?.bezier && verts.length > 0) {
+        if (object?.bezier && verts.length > 0) {
           // nudge selected cable anchors (move the point; handles are offsets and follow)
           store.update(
             (d) =>
-              updateShape(d, id, (s) => ({
+              updateObject(d, id, (s) => ({
                 ...s,
                 bezier: s.bezier?.map((a, i) => (verts.includes(i) ? { ...a, p: v2(a.p.x + dx, a.p.y + dy) } : a)),
               })),
             { coalesce: `vnudge:${id}` },
           );
-        } else if (shape && verts.length > 0 && shape.controlPoints.length > 0) {
+        } else if (object && verts.length > 0 && object.controlPoints.length > 0) {
           // nudge selected control-point vertices (polygon / polyline / ring / mesh)
           store.update(
             (d) =>
-              updateShape(d, id, (s) => ({
+              updateObject(d, id, (s) => ({
                 ...s,
                 controlPoints: s.controlPoints.map((p, i) => (verts.includes(i) ? v2(p.x + dx, p.y + dy) : p)),
               })),
@@ -564,7 +563,7 @@ export function App(): React.JSX.Element {
         } else {
           store.update(
             (d) =>
-              updateShape(d, id, (s) => ({
+              updateObject(d, id, (s) => ({
                 ...s,
                 transform: { ...s.transform, pos: s.transform.pos.withX(s.transform.pos.x + dx).withY(s.transform.pos.y + dy) },
               })),
@@ -648,7 +647,7 @@ export function App(): React.JSX.Element {
         {workspace ? (
           <>
             <aside className="flex shrink-0 flex-col gap-3 bg-bg p-3" style={{ width: leftWidth }}>
-              {active ? <Library enabled onPick={pickShape} /> : null}
+              {active ? <Library enabled onPick={pickObject} /> : null}
               {active && state ? <Layers store={active.store} state={state} /> : null}
               <div className="flex min-h-0 flex-1 flex-col">
                 <SectionLabel>Explorer</SectionLabel>
@@ -656,7 +655,7 @@ export function App(): React.JSX.Element {
                     --text-sm token to this subtree; leaves every other text-sm + carapace untouched */}
                 <div className="-mx-1 min-h-0 flex-1 overflow-y-auto" style={{ ["--text-sm" as string]: "0.8125rem" }}>
                   {/* getIcon cast bridges a duplicate @types/react (carapace pins 19.0, lambert
-                      19.2); the ReactNode shapes are identical, only nominally distinct */}
+                      19.2); the ReactNode objects are identical, only nominally distinct */}
                   <FileExplorer
                     root={workspace.projectPath}
                     onOpen={(p) => {
@@ -758,7 +757,7 @@ export function App(): React.JSX.Element {
                 icon={<LambertMark className="!h-[108px] !w-[108px]" />}
                 message={
                   workspace
-                    ? "Open an image from the Explorer to start placing shapes."
+                    ? "Open an image from the Explorer to start placing objects."
                     : "Create a new project or open an existing one to start authoring height fields."
                 }
                 action={
@@ -780,7 +779,7 @@ export function App(): React.JSX.Element {
       </div>
       <StatusBar
         left={status}
-        right={state ? `${state.doc.source.width}×${state.doc.source.height} · ${flattenLayers(state.doc.layers).length} shapes` : null}
+        right={state ? `${state.doc.source.width}×${state.doc.source.height} · ${flattenLayers(state.doc.layers).length} objects` : null}
       />
       <UpdateNotice />
     </div>

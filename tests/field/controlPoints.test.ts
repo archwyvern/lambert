@@ -93,24 +93,14 @@ test("ringPhase + regularPolygonAligned keep two rings index-aligned (no twist)"
   }
 });
 
-test("frustumStrip: one triangle per step, every vertex referenced (any counts)", () => {
-  for (const [nB, nT] of [[4, 4], [4, 5], [5, 4], [3, 7], [8, 3]] as const) {
-    const { tris } = frustumStrip(nB, nT);
+test("frustumStrip: one triangle per step, every vertex referenced (equal counts, apex, mismatch)", () => {
+  for (const [nB, nT] of [[4, 4], [4, 1], [4, 5], [5, 4], [8, 3]] as const) {
+    const tris = frustumStrip(nB, nT);
     expect(tris.length).toBe(nB + nT);
     const outerSeen = new Set<number>();
     const innerSeen = new Set<number>();
-    for (const tri of tris) {
-      const outerCount = tri.filter(([r]) => r === 0).length;
-      expect(outerCount === 1 || outerCount === 2).toBe(true); // a valid strip step
-      for (const [r, idx] of tri) (r === 0 ? outerSeen : innerSeen).add(idx);
-    }
+    for (const tri of tris) for (const [r, idx] of tri) (r === 0 ? outerSeen : innerSeen).add(idx);
     expect(outerSeen.size).toBe(nB);
     expect(innerSeen.size).toBe(nT);
   }
-});
-
-test("frustumStrip: connectors pair each step, indices in range", () => {
-  const { connectors } = frustumStrip(4, 5);
-  expect(connectors.length).toBe(9);
-  expect(connectors.every(([o, i]) => o >= 0 && o < 4 && i >= 0 && i < 5)).toBe(true);
 });

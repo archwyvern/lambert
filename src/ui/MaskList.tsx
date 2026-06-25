@@ -3,9 +3,9 @@ import { FormToggle, IconButton, Select } from "@carapace/shell";
 import type { Mask } from "../field/types";
 import { Button, cx } from "./kit";
 
-/** The Masks section shared by the shape and group inspectors: a "+ Add Mask" header (enters the pen
+/** The Masks section shared by the object and group inspectors: a "+ Add Mask" header (enters the pen
  *  tool) and one row per mask (keep/cut mode, follow toggle, visibility, delete). The owner wires the
- *  callbacks to its own node (a shape via updateShape, a group via updateNode). */
+ *  callbacks to its own node (an object via updateObject, a group via updateNode). */
 export function MaskList(props: {
   masks: Mask[];
   emptyHint: string;
@@ -44,7 +44,7 @@ export function MaskList(props: {
                 />
                 <span className="flex items-center gap-1 text-fg-mid">
                   follow
-                  <FormToggle ariaLabel="Mask follows the shape transform" value={m.follow} onChange={(v) => onFollow(m.id, v)} />
+                  <FormToggle ariaLabel="Mask follows the object transform" value={m.follow} onChange={(v) => onFollow(m.id, v)} />
                 </span>
                 <span className="flex items-center gap-1 text-fg-mid" title="Anti-alias the mask edge (off = hard edge)">
                   AA

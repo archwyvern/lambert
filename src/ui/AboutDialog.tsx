@@ -14,7 +14,7 @@ export function AboutDialog({ onClose }: { onClose: () => void }): React.JSX.Ele
           <div className="text-lg font-semibold text-fg">Lambert</div>
           <div className="text-sm text-fg-mid">Version {__APP_VERSION__}</div>
         </div>
-        <p className="max-w-xs text-base text-fg-mid">Shape-based height-field authoring for normal maps.</p>
+        <p className="max-w-xs text-base text-fg-mid">Object-based height-field authoring for normal maps.</p>
         <div className="space-y-0.5 text-sm text-fg-mid">
           <div>Created by Archwyvern</div>
           <div>Copyright © 2026 Archwyvern</div>

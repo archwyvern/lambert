@@ -13,8 +13,8 @@ export interface GuideSection {
 /** What the editor is currently doing — drives which shortcut sections are shown. */
 export interface GuideContext {
   tool: ToolMode;
-  /** "none" = no shape or a shape with no editable points (e.g. dome). */
-  shapeKind: "none" | "cable" | "mesh" | "polygon" | "polyline" | "rings";
+  /** "none" = no object or an object with no editable points (e.g. dome). */
+  objectKind: "none" | "cable" | "mesh" | "polygon" | "polyline" | "rings";
   placing: boolean;
 }
 
@@ -23,7 +23,7 @@ const cap = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
 /**
  * The contextual 2D shortcut guide. Ordered so the most relevant section is first: in placing
  * ("pen") mode that takes over entirely; otherwise tools, then the active tool, then the verbs for
- * the selected shape kind, then the always-on view/edit keys.
+ * the selected object kind, then the always-on view/edit keys.
  */
 export function guide2D(ctx: GuideContext): GuideSection[] {
   if (ctx.placing) {
@@ -65,7 +65,7 @@ export function guide2D(ctx: GuideContext): GuideSection[] {
     });
   }
 
-  if (ctx.shapeKind === "cable") {
+  if (ctx.objectKind === "cable") {
     out.push({
       title: "Cable",
       rows: [
@@ -80,10 +80,10 @@ export function guide2D(ctx: GuideContext): GuideSection[] {
       ],
     });
   } else if (
-    ctx.shapeKind === "polygon" ||
-    ctx.shapeKind === "polyline" ||
-    ctx.shapeKind === "rings" ||
-    ctx.shapeKind === "mesh"
+    ctx.objectKind === "polygon" ||
+    ctx.objectKind === "polyline" ||
+    ctx.objectKind === "rings" ||
+    ctx.objectKind === "mesh"
   ) {
     const rows: GuideRow[] = [
       { keys: "Click vertex", desc: "Select" },
@@ -93,7 +93,7 @@ export function guide2D(ctx: GuideContext): GuideSection[] {
       { keys: "Right-click", desc: "Vertex / edge menu" },
       { keys: "⌫", desc: "Delete selected" },
     ];
-    if (ctx.shapeKind === "mesh") rows.push({ keys: "Right-click", desc: "Connect · Merge · Z-align" });
+    if (ctx.objectKind === "mesh") rows.push({ keys: "Right-click", desc: "Connect · Merge · Z-align" });
     out.push({ title: "Vertices", rows });
   }
 

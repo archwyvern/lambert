@@ -24,16 +24,16 @@ export type ParamSpec = ParamSpecPx | ParamSpecEnum;
 
 export interface ControlPointSpec {
   /** rings = two polygon rings in one array (base then top; counts differ via ringSplit).
-   *  mesh = free triangulated surface; topology in ShapeInstance.mesh, xy in controlPoints. */
+   *  mesh = free triangulated surface; topology in ObjectInstance.mesh, xy in controlPoints. */
   kind: "none" | "polygon" | "polyline" | "rings" | "mesh";
   min?: number;
-  /** Default control points in shape-local px. */
+  /** Default control points in object-local px. */
   default: Vector2[];
 }
 
 /** A mesh-plane's topology: per-vertex height (index-aligned with controlPoints) + triangles. */
 export interface MeshData {
-  /** Height in px at each vertex (scale.z multiplies, pos.z elevates — like every shape). */
+  /** Height in px at each vertex (scale.z multiplies, pos.z elevates — like every object). */
   z: number[];
   /** Triangular FACES as triples of vertex indices into controlPoints. */
   tris: [number, number, number][];
@@ -43,8 +43,8 @@ export interface MeshData {
   grad?: [number, number][];
 }
 
-/** A pen-drawn closed-Bézier mask that trims its owner shape. keep = shape shows only inside the
- *  loop; cut = shape is removed inside the loop. follow (default true) = anchors are in shape-local
+/** A pen-drawn closed-Bézier mask that trims its owner object. keep = object shows only inside the
+ *  loop; cut = object is removed inside the loop. follow (default true) = anchors are in object-local
  *  space and ride the transform; false = anchors are pinned in canvas/doc space. */
 export interface Mask {
   id: string;
@@ -58,7 +58,7 @@ export interface Mask {
   hard?: boolean;
 }
 
-export interface ShapeInstance {
+export interface ObjectInstance {
   id: string;
   typeId: string;
   /** User-given layer name; display falls back to the type name when absent. */
@@ -66,15 +66,25 @@ export interface ShapeInstance {
   transform: Transform2D;
   params: Record<string, number | string | boolean>;
   controlPoints: Vector2[];
-  /** Cable only: the cubic-Bézier pen path (anchors + tangent handles). controlPoints is the
-   *  dense sample of it (what eval/GPU walk); editing the path regenerates controlPoints. */
+  /** Analytic vector paths (Pipe/Berm (Vector)): the cubic-Bézier pen path (anchors + tangent
+   *  handles), evaluated directly; controlPoints stays empty so the packer ships the anchors. */
   bezier?: BezierAnchor[];
-  /** "rings" shapes (plateau): index where the top ring begins = base-ring vertex count.
+  /** Bézier path is a closed loop (last anchor joins the first): an O-ring pipe/berm, and the basis
+   *  for a filled vector outline. Open by default. */
+  closed?: boolean;
+  /** Anchor indices where each Bézier subpath (loop) begins; absent = a single path starting at 0.
+   *  Used by Plateau (Vector) (base + top ring) and Surface (Vector) holes. */
+  subpathStarts?: number[];
+  /** Baked vertex count of each contour after baking the subpaths ([outer, hole1, hole2, ...] for a
+   *  Surface (Vector); [base, top] for a Plateau (Vector)). Set by the bake; drives the multi-contour
+   *  hole CSG. Absent = a single contour. */
+  contourCounts?: number[];
+  /** "rings" objects (plateau): index where the top ring begins = base-ring vertex count.
    *  Absent = equal split (controlPoints.length / 2); lets inner/outer counts differ. */
   ringSplit?: number;
-  /** Present only for mesh-plane shapes (typeId "mesh"); aligns with controlPoints. */
+  /** Present only for Mesh objects (typeId ObjectTypeId.Mesh); aligns with controlPoints. */
   mesh?: MeshData;
-  /** Per-shape trim masks; each gates ONLY this shape's influence. Absent = unmasked. */
+  /** Per-object trim masks; each gates ONLY this object's influence. Absent = unmasked. */
   masks?: Mask[];
   visible: boolean;
   locked: boolean;
@@ -100,8 +110,8 @@ export interface GroupLayer {
   children: LayerNode[];
 }
 
-/** A node in the layer tree: a shape (leaf) or a group (subtree). */
-export type LayerNode = ShapeInstance | GroupLayer;
+/** A node in the layer tree: an object (leaf) or a group (subtree). */
+export type LayerNode = ObjectInstance | GroupLayer;
 
 /** Per-file canvas aids: a repositionable origin (creation point + ruler/display zero), guides, and
  *  guide lock + snap toggles. Coords are absolute texture pixels; the origin is displayed relative. */
@@ -116,25 +126,25 @@ export interface CanvasState {
 export function isGroup(n: LayerNode): n is GroupLayer {
   return (n as GroupLayer).kind === "group";
 }
-export function isShape(n: LayerNode): n is ShapeInstance {
+export function isObject(n: LayerNode): n is ObjectInstance {
   return (n as GroupLayer).kind !== "group";
 }
 
 export interface FieldSample {
   /** Height contribution in px at scale.z = 1 (pre elevation/extrude). */
   height: number;
-  /** Signed distance to the footprint in shape-local px (negative inside). */
+  /** Signed distance to the footprint in object-local px (negative inside). */
   sd: number;
 }
 
-export interface ShapeType {
+export interface ObjectType {
   id: string;
   name: string;
-  /** Library palette group (e.g. "Primitives", "Profiles"). Absent = ungrouped/hidden. */
+  /** Library palette group: "Primitives", "Vectors", or "Meshes". Absent = ungrouped/hidden. */
   category?: string;
   params: Record<string, ParamSpec>;
   controlPoints: ControlPointSpec;
-  /** carve = subtractive shape (groove); everything else clips via max. */
+  /** carve = subtractive object (groove); everything else clips via max. */
   defaultCombine?: CombineOp;
   /** Intrinsic tallness in px at scale.z = 1 (extrude basis). */
   nominalHeight?: number;
@@ -146,8 +156,8 @@ export interface ShapeType {
    * Optional so test-only types can skip it; buildFoldWgsl() skips types without it.
    */
   wgsl?: string;
-  /** Optional post-construction hook (createShapeInstance) — e.g. cable seeds its anchors and
+  /** Optional post-construction hook (createObjectInstance) — e.g. cable seeds its anchors and
    *  resamples them into the dense controlPoints. */
-  onCreate?(shape: ShapeInstance): void;
-  eval(pLocal: Vector2, shape: ShapeInstance): FieldSample;
+  onCreate?(object: ObjectInstance): void;
+  eval(pLocal: Vector2, object: ObjectInstance): FieldSample;
 }

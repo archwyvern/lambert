@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { Vector2, Vector3 } from "@carapace/primitives";
-import "../../src/field/shapes";
-import { flattenLayers, resolveShapes } from "../../src/field/flatten";
+import "../../src/field/objects";
+import { flattenLayers, resolveObjects } from "../../src/field/flatten";
 import { affineApply, affineFromTRS } from "../../src/field/affine";
 import { createMask } from "../../src/field/maskOps";
-import { createShapeInstance } from "../../src/field/registry";
+import { createObjectInstance, ObjectTypeId } from "../../src/field/registry";
 import { fromLocal } from "../../src/field/transform";
 import type { GroupLayer, Mask } from "../../src/field/types";
 
@@ -26,8 +26,8 @@ const keepSquare = (cx: number, cy: number, r: number): Mask =>
   createMask([v(cx - r, cy - r), v(cx + r, cy - r), v(cx + r, cy + r), v(cx - r, cy + r)], true);
 
 describe("flattenLayers", () => {
-  it("a lone shape resolves to its own transform", () => {
-    const s = createShapeInstance("dome", v(10, 20));
+  it("a lone object resolves to its own transform", () => {
+    const s = createObjectInstance(ObjectTypeId.Sphere, v(10, 20));
     s.transform.scale = new Vector3(2, 3, 1);
     const [rs] = flattenLayers([s]);
     const worldOrigin = fromLocal(s.transform, v(0, 0));
@@ -38,7 +38,7 @@ describe("flattenLayers", () => {
   });
 
   it("a group composes its transform onto a child", () => {
-    const child = createShapeInstance("dome", v(5, 0));
+    const child = createObjectInstance(ObjectTypeId.Sphere, v(5, 0));
     const group: GroupLayer = {
       kind: "group",
       id: "g",
@@ -56,7 +56,7 @@ describe("flattenLayers", () => {
   });
 
   it("z composes: group elevation adds, group tallness multiplies", () => {
-    const child = createShapeInstance("dome", v(0, 0));
+    const child = createObjectInstance(ObjectTypeId.Sphere, v(0, 0));
     child.transform.pos = child.transform.pos.withZ(3);
     child.transform.scale = child.transform.scale.withZ(2);
     const group: GroupLayer = {
@@ -72,10 +72,10 @@ describe("flattenLayers", () => {
     expect(rs!.tallnessZ).toBeCloseTo(8);
   });
 
-  it("hidden groups and hidden shapes are dropped; z-order is DFS", () => {
-    const a = createShapeInstance("dome", v(0, 0));
+  it("hidden groups and hidden objects are dropped; z-order is DFS", () => {
+    const a = createObjectInstance(ObjectTypeId.Sphere, v(0, 0));
     a.id = "a";
-    const b = createShapeInstance("dome", v(0, 0));
+    const b = createObjectInstance(ObjectTypeId.Sphere, v(0, 0));
     b.id = "b";
     b.visible = false;
     const hidden: GroupLayer = {
@@ -84,21 +84,21 @@ describe("flattenLayers", () => {
       transform: { pos: new Vector3(0, 0, 0), rotation: 0, scale: new Vector3(1, 1, 1) },
       visible: false,
       locked: false,
-      children: [createShapeInstance("dome", v(0, 0))],
+      children: [createObjectInstance(ObjectTypeId.Sphere, v(0, 0))],
     };
     const out = flattenLayers([a, b, hidden]);
-    expect(out.map((r) => r.shape.id)).toEqual(["a"]);
+    expect(out.map((r) => r.object.id)).toEqual(["a"]);
   });
 
-  it("resolveShapes wraps a flat list", () => {
-    const out = resolveShapes([createShapeInstance("dome", v(0, 0))]);
+  it("resolveObjects wraps a flat list", () => {
+    const out = resolveObjects([createObjectInstance(ObjectTypeId.Sphere, v(0, 0))]);
     expect(out).toHaveLength(1);
   });
 });
 
 describe("flattenLayers — group masks (scope tagging)", () => {
   it("a group's mask attaches to its child baked to world (scope 1, follow false)", () => {
-    const child = createShapeInstance("dome", v(0, 0));
+    const child = createObjectInstance(ObjectTypeId.Sphere, v(0, 0));
     const g = group([child], { id: "g", transform: { pos: new Vector3(50, 20, 0), rotation: 0, scale: new Vector3(2, 2, 1) } });
     g.masks = [keepSquare(10, 0, 5)];
     const [rs] = flattenLayers([g]);
@@ -112,40 +112,40 @@ describe("flattenLayers — group masks (scope tagging)", () => {
     expect(m.anchors[0]!.p.y).toBeCloseTo(want.y, 5);
   });
 
-  it("a hidden mask (visible:false) is skipped, on a shape and on a group", () => {
-    const child = createShapeInstance("dome", v(0, 0));
+  it("a hidden mask (visible:false) is skipped, on an object and on a group", () => {
+    const child = createObjectInstance(ObjectTypeId.Sphere, v(0, 0));
     child.masks = [{ ...keepSquare(0, 0, 3), visible: false }];
     const g = group([child]);
     g.masks = [{ ...keepSquare(0, 0, 8), visible: false }];
     const [rs] = flattenLayers([g]);
     expect(rs!.masks).toHaveLength(0); // both disabled -> no trimming
-    // re-enabling the shape's mask brings it back at scope 0
+    // re-enabling the object's mask brings it back at scope 0
     child.masks = [keepSquare(0, 0, 3)];
     expect(flattenLayers([g])[0]!.masks.map((m) => m.scope)).toEqual([0]);
   });
 
-  it("a shape's own mask is scope 0; an ancestor group's is scope 1 (sorted)", () => {
-    const child = createShapeInstance("dome", v(0, 0));
+  it("an object's own mask is scope 0; an ancestor group's is scope 1 (sorted)", () => {
+    const child = createObjectInstance(ObjectTypeId.Sphere, v(0, 0));
     child.masks = [keepSquare(0, 0, 3)];
     const g = group([child]);
     g.masks = [keepSquare(0, 0, 8)];
     const [rs] = flattenLayers([g]);
     expect(rs!.masks.map((m) => m.scope)).toEqual([0, 1]);
-    expect(rs!.masks[0]!.follow).toBe(true); // shape's own, untouched
+    expect(rs!.masks[0]!.follow).toBe(true); // object's own, untouched
   });
 });
 
 describe("flattenLayers — mirror", () => {
   it("mirror=none and missing mirror resolve identically to a plain group", () => {
-    const child = createShapeInstance("dome", v(5, 3));
-    const plain = flattenLayers([group([createShapeInstance("dome", v(5, 3))])]);
+    const child = createObjectInstance(ObjectTypeId.Sphere, v(5, 3));
+    const plain = flattenLayers([group([createObjectInstance(ObjectTypeId.Sphere, v(5, 3))])]);
     const none = flattenLayers([group([child], { mirror: "none" })]);
     expect(none).toHaveLength(1);
     expect(none[0]!.invAffine).toEqual(plain[0]!.invAffine);
   });
 
   it("mirror=x emits 2 copies; the reflected one reflects about the group origin", () => {
-    const child = createShapeInstance("dome", v(5, 0));
+    const child = createObjectInstance(ObjectTypeId.Sphere, v(5, 0));
     const out = flattenLayers([group([child], { mirror: "x" })]);
     expect(out).toHaveLength(2);
     // base maps world (5,0) -> local (0,0); reflected maps world (-5,0) -> local (0,0)
@@ -158,18 +158,18 @@ describe("flattenLayers — mirror", () => {
   });
 
   it("mirror=quad emits 4 copies", () => {
-    const out = flattenLayers([group([createShapeInstance("dome", v(5, 5))], { mirror: "quad" })]);
+    const out = flattenLayers([group([createObjectInstance(ObjectTypeId.Sphere, v(5, 5))], { mirror: "quad" })]);
     expect(out).toHaveLength(4);
   });
 
   it("mirrorEnabled:false disables the mirror: one copy, no auto-clip (a plain group)", () => {
-    const out = flattenLayers([group([createShapeInstance("dome", v(5, 0))], { mirror: "x", mirrorEnabled: false })]);
+    const out = flattenLayers([group([createObjectInstance(ObjectTypeId.Sphere, v(5, 0))], { mirror: "x", mirrorEnabled: false })]);
     expect(out).toHaveLength(1); // no reflection
     expect(out[0]!.masks).toHaveLength(0); // no source clip
   });
 
   it("mirror=x auto-clips each copy to the source (negative) side of its own frame", () => {
-    const child = createShapeInstance("dome", v(0, 0));
+    const child = createObjectInstance(ObjectTypeId.Sphere, v(0, 0));
     const out = flattenLayers([group([child], { mirror: "x" })]);
     expect(out).toHaveLength(2);
     // each copy carries exactly one (auto-clip) keep mask, scope 1, baked to world
@@ -187,7 +187,7 @@ describe("flattenLayers — mirror", () => {
   });
 
   it("a user mask on a mirror group adds a second scope and reflects with the copy", () => {
-    const child = createShapeInstance("dome", v(0, 0));
+    const child = createObjectInstance(ObjectTypeId.Sphere, v(0, 0));
     const g = group([child], { mirror: "x" });
     g.masks = [keepSquare(-10, 0, 5)]; // a user keep mask on the source side
     const out = flattenLayers([g]);
