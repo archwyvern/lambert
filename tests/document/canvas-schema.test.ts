@@ -11,12 +11,12 @@ describe("doc.canvas", () => {
   });
 
   it("legacy doc without canvas defaults origin to centre", () => {
-    const legacy = JSON.stringify({
+    const noCanvas = JSON.stringify({
       schemaVersion: 1,
       source: { path: "a.png", width: 80, height: 40 },
-      shapes: [],
+      layers: [],
     });
-    expect(parseDoc(legacy).canvas.origin).toEqual({ x: 40, y: 20 });
+    expect(parseDoc(noCanvas).canvas.origin).toEqual({ x: 40, y: 20 });
   });
 
   it("canvas round-trips (origin + guides + flags)", () => {

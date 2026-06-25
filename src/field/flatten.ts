@@ -1,22 +1,22 @@
 import { Affine, affineApply, affineCompose, affineFromTRS, affineIdentity, affineInvert, affineScaleHint } from "./affine";
 import { bezierAnchor } from "./bezier";
 import { isGroup } from "./types";
-import type { GroupLayer, LayerNode, Mask, ShapeInstance } from "./types";
+import type { GroupLayer, LayerNode, Mask, ObjectInstance } from "./types";
 import { v2 } from "./vec";
 
-/** A mask resolved for the fold: the same shape as Mask plus a scope id. scope 0 = the shape's own
+/** A mask resolved for the fold: the same object as Mask plus a scope id. scope 0 = the object's own
  *  masks (follow as authored); scope >= 1 = an ancestor group's masks, baked to WORLD (follow=false).
- *  Coverage unions within a scope and multiplies across scopes (a shape shows only where its own
+ *  Coverage unions within a scope and multiplies across scopes (an object shows only where its own
  *  keeps AND every ancestor group's keeps keep it). */
 export interface ResolvedMask extends Mask {
   scope: number;
 }
 
-/** A shape resolved to world space: the geometry source plus the composed inverse transform, z, and
- *  scope-tagged masks. This is what the fold (evalCpu + pack) consumes instead of a raw ShapeInstance. */
-export interface ResolvedShape {
-  shape: ShapeInstance;
-  /** World -> shape-local (composes every ancestor group + the shape's own transform). */
+/** An object resolved to world space: the geometry source plus the composed inverse transform, z, and
+ *  scope-tagged masks. This is what the fold (evalCpu + pack) consumes instead of a raw ObjectInstance. */
+export interface ResolvedObject {
+  object: ObjectInstance;
+  /** World -> object-local (composes every ancestor group + the object's own transform). */
   invAffine: Affine;
   /** Local distance -> canvas px (edge AA / mask feather). */
   scaleHint: number;
@@ -24,7 +24,7 @@ export interface ResolvedShape {
   elevationZ: number;
   /** Composed tallness multiplier (product of scale.z up the tree). */
   tallnessZ: number;
-  /** The shape's own masks (scope 0) plus every ancestor group's masks baked to world (scopes 1+). */
+  /** The object's own masks (scope 0) plus every ancestor group's masks baked to world (scopes 1+). */
   masks: ResolvedMask[];
 }
 
@@ -93,7 +93,7 @@ interface Ctx {
   scopes: ScopeFrame[]; // ancestor group mask scopes, outermost first
 }
 
-function walk(nodes: LayerNode[], ctx: Ctx, out: ResolvedShape[]): void {
+function walk(nodes: LayerNode[], ctx: Ctx, out: ResolvedObject[]): void {
   for (const n of nodes) {
     if (!n.visible) continue; // hidden subtree contributes nothing
     const fwd = affineCompose(ctx.affine, affineFromTRS(n.transform));
@@ -117,7 +117,7 @@ function walk(nodes: LayerNode[], ctx: Ctx, out: ResolvedShape[]): void {
       const masks: ResolvedMask[] = (n.masks ?? []).filter(shown).map((m) => ({ ...m, scope: 0 }));
       ctx.scopes.forEach((sc, i) => sc.masks.forEach((m) => masks.push(worldBakeMask(m, sc.frame, i + 1))));
       out.push({
-        shape: n,
+        object: n,
         invAffine: affineInvert(fwd),
         scaleHint: affineScaleHint(fwd),
         elevationZ: elevation,
@@ -128,16 +128,16 @@ function walk(nodes: LayerNode[], ctx: Ctx, out: ResolvedShape[]): void {
   }
 }
 
-/** Resolve the layer tree to a flat, world-transformed shape list (DFS order = z-order). Hidden
- *  subtrees are dropped. The fold consumes this instead of a raw ShapeInstance[]. */
-export function flattenLayers(layers: LayerNode[]): ResolvedShape[] {
-  const out: ResolvedShape[] = [];
+/** Resolve the layer tree to a flat, world-transformed object list (DFS order = z-order). Hidden
+ *  subtrees are dropped. The fold consumes this instead of a raw ObjectInstance[]. */
+export function flattenLayers(layers: LayerNode[]): ResolvedObject[] {
+  const out: ResolvedObject[] = [];
   walk(layers, { affine: affineIdentity(), elevation: 0, tallness: 1, scopes: [] }, out);
   return out;
 }
 
-/** Wrap a flat shape list as top-level layers and resolve — for tests, fixtures, and callers that
+/** Wrap a flat object list as top-level layers and resolve — for tests, fixtures, and callers that
  *  don't (yet) have a tree. */
-export function resolveShapes(shapes: ShapeInstance[]): ResolvedShape[] {
-  return flattenLayers(shapes);
+export function resolveObjects(objects: ObjectInstance[]): ResolvedObject[] {
+  return flattenLayers(objects);
 }

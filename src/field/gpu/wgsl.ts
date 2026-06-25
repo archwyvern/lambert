@@ -1,12 +1,12 @@
-import { allShapeTypes } from "../registry";
+import { allObjectTypes } from "../registry";
 
-export const RECORD_F32 = 26;
+export const RECORD_F32 = 27;
 export const PARAMS_OFFSET = 13;
 export const MAX_PARAMS = 8;
 
 /** Record layout (f32 slots): see pack.ts — typeIndex, op, ringSplit, scaleZ, invAffine(a,b,c,d)
  *  = slots 4-7, invAffine translation(e,f) = slots 8-9, distScale, cpStart, cpCount, params[8],
- *  elevation, meshTriStart, meshTriCount, maskLoopStart, maskLoopCount. */
+ *  elevation, meshTriStart, meshTriCount, maskLoopStart, maskLoopCount, closed(26). */
 
 // Fold-compute-only bindings: the per-tile uniforms and the storage-texture output. The composite
 // fragment does NOT include these (it has its own uniforms + a diffuse texture instead).
@@ -26,16 +26,16 @@ struct Uniforms {
 @group(0) @binding(3) var outField: texture_storage_2d<rg32float, write>;
 `;
 
-// Shared field library: shape buffers + all eval functions + fold_at(). Included by BOTH the fold
+// Shared field library: object buffers + all eval functions + fold_at(). Included by BOTH the fold
 // compute shader and the 2D composite fragment so the editor evaluates the exact same field math.
 const FIELD_LIB = /* wgsl */ `
 @group(0) @binding(1) var<storage, read> records: array<f32>;
 @group(0) @binding(2) var<storage, read> points: array<vec2f>;
 // mesh-plane triangles: 2 vec4 per vertex (pos x,y,height,gradX then gradY,_,_,_), 3 verts/triangle
 @group(0) @binding(4) var<storage, read> meshTris: array<vec4f>;
-// per-shape trim masks: header vec4(vertStart, vertCount, flags, scopeId) where flags = mode(bit0:
+// per-object trim masks: header vec4(vertStart, vertCount, flags, scopeId) where flags = mode(bit0:
 // 1=cut) + space(bit1: 2=follow/local) + hard(bit2: 4=exact step, no AA — mirror seam clip), and
-// scopeId groups loops (0 = shape's own, 1+ = ancestor group masks). maskVerts holds each loop's
+// scopeId groups loops (0 = object's own, 1+ = ancestor group masks). maskVerts holds each loop's
 // baked closed polygon (vec2, local if follow else world).
 @group(0) @binding(6) var<storage, read> maskLoops: array<vec4f>;
 @group(0) @binding(7) var<storage, read> maskVerts: array<vec2f>;
@@ -44,7 +44,7 @@ const RECORD: u32 = ${RECORD_F32}u;
 
 fn rec(base: u32, i: u32) -> f32 { return records[base + i]; }
 
-// slots 4..9 hold the inverse affine (world -> shape-local): local = M_inv * p + t_inv.
+// slots 4..9 hold the inverse affine (world -> object-local): local = M_inv * p + t_inv.
 fn to_local(base: u32, p: vec2f) -> vec2f {
   return vec2f(
     rec(base, 4u) * p.x + rec(base, 5u) * p.y + rec(base, 8u),
@@ -66,11 +66,22 @@ fn apply_profile(kind: u32, inside: f32, width: f32) -> f32 {
   if (width <= 0.0) { return select(0.0, 1.0, inside > 0.0); }
   let t = clamp(inside / width, 0.0, 1.0);
   switch kind {
-    case 0u: { return t; }
-    case 1u: { return t * t * (3.0 - 2.0 * t); }
-    case 2u: { return sqrt(t * (2.0 - t)); }
-    default: { return 1.0 - sqrt(1.0 - t * t); }
+    case 0u: { return sqrt(t * (2.0 - t)); }       // round
+    case 1u: { return t; }                          // linear
+    case 2u: { return 1.0 - sqrt(1.0 - t * t); }    // cove
+    default: { return t * t * (3.0 - 2.0 * t); }    // smooth
   }
+}
+
+// Barycentric height inside triangle abc (corner heights ha/hb/hc); .y = 1 if p is inside, else 0.
+// Shared by the Plateau / Plateau (Vector) slope-band loft.
+fn plateau_tri(p: vec2f, a: vec2f, b: vec2f, c: vec2f, ha: f32, hb: f32, hc: f32) -> vec2f {
+  let det = (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
+  if (abs(det) < 1e-9) { return vec2f(0.0, 0.0); }
+  let u = ((p.x - a.x) * (c.y - a.y) - (c.x - a.x) * (p.y - a.y)) / det;
+  let v = ((b.x - a.x) * (p.y - a.y) - (p.x - a.x) * (b.y - a.y)) / det;
+  if (u < -1e-4 || v < -1e-4 || u + v > 1.0001) { return vec2f(0.0, 0.0); }
+  return vec2f(ha + u * (hb - ha) + v * (hc - ha), 1.0);
 }
 
 fn sd_segment(p: vec2f, a: vec2f, b: vec2f) -> f32 {
@@ -127,7 +138,7 @@ fn sd_mask_polygon(start: u32, count: u32, p: vec2f) -> f32 {
 }
 
 // combined trim coverage: keepCov * (1 - cutCov) within a scope, MULTIPLIED across scopes (group
-// masks intersect the shape's own). Mirrors maskOps.ts maskCoverage — follow loops test pLocal (sd
+// masks intersect the object's own). Mirrors maskOps.ts maskCoverage — follow loops test pLocal (sd
 // scaled to canvas by distScale rec(10)), world loops test pWorld. Loops are scope-sorted (lane w).
 fn mask_cover(base: u32, pWorld: vec2f, pLocal: vec2f) -> f32 {
   let loopStart = u32(rec(base, 24u));
@@ -192,7 +203,8 @@ fn cubic_d2(p0: vec2f, c0: vec2f, c1: vec2f, p1: vec2f, t: f32) -> vec2f {
 // Distance from p to a cubic segment. cutStart/cutEnd request a flat cap at that endpoint: the dome
 // (the region whose nearest point IS the endpoint, and which sits beyond it) is removed locally —
 // a Voronoi test, NOT an infinite half-plane (a half-plane slices off curved tube far from the end).
-fn cubic_dist(p: vec2f, p0: vec2f, c0: vec2f, c1: vec2f, p1: vec2f, cutStart: bool, cutEnd: bool) -> f32 {
+// Nearest distance AND its parameter t (for per-anchor radius interpolation). Returns vec2(dist, t).
+fn cubic_dist_t(p: vec2f, p0: vec2f, c0: vec2f, c1: vec2f, p1: vec2f, cutStart: bool, cutEnd: bool) -> vec2f {
   // 16-sample bracket: enough to isolate the global nearest even when long tangents make the curve
   // loop/cusp and the distance-in-t has several local minima (a coarse 8-sample scan missed them).
   var bestT = 0.0;
@@ -212,12 +224,18 @@ fn cubic_dist(p: vec2f, p0: vec2f, c0: vec2f, c1: vec2f, p1: vec2f, cutStart: bo
     if (abs(fp) > 1e-5) { t = clamp(t - dot(B - p, d1) / fp, 0.0, 1.0); }
   }
   // flat cap: nearest pinned at this end (t at the boundary) AND strictly beyond it -> outside.
-  if (cutEnd && t > 0.9999 && dot(p - p1, p1 - c1) > 0.0) { return 1e30; }
-  if (cutStart && t < 0.0001 && dot(p - p0, c0 - p0) < 0.0) { return 1e30; }
+  if (cutEnd && t > 0.9999 && dot(p - p1, p1 - c1) > 0.0) { return vec2f(1e30, t); }
+  if (cutStart && t < 0.0001 && dot(p - p0, c0 - p0) < 0.0) { return vec2f(1e30, t); }
   // guard: a diverging Newton step must never make it worse than the coarse bracket (that produced
   // the spiky garbage normals on long tangents) — keep whichever distance is smaller.
   let bn = cubic_at(p0, c0, c1, p1, t);
-  return sqrt(min(bestD, dot(bn - p, bn - p)));
+  let dn = dot(bn - p, bn - p);
+  if (dn <= bestD) { return vec2f(sqrt(dn), t); }
+  return vec2f(sqrt(bestD), bestT);
+}
+
+fn cubic_dist(p: vec2f, p0: vec2f, c0: vec2f, c1: vec2f, p1: vec2f, cutStart: bool, cutEnd: bool) -> f32 {
+  return cubic_dist_t(p, p0, c0, c1, p1, cutStart, cutEnd).x;
 }
 
 // spine with a separate profile slope width (slopeW < halfW gives a flat-topped section)
@@ -235,14 +253,50 @@ fn shape_spine_s(p: vec2f, base: u32, h: f32, halfW: f32, slopeW: f32, prof: u32
 fn shape_spine(p: vec2f, base: u32, h: f32, halfW: f32, prof: u32) -> vec2f {
   return shape_spine_s(p, base, h, halfW, halfW, prof);
 }
+
+// Shared triangulated height-field eval for Mesh/Grid/Revolve/Loft/Noise: barycentric height in the
+// triangle under p (blended toward Phong by smoothness at slot 13), else sd to the nearest edge.
+fn shape_meshfield(p: vec2f, base: u32) -> vec2f {
+  let sm = rec(base, 13u);
+  let triStart = u32(rec(base, 22u));
+  let triCount = u32(rec(base, 23u));
+  for (var t = 0u; t < triCount; t = t + 1u) {
+    let o = triStart + t * 6u;
+    let a = meshTris[o];
+    let b = meshTris[o + 2u];
+    let c = meshTris[o + 4u];
+    let det = (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
+    if (abs(det) < 1e-9) { continue; }
+    let uu = ((p.x - a.x) * (c.y - a.y) - (c.x - a.x) * (p.y - a.y)) / det;
+    let vv = ((b.x - a.x) * (p.y - a.y) - (p.x - a.x) * (b.y - a.y)) / det;
+    if (uu >= -1e-4 && vv >= -1e-4 && uu + vv <= 1.0001) {
+      let ww = 1.0 - uu - vv;
+      let hL = ww * a.z + uu * b.z + vv * c.z;
+      if (sm <= 0.0) { return vec2f(hL, -1.0); }
+      let pa = a.z + a.w * (p.x - a.x) + meshTris[o + 1u].x * (p.y - a.y);
+      let pb = b.z + b.w * (p.x - b.x) + meshTris[o + 3u].x * (p.y - b.y);
+      let pc = c.z + c.w * (p.x - c.x) + meshTris[o + 5u].x * (p.y - c.y);
+      let hP = ww * pa + uu * pb + vv * pc;
+      return vec2f(hL + sm * (hP - hL), -1.0);
+    }
+  }
+  var d = 1e9;
+  for (var t = 0u; t < triCount; t = t + 1u) {
+    let o = triStart + t * 6u;
+    d = min(d, sd_segment(p, meshTris[o].xy, meshTris[o + 2u].xy));
+    d = min(d, sd_segment(p, meshTris[o + 2u].xy, meshTris[o + 4u].xy));
+    d = min(d, sd_segment(p, meshTris[o + 4u].xy, meshTris[o].xy));
+  }
+  return vec2f(0.0, d);
+}
 `;
 
-// The ordered fold over all shapes at one point -> vec2f(height, mask). Shared by fold + composite.
+// The ordered fold over all objects at one point -> vec2f(height, mask). Shared by fold + composite.
 const FOLD_AT = /* wgsl */ `
 fn fold_at(p: vec2f, count: u32) -> vec2f {
   var bigH = 0.0;
   var bigM = 0.0;
-  var covered = false; // has any shape hard-covered this pixel yet?
+  var covered = false; // has any object hard-covered this pixel yet?
   for (var s = 0u; s < count; s = s + 1u) {
     let base = s * RECORD;
     let pl = to_local(base, p);
@@ -253,8 +307,8 @@ fn fold_at(p: vec2f, count: u32) -> vec2f {
     if (inf <= 0.0) { continue; }
     let h = rec(base, 21u) + smp.x * rec(base, 3u); // elevation + extrude
     let op = u32(rec(base, 1u));
-    // the FIRST shape (a non-carve "max" shape) to cover a pixel SETS the surface, so it can go below
-    // the ground plane — negative Z is allowed. Later overlapping shapes, and carve shapes (which
+    // the FIRST object (a non-carve "max" object) to cover a pixel SETS the surface, so it can go below
+    // the ground plane — negative Z is allowed. Later overlapping objects, and carve objects (which
     // subtract from the ground), always combine.
     let combined = select(combine_height(op, bigH, h), h, !covered && op != 1u);
     // mask = footprint COVERAGE (AA edge + trim masks), not height change — so a flat region (z=0, or
@@ -269,11 +323,17 @@ fn fold_at(p: vec2f, count: u32) -> vec2f {
 }
 `;
 
+/** The WGSL fn name for an object type's SDF. Derived from the display name (not the GUID id) so the
+ *  generated shader + any compile error stays readable; each type's `wgsl` field declares this name. */
+export function objectWgslFn(name: string): string {
+  return `shape_${name.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`;
+}
+
 function dispatchSwitch(): string {
-  const cases = allShapeTypes()
+  const cases = allObjectTypes()
     .filter((t) => t.wgsl)
     .map((t, i) => {
-      const fn = `shape_${t.id.replace(/-/g, "_")}`;
+      const fn = objectWgslFn(t.name);
       return i === 0
         ? `    default: { return ${fn}(p, base); }`
         : `    case ${i}u: { return ${fn}(p, base); }`;
@@ -299,9 +359,9 @@ fn fold(@builtin(global_invocation_id) gid: vec3u) {
 }
 `;
 
-/** Shared field-eval library (buffers + shape fns + fold_at), included by fold + composite. */
+/** Shared field-eval library (buffers + object fns + fold_at), included by fold + composite. */
 export function buildFieldLibWgsl(): string {
-  const shapeFns = allShapeTypes()
+  const shapeFns = allObjectTypes()
     .filter((t) => t.wgsl)
     .map((t) => t.wgsl!)
     .join("\n");
@@ -315,10 +375,10 @@ export function buildFoldWgsl(): string {
 
 /** typeIndex assignment used by pack.ts — must match dispatchSwitch ordering. */
 export function gpuTypeIndex(typeId: string): number {
-  const idx = allShapeTypes()
+  const idx = allObjectTypes()
     .filter((t) => t.wgsl)
     .findIndex((t) => t.id === typeId);
-  if (idx < 0) throw new Error(`shape type ${typeId} has no wgsl registration`);
+  if (idx < 0) throw new Error(`object type ${typeId} has no wgsl registration`);
   return idx;
 }
 

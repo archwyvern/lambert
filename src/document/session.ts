@@ -52,8 +52,8 @@ export function buildSessionJson(s: Omit<SessionData, "version">): string {
 export function parseSessionJson(json: string): SessionData {
   const data = sessionSchema.parse(JSON.parse(json)) as SessionData;
   for (const t of data.tabs) {
-    const raw = t.doc as unknown as { layers?: unknown[]; shapes?: unknown[] };
-    t.doc.layers = normalizeLayers((raw.layers ?? raw.shapes ?? []) as unknown[] as Parameters<typeof normalizeLayers>[0]);
+    const raw = t.doc as unknown as { layers?: unknown[] };
+    t.doc.layers = normalizeLayers((raw.layers ?? []) as unknown[] as Parameters<typeof normalizeLayers>[0]);
     t.doc.canvas = t.doc.canvas ?? defaultCanvas(t.doc.source.width, t.doc.source.height);
   }
   return data;

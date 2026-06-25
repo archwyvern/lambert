@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
-import "../../src/field/shapes";
-import { createShapeInstance } from "../../src/field/registry";
-import { alignedToAxis, snapHalf, snapShapeToGrid, snapToGuides } from "../../src/field/snap";
+import "../../src/field/objects";
+import { createObjectInstance, ObjectTypeId } from "../../src/field/registry";
+import { alignedToAxis, snapHalf, snapObjectToGrid, snapToGuides } from "../../src/field/snap";
 import { fromLocal } from "../../src/field/transform";
 import { v2 } from "../../src/field/vec";
 import { Vector3 } from "@carapace/primitives";
@@ -15,13 +15,13 @@ test("snapHalf snaps to the nearest whole or half", () => {
   expect(snapHalf(10)).toBe(10);
 });
 
-test("snapShapeToGrid puts position + every vertex's canvas position on the ½px grid", () => {
-  const s = createShapeInstance("plateau", v2(40.3, 48.8));
+test("snapObjectToGrid puts position + every vertex's canvas position on the ½px grid", () => {
+  const s = createObjectInstance(ObjectTypeId.Plateau, v2(40.3, 48.8));
   s.transform.pos = s.transform.pos.withZ(5.2);
   s.transform.rotation = 0.37;
   s.transform.scale = new Vector3(1.3, 1.3, 1.3);
   s.controlPoints = [v2(0.2, -0.4), v2(2.6, 2.9), v2(-5.1, 7.3)];
-  const snapped = snapShapeToGrid(s);
+  const snapped = snapObjectToGrid(s);
   expect(snapped.transform.pos).toEqual({ x: 40.5, y: 49, z: 5 });
   for (const cp of snapped.controlPoints) {
     const world = fromLocal(snapped.transform, cp);
@@ -63,11 +63,11 @@ test("alignedToAxis fires on every 45° axis (0,45,90,...,315) at any length, no
   for (const d of [v2(50, 20), v2(20, 50), v2(30, 10)]) expect(alignedToAxis(v2(0, 0), d, 0.25)).toBe(false);
 });
 
-test("vertex canvas position snaps to ½px even on a scaled shape (the 0.5-not-1.0 fix)", () => {
-  const s = createShapeInstance("plateau", v2(10, 10)); // pos on grid, no rotation
+test("vertex canvas position snaps to ½px even on a scaled object (the 0.5-not-1.0 fix)", () => {
+  const s = createObjectInstance(ObjectTypeId.Plateau, v2(10, 10)); // pos on grid, no rotation
   s.transform.scale = new Vector3(2, 2, 1);
   s.controlPoints = [v2(3.1, 3.1)]; // canvas = 10 + 3.1*2 = 16.2
-  const world = fromLocal(snapShapeToGrid(s).transform, snapShapeToGrid(s).controlPoints[0]!);
+  const world = fromLocal(snapObjectToGrid(s).transform, snapObjectToGrid(s).controlPoints[0]!);
   expect(world.x).toBe(16); // 16.2 -> 16.0 (nearest ½), not a 1px step from the 2× scale
   expect(world.y).toBe(16);
 });

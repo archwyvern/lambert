@@ -1,16 +1,16 @@
 import { Vector3 } from "@carapace/primitives";
-import "./shapes";
-import { bezierAnchor } from "./bezier";
+import "./objects";
+import { bakeRings, bezierAnchor } from "./bezier";
 import { meshEdges } from "./meshOps";
-import { createShapeInstance } from "./registry";
-import type { GroupLayer, LayerNode, Mask, ShapeInstance } from "./types";
+import { createObjectInstance, ObjectTypeId } from "./registry";
+import type { GroupLayer, LayerNode, Mask, ObjectInstance } from "./types";
 import { v2 } from "./vec";
 
 /** An irregular sculpted mesh (4 corners + a raised off-centre peak, non-coplanar facets) under a
  *  rotation + non-uniform scale, with smoothness on — exercises the mesh GPU path (barycentric +
  *  Phong + outline SD) GPU==CPU in the drift selftest. */
-export function meshShapes(): ShapeInstance[] {
-  const mesh = createShapeInstance("mesh", v2(48, 48));
+export function meshObjects(): ObjectInstance[] {
+  const mesh = createObjectInstance(ObjectTypeId.Mesh, v2(48, 48));
   mesh.id = "stress-mesh";
   mesh.transform.rotation = 0.3;
   mesh.transform.scale = new Vector3(1.2, 0.9, 1.1);
@@ -27,42 +27,44 @@ export function meshShapes(): ShapeInstance[] {
   return [mesh];
 }
 
-/** Deterministic fixture exercising all four v1 shapes and blending. */
-export function goldenShapes(): ShapeInstance[] {
-  const slab = createShapeInstance("plateau", v2(40, 48));
+/** Deterministic fixture exercising all four v1 objects and blending. */
+export function goldenObjects(): ObjectInstance[] {
+  const slab = createObjectInstance(ObjectTypeId.Plateau, v2(40, 48));
   slab.id = "slab";
-  const dome = createShapeInstance("dome", v2(40, 48));
+  const dome = createObjectInstance(ObjectTypeId.Sphere, v2(40, 48));
   dome.id = "dome";
   dome.transform.scale = new Vector3(16 / 48, 16 / 48, 36 / 48); // 16px footprint, 36px tall
-  const capsule = createShapeInstance("capsule", v2(72, 24));
+  const capsule = createObjectInstance(ObjectTypeId.Pipe, v2(72, 24));
   capsule.id = "capsule";
   capsule.transform.rotation = Math.PI / 6;
-  const groove = createShapeInstance("groove", v2(40, 72));
+  const groove = createObjectInstance(ObjectTypeId.PipeVector, v2(40, 72));
   groove.id = "groove";
+  groove.params.invert = "carve"; // a carved channel along the path
   return [slab, dome, capsule, groove];
 }
 
 /** Transform stressor: rotation + non-uniform scale + blend, for the GPU drift test. */
-export function stressShapes(): ShapeInstance[] {
-  const dome = createShapeInstance("dome", v2(48, 40));
+export function stressObjects(): ObjectInstance[] {
+  const dome = createObjectInstance(ObjectTypeId.Sphere, v2(48, 40));
   dome.id = "stress-dome";
   dome.transform.rotation = 0.7;
   dome.transform.scale = new Vector3(1.5, 0.75, 1);
   dome.transform.pos = dome.transform.pos.withZ(5); // exercise the elevation slot in the GPU drift test
-  const capsule = createShapeInstance("capsule", v2(48, 60));
+  const capsule = createObjectInstance(ObjectTypeId.Pipe, v2(48, 60));
   capsule.id = "stress-capsule";
   capsule.transform.rotation = -0.4;
   capsule.transform.scale = capsule.transform.scale.withZ(0.8);
-  const groove = createShapeInstance("groove", v2(48, 40));
+  const groove = createObjectInstance(ObjectTypeId.PipeVector, v2(48, 40));
   groove.id = "stress-groove";
+  groove.params.invert = "carve";
   groove.transform.rotation = 0.7;
   return [dome, capsule, groove];
 }
 
 /** A rotated, non-uniformly scaled tilted plane (diagonal tilt) — exercises the plane's slope ramp
  *  and the auto min-dot bias GPU==CPU in the drift selftest. */
-export function planeShapes(): ShapeInstance[] {
-  const plane = createShapeInstance("plane", v2(48, 48));
+export function surfaceObjects(): ObjectInstance[] {
+  const plane = createObjectInstance(ObjectTypeId.Surface, v2(48, 48));
   plane.id = "tilt-plane";
   plane.transform.rotation = 0.35;
   plane.transform.scale = new Vector3(1.2, 0.9, 1);
@@ -74,31 +76,39 @@ export function planeShapes(): ShapeInstance[] {
 
 /** One of each parametric primitive (cone/pyramid/torus/wedge/fillet) with scale + rotation,
  *  for the GPU-vs-CPU drift selftest. */
-export function primitivesShapes(): ShapeInstance[] {
-  const cone = createShapeInstance("cone", v2(26, 26));
+export function primitivesObjects(): ObjectInstance[] {
+  const cone = createObjectInstance(ObjectTypeId.Sphere, v2(26, 26));
   cone.id = "p-cone";
+  cone.params.profile = "linear"; // Cone = Sphere with a linear profile
+
   cone.transform.scale = new Vector3(0.42, 0.42, 1.2);
-  const pyr = createShapeInstance("pyramid", v2(70, 26));
+  const pyr = createObjectInstance(ObjectTypeId.Plateau, v2(70, 26)); // Plateau with a single apex = pyramid
   pyr.id = "p-pyr";
+  pyr.controlPoints = [v2(-32, -32), v2(32, -32), v2(32, 32), v2(-32, 32), v2(0, 0)];
+  pyr.ringSplit = 4;
   pyr.transform.rotation = 0.5;
   pyr.transform.scale = new Vector3(0.42, 0.42, 1);
-  const torus = createShapeInstance("torus", v2(26, 70));
+  const torus = createObjectInstance(ObjectTypeId.Torus, v2(26, 70));
   torus.id = "p-torus";
   torus.transform.scale = new Vector3(0.5, 0.5, 1);
-  const wedge = createShapeInstance("wedge", v2(70, 70));
+  const wedge = createObjectInstance(ObjectTypeId.Ramp, v2(70, 70)); // default linear = wedge
   wedge.id = "p-wedge";
   wedge.transform.rotation = 0.3;
   wedge.transform.scale = new Vector3(0.42, 0.42, 1);
-  const fillet = createShapeInstance("fillet", v2(48, 48));
+  const fillet = createObjectInstance(ObjectTypeId.Ramp, v2(48, 48));
   fillet.id = "p-fillet";
+  fillet.params.profile = "cove"; // cove = fillet
   fillet.transform.scale = new Vector3(0.3, 0.3, 1);
-  const cyl = createShapeInstance("cylinder", v2(48, 24));
+  const cyl = createObjectInstance(ObjectTypeId.Pipe, v2(48, 24)); // flat cap = cylinder
   cyl.id = "p-cyl";
+  cyl.params.cap = "flat";
   cyl.params.length = 30;
   cyl.params.radius = 10;
+  cyl.params.radius2 = 10; // uniform (no taper)
   cyl.transform.rotation = 0.4;
-  const frustum = createShapeInstance("frustum", v2(48, 72));
+  const frustum = createObjectInstance(ObjectTypeId.Pipe, v2(48, 72)); // flat cap + taper = frustum
   frustum.id = "p-frustum";
+  frustum.params.cap = "flat";
   frustum.params.length = 34;
   frustum.params.radius = 12;
   frustum.params.radius2 = 5;
@@ -106,23 +116,26 @@ export function primitivesShapes(): ShapeInstance[] {
   return [cone, pyr, torus, wedge, fillet, cyl, frustum];
 }
 
-/** Curved multi-anchor cables (round + flat profile) for the GPU-vs-CPU drift selftest — proves
- *  the Catmull-Rom dense spine walks identically on CPU and GPU. */
-export function cableShapes(): ShapeInstance[] {
-  const round = createShapeInstance("cable", v2(30, 42));
-  round.id = "c-round";
-  // smooth (Catmull-Rom) path: handles are derived from neighbours, exercising resolveHandles
+/** Curved multi-anchor pipes (round + flat-cap linear) for the GPU-vs-CPU drift selftest — proves
+ *  the Catmull-Rom dense spine + robust cubic_dist walk identically on CPU and GPU. The round one is a
+ *  CLOSED loop with PER-ANCHOR radii, so it also covers the wrap segment + the radius-taper path. */
+export function pipeObjects(): ObjectInstance[] {
+  const round = createObjectInstance(ObjectTypeId.PipeVector, v2(30, 42));
+  round.id = "p-round";
+  // smooth (Catmull-Rom) closed loop with varying per-anchor radius: exercises resolveHandlesClosed,
+  // the wrap segment, and cubic_dist_t radius interpolation GPU==CPU.
   round.bezier = [
-    bezierAnchor(v2(-26, -16)),
-    bezierAnchor(v2(2, 8)),
-    bezierAnchor(v2(30, 16)),
+    { ...bezierAnchor(v2(-26, -16)), radius: 10 },
+    { ...bezierAnchor(v2(2, 8)), radius: 5 },
+    { ...bezierAnchor(v2(30, 16)), radius: 8 },
   ];
+  round.closed = true;
   round.transform.scale = new Vector3(0.7, 0.7, 1);
-  const flat = createShapeInstance("cable", v2(64, 56));
-  flat.id = "c-flat";
-  flat.params.profile = "flat";
-  flat.params.thickness = 22;
-  flat.params.slope = 5;
+  const flat = createObjectInstance(ObjectTypeId.PipeVector, v2(64, 56));
+  flat.id = "p-flat";
+  flat.params.profile = "linear";
+  flat.params.cap = "flat";
+  flat.params.radius = 11;
   // manual path with long tangents: exercises the robust cubic_dist + flat end-caps on GPU vs CPU
   flat.bezier = [
     bezierAnchor(v2(-22, 18), v2(0, 0), v2(40, -34), "manual"),
@@ -132,11 +145,33 @@ export function cableShapes(): ShapeInstance[] {
   return [round, flat];
 }
 
+/** The baked multi-contour Bézier vectors for the GPU-vs-CPU drift selftest: a Surface (Vector) with a
+ *  HOLE (outer ring + inner hole, CSG-subtracted) and a Plateau (Vector) (base + top Bézier rings),
+ *  both under a rotation + scale — proves the ringSplit hole/ramp paths match GPU==CPU. */
+export function vectorFillObjects(): ObjectInstance[] {
+  const frame = createObjectInstance(ObjectTypeId.SurfaceVector, v2(34, 40));
+  frame.id = "v-frame";
+  frame.transform.rotation = 0.3;
+  frame.transform.scale = new Vector3(0.7, 0.7, 1);
+  const corner = (x: number, y: number) => bezierAnchor(v2(x, y), v2(0, 0), v2(0, 0), "manual");
+  frame.bezier = [...frame.bezier!, corner(-12, -12), corner(12, -12), corner(12, 12), corner(-12, 12)]; // + a hole
+  frame.subpathStarts = [0, 4];
+  const fr = bakeRings(frame.bezier, frame.subpathStarts);
+  frame.controlPoints = fr.controlPoints;
+  frame.ringSplit = fr.ringSplit;
+  frame.contourCounts = fr.contourCounts;
+  const mesa = createObjectInstance(ObjectTypeId.PlateauVector, v2(64, 56));
+  mesa.id = "v-mesa";
+  mesa.transform.rotation = -0.4;
+  mesa.transform.scale = new Vector3(0.6, 0.6, 1);
+  return [frame, mesa];
+}
+
 /** A rotated, non-uniformly scaled plateau with a local KEEP mask (one smooth anchor) and a world
  *  CUT mask — exercises both mask spaces, the distance-scale path, and the closed Catmull-Rom bake
  *  in the GPU-vs-CPU drift selftest. */
-export function maskedShapes(): ShapeInstance[] {
-  const slab = createShapeInstance("plateau", v2(48, 48));
+export function maskedObjects(): ObjectInstance[] {
+  const slab = createObjectInstance(ObjectTypeId.Plateau, v2(48, 48));
   slab.id = "m-slab";
   slab.transform.rotation = 0.4;
   slab.transform.scale = new Vector3(1.3, 0.8, 1);
@@ -164,13 +199,13 @@ export function maskedShapes(): ShapeInstance[] {
 }
 
 /** A group (rotation + non-uniform scale) wrapping a rotated dome + a capsule, beside a top-level
- *  shape — exercises the affine/shear composition path GPU==CPU in the drift selftest. */
+ *  object — exercises the affine/shear composition path GPU==CPU in the drift selftest. */
 export function nestedGroupLayers(): LayerNode[] {
-  const dome = createShapeInstance("dome", v2(20, 0));
+  const dome = createObjectInstance(ObjectTypeId.Sphere, v2(20, 0));
   dome.id = "ng-dome";
   dome.transform.rotation = 0.5;
   dome.transform.scale = new Vector3(0.5, 0.8, 1.1);
-  const capsule = createShapeInstance("capsule", v2(-10, 14));
+  const capsule = createObjectInstance(ObjectTypeId.Pipe, v2(-10, 14));
   capsule.id = "ng-capsule";
   capsule.transform.rotation = -0.3;
   const group: GroupLayer = {
@@ -181,7 +216,7 @@ export function nestedGroupLayers(): LayerNode[] {
     locked: false,
     children: [dome, capsule],
   };
-  const slab = createShapeInstance("plateau", v2(24, 72));
+  const slab = createObjectInstance(ObjectTypeId.Plateau, v2(24, 72));
   slab.id = "ng-slab";
   return [group, slab];
 }
@@ -198,9 +233,9 @@ function boxMask(id: string, mode: "keep" | "cut", follow: boolean, x0: number, 
 
 /** A rotated group carrying a KEEP mask over its left half, wrapping a wide plateau that also has its
  *  own KEEP mask over its top half — exercises scope-aware coverage (group mask intersects the
- *  shape's own, world-baked through the group affine) GPU==CPU. */
+ *  object's own, world-baked through the group affine) GPU==CPU. */
 export function scopedMaskGroupLayers(): LayerNode[] {
-  const slab = createShapeInstance("plateau", v2(0, 0));
+  const slab = createObjectInstance(ObjectTypeId.Plateau, v2(0, 0));
   slab.id = "sm-slab";
   slab.transform.scale = new Vector3(1.1, 1.1, 1);
   slab.masks = [boxMask("sm-own", "keep", true, -50, -50, 50, 6)]; // top half (local y < 6)
@@ -221,10 +256,10 @@ export function scopedMaskGroupLayers(): LayerNode[] {
  *  clip cuts anything crossing the axis, so no manual mask is needed. Exercises reflected-instance
  *  emission + the auto half-plane clip GPU==CPU. */
 export function mirrorXGroupLayers(): LayerNode[] {
-  const dome = createShapeInstance("dome", v2(0, -10)); // straddles x=0: left half kept, reflected right
+  const dome = createObjectInstance(ObjectTypeId.Sphere, v2(0, -10)); // straddles x=0: left half kept, reflected right
   dome.id = "mx-dome";
   dome.transform.scale = new Vector3(0.6, 0.7, 1.2);
-  const capsule = createShapeInstance("capsule", v2(-18, 16)); // source (left) side
+  const capsule = createObjectInstance(ObjectTypeId.Pipe, v2(-18, 16)); // source (left) side
   capsule.id = "mx-capsule";
   capsule.transform.rotation = 0.3;
   capsule.transform.scale = new Vector3(0.7, 0.7, 1);
@@ -244,7 +279,7 @@ export function mirrorXGroupLayers(): LayerNode[] {
  *  radial symmetry, plus a CUT mask to prove the auto quadrant clip still intersects user masks.
  *  Exercises quad emission + auto quadrant clip GPU==CPU. */
 export function mirrorQuadGroupLayers(): LayerNode[] {
-  const dome = createShapeInstance("dome", v2(-14, -14)); // source quadrant; reflects into all 4
+  const dome = createObjectInstance(ObjectTypeId.Sphere, v2(-14, -14)); // source quadrant; reflects into all 4
   dome.id = "mq-dome";
   dome.transform.scale = new Vector3(0.6, 0.6, 1.1);
   const group: GroupLayer = {

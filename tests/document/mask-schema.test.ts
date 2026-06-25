@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { ObjectTypeId } from "../../src/field/objectTypeIds";
 import { Vector2, Vector3 } from "@carapace/primitives";
 import { parseDoc, serializeDoc } from "../../src/document/schema";
 import type { LambertDoc } from "../../src/document/schema";
-import type { ShapeInstance } from "../../src/field/types";
+import type { ObjectInstance } from "../../src/field/types";
 
 const baseDoc = (): LambertDoc => ({
   schemaVersion: 1,
@@ -11,7 +12,7 @@ const baseDoc = (): LambertDoc => ({
   layers: [
     {
       id: "s1",
-      typeId: "dome",
+      typeId: ObjectTypeId.Sphere,
       transform: { pos: new Vector3(4, 4, 0), rotation: 0, scale: new Vector3(1, 1, 1) },
       params: {},
       controlPoints: [],
@@ -36,7 +37,7 @@ const baseDoc = (): LambertDoc => ({
 describe("mask schema", () => {
   it("round-trips masks through serialize/parse and hydrates anchor points to Vector2", () => {
     const parsed = parseDoc(serializeDoc(baseDoc()));
-    const mask = (parsed.layers[0] as ShapeInstance).masks![0]!;
+    const mask = (parsed.layers[0] as ObjectInstance).masks![0]!;
     expect(mask.mode).toBe("keep");
     expect(mask.follow).toBe(true);
     expect(mask.anchors).toHaveLength(3);
@@ -46,8 +47,8 @@ describe("mask schema", () => {
 
   it("a doc with no masks parses unchanged (masks omitted)", () => {
     const d = baseDoc();
-    delete (d.layers[0] as ShapeInstance).masks;
+    delete (d.layers[0] as ObjectInstance).masks;
     const parsed = parseDoc(serializeDoc(d));
-    expect((parsed.layers[0] as ShapeInstance).masks).toBeUndefined();
+    expect((parsed.layers[0] as ObjectInstance).masks).toBeUndefined();
   });
 });

@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
-import "../../src/field/shapes";
-import { createShapeInstance } from "../../src/field/registry";
+import "../../src/field/objects";
+import { createObjectInstance, ObjectTypeId } from "../../src/field/registry";
 import {
   emptyDoc,
   emptyProjectConfig,
@@ -35,10 +35,10 @@ test("empty doc round-trips", () => {
   expect(back).toEqual(doc);
 });
 
-test("doc with shapes round-trips", () => {
+test("doc with objects round-trips", () => {
   const doc = emptyDoc("hull.df.png", 256, 128);
-  doc.layers.push(createShapeInstance("dome", v2(64, 64)));
-  doc.layers.push(createShapeInstance("groove", v2(80, 40)));
+  doc.layers.push(createObjectInstance(ObjectTypeId.Sphere, v2(64, 64)));
+  doc.layers.push(createObjectInstance(ObjectTypeId.PipeVector, v2(80, 40)));
   const back = parseDoc(serializeDoc(doc));
   expect(back).toEqual(doc);
 });

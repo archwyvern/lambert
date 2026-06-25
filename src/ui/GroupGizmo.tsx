@@ -11,7 +11,7 @@ import type { Transform2D } from "../field/transform";
 import type { GroupLayer } from "../field/types";
 import { v2 } from "../field/vec";
 import { axisScaleFromDrag, rotationFromDrag, ROTATE_SNAP, snapAngle } from "./picking";
-import { localBounds, paddedCorners } from "./shapeBounds";
+import { localBounds, paddedCorners } from "./objectBounds";
 import { canvasToScreen, Viewport } from "./viewport";
 import { eventToCanvas } from "./canvasCoords";
 
@@ -24,8 +24,8 @@ function groupLocalBounds(group: GroupLayer): { min: Vector2; max: Vector2 } {
   let maxX = -Infinity;
   let maxY = -Infinity;
   for (const rs of flattenLayers(group.children)) {
-    const fwd = affineInvert(rs.invAffine); // shape-local -> group space
-    const b = localBounds(rs.shape);
+    const fwd = affineInvert(rs.invAffine); // object-local -> group space
+    const b = localBounds(rs.object);
     for (const c of [v2(b.min.x, b.min.y), v2(b.max.x, b.min.y), v2(b.max.x, b.max.y), v2(b.min.x, b.max.y)]) {
       const p = affineApply(fwd, c);
       minX = Math.min(minX, p.x);

@@ -17,7 +17,7 @@ import { usePointerDrag } from "./usePointerDrag";
 import { AnchorHandles, GizmoHalo } from "./gizmoChrome";
 
 /**
- * On-canvas editor for a node's trim masks (a shape OR a group). Renders each mask's outline + Bézier
+ * On-canvas editor for a node's trim masks (an object OR a group). Renders each mask's outline + Bézier
  * anchors/tangents and lets you drag/insert/delete/retype them; commits through `updateNode` so it is
  * node-agnostic. Follow masks live in the node's LOCAL frame (mapped through its full world affine, so
  * nesting is correct); pinned masks live in world space. Self-contained: owns its own selection, drag,
@@ -62,9 +62,9 @@ export function MaskGizmo(props: {
 
   // While a mask anchor is selected, this gizmo owns Delete: remove the selected anchor(s) (never
   // below the 3-anchor floor) in the CAPTURE phase, before App's window keydown — which would
-  // otherwise delete the whole shape. And a left-click that reaches window (i.e. NOT on an anchor —
+  // otherwise delete the whole object. And a left-click that reaches window (i.e. NOT on an anchor —
   // anchor pointerdowns stop propagation) clears the anchor selection: "click elsewhere deselects the
-  // vertex, not the shape" (the shape stays selected; ESC, handled by App, deselects the shape).
+  // vertex, not the object" (the object stays selected; ESC, handled by App, deselects the object).
   useEffect(() => {
     if (!maskSel) return;
     const onKey = (e: KeyboardEvent): void => {

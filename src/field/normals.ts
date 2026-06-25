@@ -3,7 +3,7 @@ import { clamp } from "./vec";
 /**
  * minmod limiter of the two one-sided slopes. This is what makes a vertical wall vanish from the
  * normal map the way an orthographic 3D bake does, instead of smearing into a 1px ramp:
- *  - smooth surface (both one-sided diffs agree in sign) -> the true local slope (rounded shapes
+ *  - smooth surface (both one-sided diffs agree in sign) -> the true local slope (rounded objects
  *    and ramps are unchanged from a central difference)
  *  - peak / apex (diffs disagree in sign) -> 0, i.e. up (correct — the tangent there is flat)
  *  - cliff (one side flat, the other a wall) -> the flat side wins -> 0, so the edge is invisible.

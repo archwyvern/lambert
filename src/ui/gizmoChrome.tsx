@@ -2,7 +2,7 @@ import { Vector2 } from "@carapace/primitives";
 import { v2 } from "../field/vec";
 import type { PointerDragHandlers } from "./usePointerDrag";
 
-/** Shared SVG chrome for the transform gizmos (shape + group): the drop-shadow halo, the rotate
+/** Shared SVG chrome for the transform gizmos (object + group): the drop-shadow halo, the rotate
  *  knobs at each edge midpoint, and the corner scale handles — previously copy-pasted between
  *  Gizmos and GroupGizmo. Plus the bezier anchor handles shared by the cable + mask editors. */
 

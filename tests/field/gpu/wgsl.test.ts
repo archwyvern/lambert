@@ -1,22 +1,22 @@
 import { expect, test } from "vitest";
-import "../../../src/field/shapes";
-import { allShapeTypes } from "../../../src/field/registry";
-import { buildFoldWgsl, buildNormalWgsl } from "../../../src/field/gpu/wgsl";
+import "../../../src/field/objects";
+import { allObjectTypes } from "../../../src/field/registry";
+import { buildFoldWgsl, buildNormalWgsl, objectWgslFn } from "../../../src/field/gpu/wgsl";
 
-test("fold module contains common lib, every shape fn, and the dispatch switch", () => {
+test("fold module contains common lib, every object fn, and the dispatch switch", () => {
   const src = buildFoldWgsl();
   for (const fn of ["fn combine_height", "fn influence", "fn apply_profile", "fn sd_polygon", "fn sd_ellipse", "fn sd_segment", "fn shape_spine", "fn to_local", "fn fold("]) {
     expect(src, fn).toContain(fn);
   }
-  for (const t of allShapeTypes()) {
+  for (const t of allObjectTypes()) {
     if (!t.wgsl) continue;
-    expect(src).toContain(`fn shape_${t.id.replace(/-/g, "_")}(`);
+    expect(src).toContain(`fn ${objectWgslFn(t.name)}(`);
   }
   // typeIndex i maps to the i-th wgsl-bearing registration; index 0 is the default arm
   // (WGSL requires default last), the rest are explicit cases
-  const order = allShapeTypes().filter((t) => t.wgsl);
+  const order = allObjectTypes().filter((t) => t.wgsl);
   order.forEach((t, i) => {
-    const fn = `shape_${t.id.replace(/-/g, "_")}`;
+    const fn = objectWgslFn(t.name);
     if (i === 0) {
       expect(src).toContain(`default: { return ${fn}(p, base); }`);
     } else {

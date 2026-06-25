@@ -20,7 +20,7 @@ export function insertVertex(points: Vector2[], afterIndex: number, p: Vector2):
 }
 
 /** Remove the vertices at `indices`, keeping at least `min`. Returns null if the delete would drop
- *  below `min` (caller leaves the shape unchanged). */
+ *  below `min` (caller leaves the object unchanged). */
 export function deleteVertices(points: Vector2[], indices: number[], min: number): Vector2[] | null {
   const drop = new Set(indices);
   const keep = points.filter((_, i) => !drop.has(i));
@@ -83,34 +83,27 @@ export function ringPhase(points: Vector2[]): number {
   return Math.atan2(points[0]!.y - centroid.y, points[0]!.x - centroid.x);
 }
 
-/** One slope-band triangle: three [ring, index] corners (ring 0 = outer/h0, ring 1 = inner/h1). */
+/** One slope-band triangle: three [ring, index] corners (ring 0 = outer/base/h0, ring 1 = inner/top/h1). */
 export type FrustumTri = [[number, number], [number, number], [number, number]];
-export interface FrustumStrip {
-  tris: FrustumTri[];
-  /** Outer<->inner connector edges (the strip diagonals) as [outerIndex, innerIndex]. */
-  connectors: Array<[number, number]>;
-}
 
-const stripCache = new Map<string, FrustumStrip>();
+const stripCache = new Map<string, FrustumTri[]>();
 
 /**
  * Triangulate the slope band between an outer ring (nB verts) and inner ring (nT verts) as a
- * two-pointer strip: walk both loops by normalized position, advancing whichever ring's next
- * vertex comes first and emitting one triangle per step. Handles ANY counts — equal counts give
- * the quad-per-side split, unequal counts fan the extra vertices (4 outer + 5 inner is fine).
- * Rings must be phase-aligned and wound the same way for clean triangles. Cached + shared by
- * count pair, so callers must treat the result as read-only.
+ * two-pointer strip: walk both loops by normalized position, advancing whichever ring's next vertex
+ * comes first and emitting one triangle per step. Equal counts give the clean quad-per-side split
+ * (vertex i pairs with vertex i); a single inner vertex fans to an apex (a pyramid); genuinely
+ * unequal counts fan the extras. Rings must be phase-aligned + wound the same way. Cached by count
+ * pair — treat the result as read-only.
  */
-export function frustumStrip(nB: number, nT: number): FrustumStrip {
+export function frustumStrip(nB: number, nT: number): FrustumTri[] {
   const key = `${nB},${nT}`;
   const hit = stripCache.get(key);
   if (hit) return hit;
   const tris: FrustumTri[] = [];
-  const connectors: Array<[number, number]> = [];
   let i = 0;
   let j = 0;
   while (i < nB || j < nT) {
-    connectors.push([i % nB, j % nT]);
     const advanceOuter = j >= nT || (i < nB && (i + 1) / nB <= (j + 1) / nT);
     if (advanceOuter) {
       tris.push([[0, i % nB], [0, (i + 1) % nB], [1, j % nT]]);
@@ -120,7 +113,6 @@ export function frustumStrip(nB: number, nT: number): FrustumStrip {
       j++;
     }
   }
-  const strip = { tris, connectors };
-  stripCache.set(key, strip);
-  return strip;
+  stripCache.set(key, tris);
+  return tris;
 }

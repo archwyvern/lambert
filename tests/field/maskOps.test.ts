@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { ObjectTypeId } from "../../src/field/objectTypeIds";
 import { Vector2, Vector3 } from "@carapace/primitives";
 import { affineIdentity } from "../../src/field/affine";
 import type { ResolvedMask } from "../../src/field/flatten";
 import { bakeMasks, createMask, maskCoverage, setMaskFollow } from "../../src/field/maskOps";
-import type { ShapeInstance } from "../../src/field/types";
+import type { ObjectInstance } from "../../src/field/types";
 import type { Transform2D } from "../../src/field/transform";
 
 const v = (x: number, y: number): Vector2 => new Vector2(x, y);
@@ -33,7 +34,7 @@ describe("maskCoverage", () => {
     expect(maskCoverage(masks, baked, ident, 1, v(12, 0))).toBeCloseTo(1, 5); // inside keep, outside cut
   });
 
-  it("scopes INTERSECT: a point must be kept by every scope (group mask vs shape mask)", () => {
+  it("scopes INTERSECT: a point must be kept by every scope (group mask vs object mask)", () => {
     // scope 0 keeps [-17,7], scope 1 (a group mask) keeps [-7,17]; they overlap on [-7,7].
     const masks = [square(-5, 0, 12, "keep", false, 0), square(5, 0, 12, "keep", false, 1)];
     const baked = bakeMasks(masks);
@@ -55,9 +56,9 @@ describe("maskCoverage", () => {
 describe("setMaskFollow", () => {
   it("converting follow keeps the loop visually in place (round-trips through the transform)", () => {
     const t: Transform2D = { pos: new Vector3(100, 50, 0), rotation: 0.6, scale: new Vector3(2, 1.5, 1) };
-    const shape: ShapeInstance = {
+    const object: ObjectInstance = {
       id: "s",
-      typeId: "dome",
+      typeId: ObjectTypeId.Sphere,
       transform: t,
       params: {},
       controlPoints: [],
@@ -65,9 +66,9 @@ describe("setMaskFollow", () => {
       locked: false,
       masks: [square(0, 0, 10, "keep", true)], // local
     };
-    const toWorld = setMaskFollow(shape, shape.masks![0]!.id, false);
+    const toWorld = setMaskFollow(object, object.masks![0]!.id, false);
     const back = setMaskFollow(toWorld, toWorld.masks![0]!.id, true);
-    const a = shape.masks![0]!.anchors[0]!.p;
+    const a = object.masks![0]!.anchors[0]!.p;
     const b = back.masks![0]!.anchors[0]!.p;
     expect(b.x).toBeCloseTo(a.x, 4);
     expect(b.y).toBeCloseTo(a.y, 4);

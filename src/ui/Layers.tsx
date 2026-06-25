@@ -11,12 +11,14 @@ import {
 import { useEffect, useState } from "react";
 import { Vector3 } from "@carapace/primitives";
 import type { DocumentStore, EditorState } from "../document/store";
-import { duplicateShape, moveShapeTo, removeShape } from "../document/docOps";
+import { duplicateObject, moveObjectTo, removeObject, updateObject } from "../document/docOps";
 import { addGroup, emptyGroup, findNode, findParentId, moveNode, siblingsOf, ungroup, updateNode, wrapInGroup } from "../document/layerOps";
-import { getShapeType } from "../field/registry";
-import { isGroup, type GroupLayer, type LayerNode } from "../field/types";
+import { getObjectType, ObjectTypeId } from "../field/registry";
+import { bakeToMesh, convertToVector, VECTOR_CONVERTIBLE } from "../field/convert";
+import { isGroup, isObject, type GroupLayer, type LayerNode } from "../field/types";
 import { Button, ContextMenu, cx, SectionLabel } from "./kit";
-import { SHAPE_ICONS } from "./shapeIcons";
+import { localBounds } from "./objectBounds";
+import { OBJECT_ICONS } from "./objectIcons";
 
 const DRAG_MIME = "application/x-lambert-layer";
 
@@ -26,14 +28,14 @@ interface Menu {
   id: string;
 }
 
-/** Display name for a node: its user name, else the group label / shape type name. */
+/** Display name for a node: its user name, else the group label / object type name. */
 function nodeLabel(n: LayerNode): string {
   if (n.name) return n.name;
-  return isGroup(n) ? "Group" : getShapeType(n.typeId).name;
+  return isGroup(n) ? "Group" : getObjectType(n.typeId).name;
 }
 
 /**
- * Layer tree panel: groups + shapes, front-most on top, indented by depth. Click selects, drag
+ * Layer tree panel: groups + objects, front-most on top, indented by depth. Click selects, drag
  * reparents/reorders, right-click for verbs (Group / Ungroup / Duplicate / reorder / Delete), eye =
  * visibility, lock = inert on canvas. Collapse a group via its chevron.
  */
@@ -199,8 +201,8 @@ export function Layers(props: { store: DocumentStore; state: EditorState }): Rea
           )}
           {group ? (
             <FolderRegular className="h-4.5 w-4.5 shrink-0 text-fg-mid" />
-          ) : SHAPE_ICONS[n.typeId] ? (
-            <img src={SHAPE_ICONS[n.typeId]} alt="" className="h-4.5 w-4.5 shrink-0" draggable={false} />
+          ) : OBJECT_ICONS[n.typeId] ? (
+            <img src={OBJECT_ICONS[n.typeId]} alt="" className="h-4.5 w-4.5 shrink-0" draggable={false} />
           ) : (
             <span className="h-4.5 w-4.5 shrink-0" />
           )}
@@ -342,17 +344,45 @@ export function Layers(props: { store: DocumentStore; state: EditorState }): Rea
             {
               label: "Duplicate",
               hotkey: "Ctrl+D",
-              onClick: () => doOp((d) => menuTargets.reduce((acc, tid) => duplicateShape(acc, tid), d)),
+              onClick: () => doOp((d) => menuTargets.reduce((acc, tid) => duplicateObject(acc, tid), d)),
             },
+            ...(!isGroup(menuNode) && VECTOR_CONVERTIBLE.has(menuNode.typeId)
+              ? [
+                  {
+                    // swap a primitive for its path-editable Bézier "(Vector)" twin
+                    label: "Convert to Vector",
+                    onClick: () =>
+                      doOp((d) =>
+                        menuTargets.reduce((acc, tid) => updateObject(acc, tid, (s) => (isObject(s) ? (convertToVector(s) ?? s) : s)), d),
+                      ),
+                  },
+                ]
+              : []),
+            ...(!isGroup(menuNode) && menuNode.typeId !== ObjectTypeId.Mesh
+              ? [
+                  {
+                    // bake the parametric/Bézier field to an editable triangle mesh (one-way)
+                    label: "Convert to Mesh",
+                    onClick: () =>
+                      doOp((d) =>
+                        menuTargets.reduce(
+                          (acc, tid) =>
+                            updateObject(acc, tid, (s) => (isObject(s) && s.typeId !== ObjectTypeId.Mesh ? bakeToMesh(s, localBounds(s)) : s)),
+                          d,
+                        ),
+                      ),
+                  },
+                ]
+              : []),
             "separator",
-            { label: "Bring to Front", onClick: () => doOp((d) => moveShapeTo(d, menuNode.id, Number.MAX_SAFE_INTEGER)) },
-            { label: "Send to Back", onClick: () => doOp((d) => moveShapeTo(d, menuNode.id, 0)) },
+            { label: "Bring to Front", onClick: () => doOp((d) => moveObjectTo(d, menuNode.id, Number.MAX_SAFE_INTEGER)) },
+            { label: "Send to Back", onClick: () => doOp((d) => moveObjectTo(d, menuNode.id, 0)) },
             "separator",
             {
               label: menuTargets.length > 1 ? `Delete ${menuTargets.length} Layers` : "Delete",
               danger: true,
               hotkey: "⌫",
-              onClick: () => doOp((d) => menuTargets.reduce((acc, tid) => removeShape(acc, tid), d)),
+              onClick: () => doOp((d) => menuTargets.reduce((acc, tid) => removeObject(acc, tid), d)),
             },
           ]}
         />

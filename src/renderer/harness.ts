@@ -1,5 +1,5 @@
-import { GOLDEN_H, GOLDEN_W, goldenShapes } from "../field/fixtures";
-import { resolveShapes } from "../field/flatten";
+import { GOLDEN_H, GOLDEN_W, goldenObjects } from "../field/fixtures";
+import { resolveObjects } from "../field/flatten";
 import { GpuFieldRenderer } from "../field/gpu/pipeline";
 import { LIT_WGSL } from "../field/gpu/lit";
 import { encodeNormalPng } from "../exporters/normalmap";
@@ -16,7 +16,7 @@ export async function runHarness(): Promise<void> {
   status.textContent = `adapter: ${adapter.info.vendor} — golden fixture ${GOLDEN_W}x${GOLDEN_H}, drag mouse over lit view to move the light`;
 
   // Normal-map view: CPU-encode the GPU result into a PNG blob for a plain <img>
-  const result = await gpu.evaluate(resolveShapes(goldenShapes()), GOLDEN_W, GOLDEN_H, { supersample: 2 });
+  const result = await gpu.evaluate(resolveObjects(goldenObjects()), GOLDEN_W, GOLDEN_H, { supersample: 2 });
   const png = encodeNormalPng(result.normals, result.width, result.height, { red: "right", green: "up" });
   const img = new Image();
   img.src = URL.createObjectURL(new Blob([png as BlobPart], { type: "image/png" }));
@@ -37,7 +37,7 @@ export async function runHarness(): Promise<void> {
   ctx.configure({ device, format });
 
   // re-run fold+normal at native res into a texture we can sample
-  const native = await gpu.evaluate(resolveShapes(goldenShapes()), GOLDEN_W, GOLDEN_H);
+  const native = await gpu.evaluate(resolveObjects(goldenObjects()), GOLDEN_W, GOLDEN_H);
   const normalTex = device.createTexture({
     size: [GOLDEN_W, GOLDEN_H],
     format: "rgba32float",

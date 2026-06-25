@@ -1,7 +1,7 @@
-"""Render the shape-library icons as actual 3D clay renders.
+"""Render the object-library icons as actual 3D clay renders.
 
-Each icon models the real height-field shape the engine evaluates, so the palette previews
-what you actually get. One builder per registered shape type. Run headless:
+Each icon models the real height-field object the engine evaluates, so the palette previews
+what you actually get. One builder per registered object type. Run headless:
 
     blender --background --python blender/render_icons.py
 
@@ -114,7 +114,7 @@ def difference(target: bpy.types.Object, cutter: bpy.types.Object) -> bpy.types.
 
 # ── shape builders (one per registered ShapeType) ─────────────────
 
-def build_dome() -> bpy.types.Object:
+def build_sphere() -> bpy.types.Object:
     # hemisphere: spherical-cap height profile
     bpy.ops.mesh.primitive_uv_sphere_add(segments=48, ring_count=24, radius=1.2)
     obj = bpy.context.active_object
@@ -122,6 +122,15 @@ def build_dome() -> bpy.types.Object:
         if v.co.z < 0:
             v.co.z = 0
     return smooth(obj)
+
+
+def build_crater() -> bpy.types.Object:
+    # the concave sibling of the dome: a slab with a spherical bowl scooped from its top
+    slab = box(1.6, 1.6, 0.5, z=0.25)
+    bpy.ops.mesh.primitive_uv_sphere_add(segments=48, ring_count=24, radius=0.95)
+    cutter = bpy.context.active_object
+    cutter.location = (0.0, 0.0, 0.85)
+    return smooth(difference(slab, cutter))
 
 
 def build_cone() -> bpy.types.Object:
@@ -202,6 +211,32 @@ def build_groove() -> bpy.types.Object:
     return difference(slab, cutter)
 
 
+def build_rib() -> bpy.types.Object:
+    # slab with a raised rounded ridge running across it (the additive twin of groove)
+    slab = box(1.5, 1.5, 0.3, z=0.15)
+    ridge = cyl(0.34, 1.6, z=0.3)
+    ridge.rotation_euler = (0.0, math.radians(90), math.radians(20))
+    bpy.ops.object.select_all(action="DESELECT")
+    slab.select_set(True)
+    ridge.select_set(True)
+    bpy.context.view_layer.objects.active = slab
+    bpy.ops.object.join()
+    return slab
+
+
+def build_berm() -> bpy.types.Object:
+    # a flat-topped embankment bar (trapezoid section), floating like the cylinder/pipe icons (no floor)
+    bpy.ops.mesh.primitive_cube_add(size=1.0)
+    bar = bpy.context.active_object
+    for v in bar.data.vertices:
+        if v.co.z > 0:
+            v.co.y *= 0.4  # pull the top edges in -> sloped sides + a flat top
+    bar.scale = (2.6, 1.0, 0.7)  # match the cylinder's bulk so the palette tiles read at a consistent size
+    bar.location.z = 0.35  # half-height: the bar rests on the ground plane (z=0), no slab beneath
+    bar.rotation_euler = (0.0, 0.0, math.radians(20))
+    return bar
+
+
 def build_wedge() -> bpy.types.Object:
     # ramp: a block with its +x top edge dropped to the floor
     o = box(1.4, 1.6, 0.9)
@@ -241,7 +276,7 @@ def build_cable() -> bpy.types.Object:
     return smooth(bpy.context.active_object)
 
 
-def build_plane() -> bpy.types.Object:
+def build_polygon() -> bpy.types.Object:
     # a flat polygon tilted into a slope (what the `tilt` control produces) — a thin square sheet
     o = box(1.6, 1.6, 0.1)
     o.rotation_euler = (math.radians(22), 0.0, 0.0)
@@ -263,23 +298,88 @@ def build_mesh() -> bpy.types.Object:
     return o  # no smooth() — keep the facets visible
 
 
+def build_grid() -> bpy.types.Object:
+    # structured subdivided patch: a regular grid with gentle regular relief, left faceted
+    bpy.ops.mesh.primitive_grid_add(x_subdivisions=6, y_subdivisions=6, size=2.8)
+    o = bpy.context.active_object
+    for v in o.data.vertices:
+        v.co.z = 0.3 * math.sin(v.co.x * 2.2) * math.sin(v.co.y * 2.2)
+    m = o.modifiers.new("tri", "TRIANGULATE")
+    bpy.context.view_layer.objects.active = o
+    bpy.ops.object.modifier_apply(modifier=m.name)
+    return o
+
+
+def build_revolve() -> bpy.types.Object:
+    # a revolved profile: a smooth radial dome (symmetric about the centre)
+    bpy.ops.mesh.primitive_grid_add(x_subdivisions=24, y_subdivisions=24, size=2.8)
+    o = bpy.context.active_object
+    for v in o.data.vertices:
+        t = min(1.0, math.hypot(v.co.x, v.co.y) / 1.4)
+        v.co.z = 1.15 * math.cos(t * math.pi / 2)
+    return smooth(o)
+
+
+def build_loft() -> bpy.types.Object:
+    # a ribbon lofted between two rails, with a hump along its length
+    seg = 12
+    verts, faces = [], []
+    for i in range(seg + 1):
+        t = i / seg
+        x = -1.4 + 2.8 * t
+        h = 1.0 * math.sin(t * math.pi)
+        verts.append((x, -0.7, h))
+        verts.append((x, 0.7, h))
+    for i in range(seg):
+        a, b, c, d = i * 2, i * 2 + 1, i * 2 + 2, i * 2 + 3
+        faces.append((a, b, d, c))
+    mesh = bpy.data.meshes.new("loft")
+    mesh.from_pydata(verts, [], faces)
+    mesh.update()
+    o = bpy.data.objects.new("loft", mesh)
+    bpy.context.collection.objects.link(o)
+    bpy.context.view_layer.objects.active = o
+    o.select_set(True)
+    return smooth(o)
+
+
+def build_noise() -> bpy.types.Object:
+    # a chaotic bumpy field, left faceted (organic noise terrain)
+    bpy.ops.mesh.primitive_grid_add(x_subdivisions=14, y_subdivisions=14, size=2.8)
+    o = bpy.context.active_object
+    for v in o.data.vertices:
+        x, y = v.co.x, v.co.y
+        v.co.z = 0.5 * math.sin(x * 3.1 + math.cos(y * 2.3)) * math.cos(y * 2.7 + math.sin(x * 1.9))
+    m = o.modifiers.new("tri", "TRIANGULATE")
+    bpy.context.view_layer.objects.active = o
+    bpy.ops.object.modifier_apply(modifier=m.name)
+    return o
+
+
 BUILDERS = {
     # Primitives
-    "dome": build_dome,
+    "sphere": build_sphere,
+    "crater": build_crater,
     "cone": build_cone,
     "pyramid": build_pyramid,
     "torus": build_torus,
-    "plateau": build_plateau,
-    "plane": build_plane,
-    "mesh": build_mesh,
-    # Profiles
     "capsule": build_capsule,
     "cylinder": build_cylinder,
     "frustum": build_frustum,
-    "groove": build_groove,
     "wedge": build_wedge,
     "fillet": build_fillet,
+    # Vectors
+    "polygon": build_polygon,
+    "plateau": build_plateau,
+    "groove": build_groove,
+    "berm": build_berm,
     "cable": build_cable,
+    # Meshes
+    "mesh": build_mesh,
+    "grid": build_grid,
+    "revolve": build_revolve,
+    "loft": build_loft,
+    "noise": build_noise,
 }
 
 

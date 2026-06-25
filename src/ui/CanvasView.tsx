@@ -1,19 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import type { DocumentStore, EditorState } from "../document/store";
-import { addShape, cloneShape, duplicateShape, moveShapeTo, removeShape, updateShape } from "../document/docOps";
+import { addInstance, cloneObject, duplicateObject, moveObjectTo, removeObject, updateObject } from "../document/docOps";
+import { createFromPreset } from "../field/presets";
 import { addGuide, clearGuides, moveGuide, removeGuide } from "../document/canvasOps";
 import { bezierAnchor } from "../field/bezier";
 import { createMask } from "../field/maskOps";
 import { flattenLayers } from "../field/flatten";
 import { findNode, findParentId, nodeWorldAffine, updateNode } from "../document/layerOps";
 import { affineApply, affineIdentity, affineInvert } from "../field/affine";
-import { isGroup, isShape } from "../field/types";
+import { isGroup, isObject } from "../field/types";
 import { insertVertex } from "../field/controlPoints";
-import { getShapeType } from "../field/registry";
+import { getObjectType, ObjectTypeId } from "../field/registry";
 import { snapHalf } from "../field/snap";
 import { editSnap } from "./snapPoint";
 import { fromLocal, toLocal } from "../field/transform";
-import type { ShapeInstance } from "../field/types";
+import type { ObjectInstance } from "../field/types";
 import { normalSigns, type NormalDirs } from "../document/schema";
 import { Vector2, Vector3 } from "@carapace/primitives";
 import { EmptyState } from "@carapace/shell";
@@ -21,7 +22,7 @@ import { v2 } from "../field/vec";
 import { ContextMenu, type MenuEntry } from "./kit";
 import { Gizmos } from "./Gizmos";
 import { LightPad } from "./LightPad";
-import { axisScaleFromDrag, constrainAxis, pickShape, pointsInBox, rotationFromDrag, ROTATE_SNAP, snapAngle } from "./picking";
+import { axisScaleFromDrag, constrainAxis, pickObject, pointsInBox, rotationFromDrag, ROTATE_SNAP, snapAngle } from "./picking";
 import { PreviewRenderer } from "./preview";
 import { RULER, Rulers } from "./Rulers";
 import { guide2D, type GuideContext } from "./keymap";
@@ -34,7 +35,7 @@ import type { ViewState } from "./App";
 type Drag =
   | { kind: "pan"; lastX: number; lastY: number }
   // moved: crossed the click-vs-drag threshold (until then the drag writes nothing). dupOnMove: this
-  // is an Alt-drag, so the first real move clones the shape and the copy is what gets dragged.
+  // is an Alt-drag, so the first real move clones the object and the copy is what gets dragged.
   // group: present for a multi-selection drag — each selected node's start pos + its parent's inverse
   // linear (world delta -> that node's local delta), so they all move together by the same world delta.
   | {
@@ -79,7 +80,7 @@ export function CanvasView(props: {
   imagePath: string;
   savedViewport: Viewport | undefined;
   onViewportChange: (vp: Viewport) => void;
-  /** Switch the active tool (double-click a control-point shape to jump into vertex editing). */
+  /** Switch the active tool (double-click a control-point object to jump into vertex editing). */
   setTool: (t: ToolMode) => void;
   /** Global ½px grid snap (positions, vertices, polygon + curve points). */
   snap: boolean;
@@ -110,8 +111,8 @@ export function CanvasView(props: {
   // click-to-place ("pen") mode: a new point follows the cursor; left-click drops it (chains)
   const [placing, setPlacing] = useState<Placing | null>(null);
   const [placeCursor, setPlaceCursor] = useState<Vector2 | null>(null);
-  const [bodyMenu, setBodyMenu] = useState<{ x: number; y: number; id: string } | null>(null); // right-click a shape
-  // leaving the shape ends placing; Esc / Enter end it too
+  const [bodyMenu, setBodyMenu] = useState<{ x: number; y: number; id: string } | null>(null); // right-click an object
+  // leaving the object ends placing; Esc / Enter end it too
   useEffect(() => setPlacing(null), [state.selectedId]);
   // seed the pen ghost at the last cursor so it's visible immediately on entering placing mode
   useEffect(() => {
@@ -141,11 +142,11 @@ export function CanvasView(props: {
   }, [tool]);
 
   const doc = state.doc;
-  // find a SHAPE leaf by id (groups return undefined — the canvas edits shapes; groups via the gizmo)
-  const findShape = (sid: string | null): ShapeInstance | undefined => {
+  // find an object leaf by id (groups return undefined — the canvas edits objects; groups via the gizmo)
+  const findObject = (sid: string | null): ObjectInstance | undefined => {
     if (!sid) return undefined;
     const n = findNode(doc.layers, sid);
-    return n && isShape(n) ? n : undefined;
+    return n && isObject(n) ? n : undefined;
   };
 
   // grid + guide snap for any world point being edited (no-op when both toggles are off)
@@ -293,7 +294,6 @@ export function CanvasView(props: {
       lightEnergy: view.lightEnergy,
       normalSigns: normalSigns(normalDirs),
       raster: view.raster,
-      fullPipeline: view.fullPipeline,
       orbit3d,
     });
   });
@@ -306,12 +306,12 @@ export function CanvasView(props: {
   // drop a placed point at the cursor and chain (stay in placing mode for the next click)
   const commitPlace = (canvasPt: Vector2): void => {
     if (!placing) return;
-    const shape = findShape(placing.shapeId);
-    if (!shape) return setPlacing(null);
-    const local = toLocal(shape.transform, snapPt(canvasPt));
+    const object = findObject(placing.objectId);
+    if (!object) return setPlacing(null);
+    const local = toLocal(object.transform, snapPt(canvasPt));
     if (placing.kind === "cable-end") {
       store.update((d) =>
-        updateShape(d, placing.shapeId, (s) =>
+        updateObject(d, placing.objectId, (s) =>
           s.bezier
             ? { ...s, bezier: placing.end === "end" ? [...s.bezier, bezierAnchor(local)] : [bezierAnchor(local), ...s.bezier] }
             : s,
@@ -320,7 +320,7 @@ export function CanvasView(props: {
       store.endGesture(); // the end stays the end — the rubber-band re-reads the new anchor next render
     } else {
       store.update((d) =>
-        updateShape(d, placing.shapeId, (s) => ({ ...s, controlPoints: insertVertex(s.controlPoints, placing.afterIndex, local) })),
+        updateObject(d, placing.objectId, (s) => ({ ...s, controlPoints: insertVertex(s.controlPoints, placing.afterIndex, local) })),
       );
       store.endGesture();
       setSelVerts([placing.afterIndex + 1]);
@@ -329,8 +329,8 @@ export function CanvasView(props: {
   };
 
   // close the pen draft into a keep mask (follow=true: stored in the target's local frame). Targets
-  // the selected node — a shape OR a group — converting through its full world affine (so a mask on a
-  // nested shape or a group lands in the right frame).
+  // the selected node — an object OR a group — converting through its full world affine (so a mask on a
+  // nested object or a group lands in the right frame).
   const commitMask = (pts: Vector2[]): void => {
     const target = state.selectedId ? findNode(doc.layers, state.selectedId) : null;
     if (!target || pts.length < 3) return setPenPts([]);
@@ -404,7 +404,7 @@ export function CanvasView(props: {
 
     // start a body move-drag. With >1 selected, capture every selected node's start pos + its parent's
     // inverse linear so the whole selection moves by one shared world delta. dup = Alt-drag a single copy.
-    const beginMove = (hit: ShapeInstance, dup: boolean): void => {
+    const beginMove = (hit: ObjectInstance, dup: boolean): void => {
       const sel = state.selectedIds;
       const group =
         sel.length > 1
@@ -425,15 +425,15 @@ export function CanvasView(props: {
         startCanvas: p,
         startPos: v2(hit.transform.pos.x, hit.transform.pos.y),
         dupOnMove: dup || undefined,
-        group: dup ? undefined : group, // Alt-dup is single-shape only
+        group: dup ? undefined : group, // Alt-dup is single-object only
       };
     };
 
     if (tool === "vertex") {
-      // vertex tool: the body never grabs drags. Clicking a different shape picks it for
+      // vertex tool: the body never grabs drags. Clicking a different object picks it for
       // editing; otherwise any drag is a marquee (works over the body too — solves interior
       // verts). Clicking a vertex dot is handled by the gizmo (it stops propagation).
-      const hit = pickShape(flattenLayers(doc.layers), p);
+      const hit = pickObject(flattenLayers(doc.layers), p);
       if (hit && hit.id !== state.selectedId) {
         store.select(hit.id);
         return;
@@ -444,11 +444,11 @@ export function CanvasView(props: {
 
     if (tool === "select") {
       // only the pointer picks by clicking; other tools select via the layer panel
-      const hit = pickShape(flattenLayers(doc.layers), p);
+      const hit = pickObject(flattenLayers(doc.layers), p);
       if (hit) {
         // pressing the body (anything that isn't a vertex dot — those stop propagation and never
-        // reach here) drops the vertex selection. Clicking a DIFFERENT shape already clears it via
-        // the selectedId effect; this also covers re-pressing the already-selected shape's body.
+        // reach here) drops the vertex selection. Clicking a DIFFERENT object already clears it via
+        // the selectedId effect; this also covers re-pressing the already-selected object's body.
         setSelVerts([]);
         if (e.shiftKey) {
           store.toggleSelect(hit.id); // add/remove from the multi-selection; no drag
@@ -467,15 +467,15 @@ export function CanvasView(props: {
         return;
       }
       // empty space: begin a vertex marquee (a plain click with no drag still deselects on
-      // up). Dragging from here box-selects the selected shape's vertices — never conflicts
-      // with shape-move (that starts on the body) or vertex drag (that starts on a dot).
+      // up). Dragging from here box-selects the selected object's vertices — never conflicts
+      // with object-move (that starts on the body) or vertex drag (that starts on a dot).
       beginMarquee();
       return;
     }
 
     // explicit tools operate on the current selection only, wherever you grab;
     // locked layers are inert on canvas (inspector still edits them)
-    const target = findShape(state.selectedId) ?? null;
+    const target = findObject(state.selectedId) ?? null;
     if (!target || target.locked) return;
     if (tool === "move") {
       dragRef.current = { kind: "move", id: target.id, startCanvas: p, startPos: v2(target.transform.pos.x, target.transform.pos.y) };
@@ -511,9 +511,9 @@ export function CanvasView(props: {
       return;
     }
     if (drag.kind === "marquee") {
-      // only a control-point shape can be box-selected; otherwise the empty drag is inert
-      const sel = findShape(state.selectedId);
-      if (!sel || getShapeType(sel.typeId).controlPoints.kind === "none") return;
+      // only a control-point object can be box-selected; otherwise the empty drag is inert
+      const sel = findObject(state.selectedId);
+      if (!sel || getObjectType(sel.typeId).controlPoints.kind === "none") return;
       const moved = drag.moved || Math.hypot(cp.x - drag.startCanvas.x, cp.y - drag.startCanvas.y) * viewport.zoom > 3;
       dragRef.current = { ...drag, current: cp, moved };
       if (!moved) return;
@@ -525,15 +525,15 @@ export function CanvasView(props: {
     }
     // click-vs-drag: a transform drag writes nothing (and doesn't dirty the doc) until the pointer
     // moves past a few px. Once moved it stays moved, so dragging back to the start still tracks. The
-    // first crossing is also where a deferred Alt-drag clones the shape and hands the drag to the copy.
+    // first crossing is also where a deferred Alt-drag clones the object and hands the drag to the copy.
     if (drag.kind === "move" || drag.kind === "rotate" || drag.kind === "scale") {
       if (!drag.moved) {
         if (Math.hypot(cp.x - drag.startCanvas.x, cp.y - drag.startCanvas.y) * viewport.zoom <= 3) return;
         drag.moved = true;
         if (drag.kind === "move" && drag.dupOnMove) {
-          const orig = findShape(drag.id);
+          const orig = findObject(drag.id);
           if (orig) {
-            const copy = cloneShape(orig, 0, 0);
+            const copy = cloneObject(orig, 0, 0);
             store.update((d) => ({ ...d, layers: [...d.layers, copy] }));
             store.select(copy.id);
             drag.id = copy.id;
@@ -571,7 +571,7 @@ export function CanvasView(props: {
       }
       store.update(
         (d) =>
-          updateShape(d, drag.id, (s) => {
+          updateObject(d, drag.id, (s) => {
             const sp = snapPt(v2(drag.startPos.x + dx, drag.startPos.y + dy));
             const pos = s.transform.pos.withX(sp.x).withY(sp.y);
             return { ...s, transform: { ...s.transform, pos } };
@@ -583,14 +583,14 @@ export function CanvasView(props: {
     if (drag.kind === "rotate") {
       let rot = rotationFromDrag(drag.pivot, drag.startCanvas, cp, drag.startRotation);
       if (e.shiftKey) rot = snapAngle(rot, ROTATE_SNAP); // godot snaps via ctrl; ctrl is our override key
-      store.update((d) => updateShape(d, drag.id, (s) => ({ ...s, transform: { ...s.transform, rotation: rot } })), {
+      store.update((d) => updateObject(d, drag.id, (s) => ({ ...s, transform: { ...s.transform, rotation: rot } })), {
         coalesce: `rot:${drag.id}`,
       });
       return;
     }
     // scale: per-axis local ratio (godot DRAG_SCALE_BOTH); shift = uniform
     const sc = axisScaleFromDrag(drag.pivot, drag.rotation, drag.startCanvas, cp, drag.startScale, e.shiftKey);
-    store.update((d) => updateShape(d, drag.id, (s) => ({ ...s, transform: { ...s.transform, scale: sc } })), {
+    store.update((d) => updateObject(d, drag.id, (s) => ({ ...s, transform: { ...s.transform, scale: sc } })), {
       coalesce: `scale:${drag.id}`,
     });
   };
@@ -598,8 +598,8 @@ export function CanvasView(props: {
   const endDrag = (): void => {
     const drag = dragRef.current;
     if (drag?.kind === "marquee" && !drag.moved && !drag.additive) {
-      // plain empty-canvas click clears the vertex selection but KEEPS the shape selected;
-      // deselecting the whole shape is ESC's job (App keymap), not an empty click
+      // plain empty-canvas click clears the vertex selection but KEEPS the object selected;
+      // deselecting the whole object is ESC's job (App keymap), not an empty click
       setSelVerts([]);
     }
     setMarquee(null);
@@ -618,7 +618,7 @@ export function CanvasView(props: {
     return screenToCanvas(viewport, v2(e.clientX - rect.left, e.clientY - rect.top));
   };
 
-  // right-click a shape body for its verbs (vertex/edge/anchor menus are handled by the gizmo, which
+  // right-click an object body for its verbs (vertex/edge/anchor menus are handled by the gizmo, which
   // stops propagation, so this only fires on the plain body or empty canvas)
   const onContextMenu = (e: React.MouseEvent): void => {
     e.preventDefault();
@@ -626,7 +626,7 @@ export function CanvasView(props: {
       setPlacing(null);
       return;
     }
-    const hit = pickShape(flattenLayers(doc.layers), pointAt(e));
+    const hit = pickObject(flattenLayers(doc.layers), pointAt(e));
     if (hit) {
       store.select(hit.id);
       setBodyMenu({ x: e.clientX, y: e.clientY, id: hit.id });
@@ -635,39 +635,39 @@ export function CanvasView(props: {
     }
   };
 
-  // double-click a control-point shape to jump straight into vertex editing (the universal gesture)
+  // double-click a control-point object to jump straight into vertex editing (the universal gesture)
   const onDoubleClick = (e: React.MouseEvent): void => {
-    const hit = pickShape(flattenLayers(doc.layers), pointAt(e));
-    if (hit && getShapeType(hit.typeId).controlPoints.kind !== "none") {
+    const hit = pickObject(flattenLayers(doc.layers), pointAt(e));
+    if (hit && getObjectType(hit.typeId).controlPoints.kind !== "none") {
       store.select(hit.id);
       setTool("vertex");
     }
   };
 
-  const bodyMenuItems = (s: ShapeInstance): MenuEntry[] => {
+  const bodyMenuItems = (s: ObjectInstance): MenuEntry[] => {
     const items: MenuEntry[] = [];
-    if (getShapeType(s.typeId).controlPoints.kind !== "none") {
+    if (getObjectType(s.typeId).controlPoints.kind !== "none") {
       items.push({ label: "Edit Vertices", onClick: () => { store.select(s.id); setTool("vertex"); } });
       items.push("separator");
     }
     const op = (fn: (d: typeof state.doc) => typeof state.doc): void => { store.update(fn); store.endGesture(); };
-    items.push({ label: "Duplicate", hotkey: "Ctrl+D", onClick: () => op((d) => duplicateShape(d, s.id)) });
-    items.push({ label: "Bring to Front", onClick: () => op((d) => moveShapeTo(d, s.id, Number.MAX_SAFE_INTEGER)) });
-    items.push({ label: "Send to Back", onClick: () => op((d) => moveShapeTo(d, s.id, 0)) });
-    items.push({ label: s.locked ? "Unlock" : "Lock", onClick: () => op((d) => updateShape(d, s.id, (sh) => ({ ...sh, locked: !sh.locked }))) });
+    items.push({ label: "Duplicate", hotkey: "Ctrl+D", onClick: () => op((d) => duplicateObject(d, s.id)) });
+    items.push({ label: "Bring to Front", onClick: () => op((d) => moveObjectTo(d, s.id, Number.MAX_SAFE_INTEGER)) });
+    items.push({ label: "Send to Back", onClick: () => op((d) => moveObjectTo(d, s.id, 0)) });
+    items.push({ label: s.locked ? "Unlock" : "Lock", onClick: () => op((d) => updateObject(d, s.id, (sh) => ({ ...sh, locked: !sh.locked }))) });
     items.push("separator");
-    items.push({ label: "Delete", danger: true, hotkey: "⌫", onClick: () => op((d) => removeShape(d, s.id)) });
+    items.push({ label: "Delete", danger: true, hotkey: "⌫", onClick: () => op((d) => removeObject(d, s.id)) });
     return items;
   };
 
   const onDrop = (e: React.DragEvent): void => {
     e.preventDefault();
     if (!diffuseBytes) return; // no document: nothing to author against
-    const typeId = e.dataTransfer.getData("application/x-lambert-shape");
-    if (!typeId) return;
+    const presetId = e.dataTransfer.getData("application/x-lambert-object");
+    if (!presetId) return;
     const rect = hostRef.current!.getBoundingClientRect();
     const p = screenToCanvas(viewport, v2(e.clientX - rect.left, e.clientY - rect.top));
-    store.update((d) => addShape(d, typeId, p));
+    store.update((d) => addInstance(d, createFromPreset(presetId, p)));
     store.endGesture();
   };
 
@@ -814,14 +814,14 @@ export function CanvasView(props: {
       {/* click-to-place ghost: dashed tether from the anchor to the cursor + a hollow dot */}
       {(() => {
         if (!placing || !placeCursor) return null;
-        const shape = findShape(placing.shapeId);
-        if (!shape) return null;
+        const object = findObject(placing.objectId);
+        if (!object) return null;
         const originLocal =
           placing.kind === "cable-end"
-            ? (placing.end === "end" ? shape.bezier?.[shape.bezier.length - 1] : shape.bezier?.[0])?.p
-            : shape.controlPoints[placing.afterIndex];
+            ? (placing.end === "end" ? object.bezier?.[object.bezier.length - 1] : object.bezier?.[0])?.p
+            : object.controlPoints[placing.afterIndex];
         if (!originLocal) return null;
-        const o = canvasToScreen(viewport, fromLocal(shape.transform, originLocal));
+        const o = canvasToScreen(viewport, fromLocal(object.transform, originLocal));
         const c = canvasToScreen(viewport, placeCursor);
         return (
           <svg className="pointer-events-none absolute inset-0 h-full w-full">
@@ -904,16 +904,16 @@ export function CanvasView(props: {
       ) : null}
       {diffuseBytes && !swapped
         ? (() => {
-            const sel = findShape(state.selectedId);
-            const shapeKind: GuideContext["shapeKind"] = !sel
+            const sel = findObject(state.selectedId);
+            const objectKind: GuideContext["objectKind"] = !sel
               ? "none"
-              : sel.typeId === "cable"
-                ? "cable"
-                : (getShapeType(sel.typeId).controlPoints.kind as GuideContext["shapeKind"]);
+              : getObjectType(sel.typeId).controlPoints.kind === "none" && sel.bezier
+                ? "cable" // analytic Bézier path (Pipe/Berm) — open-path editing shortcuts
+                : (getObjectType(sel.typeId).controlPoints.kind as GuideContext["objectKind"]);
             return (
               <ShortcutGuide
                 storageKey="lambert.guide2d.open"
-                sections={guide2D({ tool, shapeKind, placing: !!placing })}
+                sections={guide2D({ tool, objectKind, placing: !!placing })}
               />
             );
           })()
@@ -932,7 +932,7 @@ export function CanvasView(props: {
       ) : null}
       {bodyMenu
         ? (() => {
-            const s = findShape(bodyMenu.id);
+            const s = findObject(bodyMenu.id);
             return s ? (
               <ContextMenu x={bodyMenu.x} y={bodyMenu.y} items={bodyMenuItems(s)} onClose={() => setBodyMenu(null)} />
             ) : null;

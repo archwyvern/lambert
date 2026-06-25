@@ -1,7 +1,6 @@
 import { Vector2, Vector3 } from "@carapace/primitives";
 import { z } from "zod";
-import { polygonStats } from "../field/controlPoints";
-import type { CanvasState, LayerNode, ShapeInstance } from "../field/types";
+import type { CanvasState, LayerNode, ObjectInstance } from "../field/types";
 
 const vec2Schema = z.object({ x: z.number(), y: z.number() });
 const bezierAnchorSchema = z.object({
@@ -10,6 +9,7 @@ const bezierAnchorSchema = z.object({
   hOut: vec2Schema,
   mode: z.enum(["smooth", "manual"]).optional(),
   sym: z.boolean().optional(),
+  radius: z.number().optional(), // Pipe (Vector) per-anchor taper
 });
 
 const maskSchema = z.object({
@@ -28,7 +28,7 @@ const maskSchema = z.object({
 const pos3Schema = z.object({ x: z.number(), y: z.number(), z: z.number().default(0) });
 const scale3Schema = z.object({ x: z.number(), y: z.number(), z: z.number().default(1) });
 
-const shapeSchema = z.object({
+const objectSchema = z.object({
   id: z.string(),
   typeId: z.string(),
   name: z.string().optional(),
@@ -39,11 +39,17 @@ const shapeSchema = z.object({
   }),
   params: z.record(z.string(), z.union([z.number(), z.string(), z.boolean()])),
   controlPoints: z.array(vec2Schema),
-  /** Cable only: the cubic-Bézier pen path (controlPoints is its dense sample). */
+  /** Analytic vector paths (Pipe/Berm (Vector)): the cubic-Bézier pen path. */
   bezier: z.array(bezierAnchorSchema).optional(),
-  /** "rings" shapes: base-ring vertex count (top ring is the rest). Absent = equal split. */
+  /** Bézier path is a closed loop (last anchor joins the first). Open by default. */
+  closed: z.boolean().optional(),
+  /** Anchor indices where each Bézier subpath begins (Plateau (Vector) rings / Surface holes). */
+  subpathStarts: z.array(z.number().int().nonnegative()).optional(),
+  /** Baked per-contour vertex counts ([outer, ...holes] / [base, top]); drives the hole CSG. */
+  contourCounts: z.array(z.number().int().nonnegative()).optional(),
+  /** "rings" objects: base-ring vertex count (top ring is the rest). Absent = equal split. */
   ringSplit: z.number().int().positive().optional(),
-  /** Mesh-plane topology (typeId "mesh" only): per-vertex height + triangle indices. */
+  /** Mesh-plane topology (Mesh type only): per-vertex height + triangle indices. */
   mesh: z
     .object({
       z: z.array(z.number()),
@@ -51,12 +57,8 @@ const shapeSchema = z.object({
       edges: z.array(z.tuple([z.number(), z.number()])).optional(),
     })
     .optional(),
-  /** Per-shape trim masks (closed Bézier loops). */
+  /** Per-object trim masks (closed Bézier loops). */
   masks: z.array(maskSchema).optional(),
-  /** Legacy combine settings (op/blend); behavior now derives from the shape type. */
-  combine: z.unknown().optional(),
-  /** Legacy height multiplier; folded into scale.z on load. */
-  strength: z.number().optional(),
   visible: z.boolean(),
   locked: z.boolean(),
 });
@@ -78,7 +80,7 @@ const groupLayerSchema: z.ZodType = z.lazy(() =>
     children: z.array(layerNodeSchema),
   }),
 );
-const layerNodeSchema: z.ZodType = z.lazy(() => z.union([groupLayerSchema, shapeSchema]));
+const layerNodeSchema: z.ZodType = z.lazy(() => z.union([groupLayerSchema, objectSchema]));
 
 /** Which way the encoded channels point. Default: red right, green up. */
 export interface NormalDirs {
@@ -121,7 +123,7 @@ export function serializeProjectConfig(config: ProjectConfig): string {
   return JSON.stringify(config, null, 2) + "\n";
 }
 
-// --- per-image document (.lnb): one image's shapes + view state ---
+// --- per-image document (.lnb): one image's objects + view state ---
 
 const canvasSchema = z.object({
   origin: z.object({ x: z.number(), y: z.number() }),
@@ -142,13 +144,11 @@ export const docSchema = z.object({
     width: z.number().int().positive(),
     height: z.number().int().positive(),
   }),
-  // new docs use the layer tree; legacy docs carry a flat `shapes` list (normalized to layers on load)
   layers: z.array(layerNodeSchema).optional(),
-  shapes: z.array(shapeSchema).optional(),
   canvas: canvasSchema.optional(),
 });
 
-export type LambertDoc = Omit<z.infer<typeof docSchema>, "shapes" | "layers" | "canvas"> & {
+export type LambertDoc = Omit<z.infer<typeof docSchema>, "layers" | "canvas"> & {
   layers: LayerNode[];
   canvas: CanvasState;
 };
@@ -162,74 +162,7 @@ export function emptyDoc(sourcePath: string, width: number, height: number): Lam
   };
 }
 
-/** Pre-elevation documents stored tallness as a px param; nominal = the old default. */
-const LEGACY_TALLNESS: Record<string, { param: string; nominal: number }> = {
-  plateau: { param: "height", nominal: 24 },
-  dome: { param: "height", nominal: 48 },
-  capsule: { param: "height", nominal: 16 },
-  groove: { param: "depth", nominal: 8 },
-};
-
-/** Shape type ids removed from the engine. Legacy documents that still carry them drop the
- *  orphaned leaves on load — their type is unregistered, so anything calling getShapeType on them
- *  (pack, render, picking) would throw. */
-const REMOVED_TYPE_IDS = new Set(["surface"]);
-
 /* eslint-disable @typescript-eslint/no-explicit-any -- load-boundary glue over raw parsed JSON */
-
-/** Fold legacy per-shape fields (combine/strength/height/depth/radii/slopeWidth) into the current
- *  model. Mutates the raw (pre-hydrate) shape in place. */
-function migrateRawShape(s: any): void {
-  delete s.combine; // legacy combine settings: the shape type owns the behavior now
-  if (s.strength !== undefined) {
-    s.transform.scale.z *= s.strength; // legacy strength -> tallness scale
-    delete s.strength;
-  }
-  const legacy = LEGACY_TALLNESS[s.typeId];
-  if (legacy && typeof s.params[legacy.param] === "number") {
-    s.transform.scale.z *= (s.params[legacy.param] as number) / legacy.nominal;
-    delete s.params[legacy.param];
-  }
-  if (s.typeId === "dome") {
-    if (typeof s.params.radiusX === "number") {
-      s.transform.scale.x *= s.params.radiusX / 48;
-      delete s.params.radiusX;
-    }
-    if (typeof s.params.radiusY === "number") {
-      s.transform.scale.y *= s.params.radiusY / 48;
-      delete s.params.radiusY;
-    }
-  }
-  if (s.typeId === "plateau" && typeof s.params.slopeWidth === "number") {
-    const base = s.controlPoints as { x: number; y: number }[];
-    const { centroid, radius } = polygonStats(base.map((v) => new Vector2(v.x, v.y)));
-    const apothem = radius * Math.cos(Math.PI / Math.max(base.length, 3));
-    const k = Math.max(0.2, (apothem - s.params.slopeWidth) / Math.max(apothem, 1e-6));
-    s.controlPoints = [
-      ...base,
-      ...base.map((v) => ({ x: centroid.x + (v.x - centroid.x) * k, y: centroid.y + (v.y - centroid.y) * k })),
-    ];
-    delete s.params.slopeWidth;
-  }
-}
-
-/** ridge -> capsule rename: the old 2-point spine + width param becomes a parametric capsule, with
- *  the transform rotated to keep the spine's orientation. Returns a new raw shape. */
-function ridgeToCapsule(s: any): any {
-  if (s.typeId !== "ridge") return s;
-  const a = s.controlPoints[0];
-  const b = s.controlPoints[s.controlPoints.length - 1];
-  const length = a && b ? Math.hypot(b.x - a.x, b.y - a.y) || 64 : 64;
-  const angle = a && b ? Math.atan2(b.y - a.y, b.x - a.x) : 0;
-  const radius = (Number(s.params.width) || 24) / 2;
-  return {
-    ...s,
-    typeId: "capsule",
-    params: { length, radius, profile: s.params.profile ?? "round" },
-    controlPoints: [],
-    transform: { ...s.transform, rotation: s.transform.rotation + angle },
-  };
-}
 
 const hydrateVec2List = (xs: any[]): Vector2[] => xs.map((p) => new Vector2(p.x, p.y));
 const hydrateAnchor = (a: any) => ({
@@ -238,6 +171,7 @@ const hydrateAnchor = (a: any) => ({
   hOut: new Vector2(a.hOut.x, a.hOut.y),
   mode: a.mode,
   sym: a.sym,
+  radius: a.radius,
 });
 const hydrateMask = (m: any) => ({ ...m, anchors: m.anchors.map(hydrateAnchor) });
 const hydrateTransform = (t: any) => ({
@@ -246,21 +180,20 @@ const hydrateTransform = (t: any) => ({
   scale: new Vector3(t.scale.x, t.scale.y, t.scale.z),
 });
 
-function hydrateShapeRaw(s: any): ShapeInstance {
+function hydrateObjectRaw(s: any): ObjectInstance {
   return {
     ...s,
     transform: hydrateTransform(s.transform),
     controlPoints: hydrateVec2List(s.controlPoints),
     bezier: s.bezier?.map(hydrateAnchor),
     masks: s.masks?.map(hydrateMask),
-  } as ShapeInstance;
+  } as ObjectInstance;
 }
 
 /**
- * Drop removed-type leaves, fold legacy shape fields, rename ridge->capsule, and hydrate plain
- * {x,y} vectors into carapace Vector instances — recursively over the layer tree. JSON.parse yields
- * prototype-less objects; the runtime expects real Vector2/Vector3. Shared by .lambert load and
- * session restore; idempotent (reads .x/.y, safe on already-hydrated trees).
+ * Hydrate plain {x,y} vectors into carapace Vector instances — recursively over the layer tree.
+ * JSON.parse yields prototype-less objects; the runtime expects real Vector2/Vector3. Shared by
+ * .lnb load and session restore; idempotent (reads .x/.y, safe on already-hydrated trees).
  */
 export function normalizeLayers(raw: any[]): LayerNode[] {
   const out: LayerNode[] = [];
@@ -279,9 +212,7 @@ export function normalizeLayers(raw: any[]): LayerNode[] {
         children: normalizeLayers(n.children),
       });
     } else {
-      if (REMOVED_TYPE_IDS.has(n.typeId)) continue;
-      migrateRawShape(n);
-      out.push(hydrateShapeRaw(ridgeToCapsule(n)));
+      out.push(hydrateObjectRaw(n));
     }
   }
   return out;
@@ -291,7 +222,7 @@ export function normalizeLayers(raw: any[]): LayerNode[] {
 
 export function parseDoc(json: string): LambertDoc {
   const raw = docSchema.parse(JSON.parse(json));
-  const layers = raw.layers ?? raw.shapes ?? [];
+  const layers = raw.layers ?? [];
   return {
     schemaVersion: raw.schemaVersion,
     source: raw.source,

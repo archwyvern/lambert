@@ -17,6 +17,9 @@ export interface BezierAnchor {
    *  false = the two handles move independently. Alt held during a drag inverts this. UI-only
    *  (the fold uses the resolved tangents regardless). */
   sym?: boolean;
+  /** Per-anchor tube radius for a Pipe (Vector) taper (interpolated along each segment). Absent =
+   *  the type's uniform `radius` param. A Frustum converts to a vector by setting the two end radii. */
+  radius?: number;
 }
 
 export const bezierAnchor = (
@@ -85,7 +88,7 @@ function cubicD2(p0: Vector2, c0: Vector2, c1: Vector2, p1: Vector2, t: number):
  * the closest-point condition dot(B(t)-p, B'(t)) = 0. Mirrors the WGSL `cubic_dist` exactly so
  * the directly-rendered cable stays GPU==CPU. A smooth distance is what keeps the normals facet-free.
  */
-export function cubicDist(
+export function cubicNearest(
   p: Vector2,
   p0: Vector2,
   c0: Vector2,
@@ -93,9 +96,9 @@ export function cubicDist(
   p1: Vector2,
   cutStart = false,
   cutEnd = false,
-): number {
+): { dist: number; t: number } {
   // 16-sample bracket isolates the global nearest even when long tangents loop/cusp the curve; the
-  // final min() guards against a diverging Newton step (mirror of the WGSL cubic_dist).
+  // final min() guards against a diverging Newton step (mirror of the WGSL cubic_dist_t).
   let bestT = 0;
   let bestD = Infinity;
   for (let s = 0; s <= 16; s++) {
@@ -120,27 +123,46 @@ export function cubicDist(
   }
   // flat cap: nearest pinned at this end (t at the boundary) AND strictly beyond it -> outside (local
   // Voronoi test, mirror of the WGSL — an infinite half-plane would slice off curved tube far away)
-  if (cutEnd && t > 0.9999 && (p.x - p1.x) * (p1.x - c1.x) + (p.y - p1.y) * (p1.y - c1.y) > 0) return 1e30;
-  if (cutStart && t < 0.0001 && (p.x - p0.x) * (c0.x - p0.x) + (p.y - p0.y) * (c0.y - p0.y) < 0) return 1e30;
+  if (cutEnd && t > 0.9999 && (p.x - p1.x) * (p1.x - c1.x) + (p.y - p1.y) * (p1.y - c1.y) > 0) return { dist: 1e30, t };
+  if (cutStart && t < 0.0001 && (p.x - p0.x) * (c0.x - p0.x) + (p.y - p0.y) * (c0.y - p0.y) < 0) return { dist: 1e30, t };
   const B = cubicAt(p0, c0, c1, p1, t);
-  return Math.sqrt(Math.min(bestD, (B.x - p.x) ** 2 + (B.y - p.y) ** 2));
+  const dn = (B.x - p.x) ** 2 + (B.y - p.y) ** 2;
+  if (dn <= bestD) return { dist: Math.sqrt(dn), t };
+  return { dist: Math.sqrt(bestD), t: bestT };
 }
 
-/** Sample the cubic-Bézier path into a dense polyline (perSeg points per segment + the final
- *  endpoint). Fewer than 2 anchors return their points. This is what eval + the GPU fold walk. */
-export function bezierSpine(anchors: BezierAnchor[], perSeg = 16): Vector2[] {
+/** Smooth distance from p to a cubic segment (the t-discarding form of cubicNearest). */
+export function cubicDist(
+  p: Vector2,
+  p0: Vector2,
+  c0: Vector2,
+  c1: Vector2,
+  p1: Vector2,
+  cutStart = false,
+  cutEnd = false,
+): number {
+  return cubicNearest(p, p0, c0, c1, p1, cutStart, cutEnd).dist;
+}
+
+/** Sample the cubic-Bézier path into a dense polyline (perSeg points per segment). Open: ends at the
+ *  final endpoint. `closed` (needs >= 3 anchors): wraps the last->first segment with wrap-around smooth
+ *  tangents and ends back at the first point. Fewer than 2 anchors return their points. */
+export function bezierSpine(anchors: BezierAnchor[], perSeg = 16, closed = false): Vector2[] {
   if (anchors.length < 2) return anchors.map((a) => v2(a.p.x, a.p.y));
-  const r = resolveHandles(anchors);
+  const loop = closed && anchors.length >= 3;
+  const r = loop ? resolveHandlesClosed(anchors) : resolveHandles(anchors);
   const out: Vector2[] = [];
-  for (let i = 0; i < r.length - 1; i++) {
+  const segs = loop ? r.length : r.length - 1;
+  for (let i = 0; i < segs; i++) {
+    const i1 = (i + 1) % r.length;
     const p0 = r[i]!.p;
     const c0 = ctrlOut(r[i]!);
-    const c1 = ctrlIn(r[i + 1]!);
-    const p1 = r[i + 1]!.p;
+    const c1 = ctrlIn(r[i1]!);
+    const p1 = r[i1]!.p;
     for (let s = 0; s < perSeg; s++) out.push(cubic(p0, c0, c1, p1, s / perSeg));
   }
-  const last = r[r.length - 1]!.p;
-  out.push(v2(last.x, last.y));
+  const end = loop ? r[0]!.p : r[r.length - 1]!.p;
+  out.push(v2(end.x, end.y));
   return out;
 }
 
@@ -186,6 +208,47 @@ export function bakeMaskLoop(anchors: BezierAnchor[], perSeg = 12): Vector2[] {
     for (let s = 0; s < perSeg; s++) out.push(cubic(p0, c0, c1, p1, s / perSeg));
   }
   return out;
+}
+
+/** Split a flat anchor list into subpath loops at the given start indices (absent/single = one loop). */
+export function splitSubpaths(anchors: BezierAnchor[], subpathStarts?: number[]): BezierAnchor[][] {
+  if (!subpathStarts || subpathStarts.length <= 1) return [anchors];
+  return subpathStarts.map((s, i) => anchors.slice(s, i + 1 < subpathStarts.length ? subpathStarts[i + 1] : anchors.length));
+}
+
+/** Bake each closed Bézier subpath to a dense polygon and concatenate them into one ring list (the
+ *  first loop is the base ring); `ringSplit` is the baked base-ring vertex count. For Plateau (Vector):
+ *  two loops -> base + top rings consumed by the shared Plateau eval/WGSL. */
+export function bakeRings(anchors: BezierAnchor[], subpathStarts?: number[]): { controlPoints: Vector2[]; ringSplit: number; contourCounts: number[] } {
+  const baked = splitSubpaths(anchors, subpathStarts).map((l) => bakeMaskLoop(l));
+  return { controlPoints: baked.flat(), ringSplit: baked[0]?.length ?? 0, contourCounts: baked.map((b) => b.length) };
+}
+
+/** Bake a closed loop to a UNIFORM perSeg-samples-per-segment polygon (no straight-segment skip). Two
+ *  loops with the same anchor count bake to the SAME point count — required for the Plateau (Vector)
+ *  paired loft (base[k] <-> top[k]) so it doesn't fan a dense curved ring across a sparse straight one. */
+export function bakeLoopUniform(anchors: BezierAnchor[], perSeg = 8): Vector2[] {
+  if (anchors.length < 3) return anchors.map((a) => v2(a.p.x, a.p.y));
+  const r = resolveHandlesClosed(anchors);
+  const n = r.length;
+  const out: Vector2[] = [];
+  for (let i = 0; i < n; i++) {
+    const a0 = r[i]!;
+    const a1 = r[(i + 1) % n]!;
+    const p0 = a0.p;
+    const c0 = ctrlOut(a0);
+    const c1 = ctrlIn(a1);
+    const p1 = a1.p;
+    for (let s = 0; s < perSeg; s++) out.push(cubic(p0, c0, c1, p1, s / perSeg));
+  }
+  return out;
+}
+
+/** bakeRings with uniform per-segment sampling — base + top bake to equal counts (for equal anchor
+ *  counts), giving the Plateau (Vector) loft clean 1:1 pairing instead of a fan. */
+export function bakeRingsUniform(anchors: BezierAnchor[], subpathStarts?: number[], perSeg = 8): { controlPoints: Vector2[]; ringSplit: number; contourCounts: number[] } {
+  const baked = splitSubpaths(anchors, subpathStarts).map((l) => bakeLoopUniform(l, perSeg));
+  return { controlPoints: baked.flat(), ringSplit: baked[0]?.length ?? 0, contourCounts: baked.map((b) => b.length) };
 }
 
 /**

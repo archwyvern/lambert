@@ -1,13 +1,13 @@
 import type { DocumentStore, EditorState } from "../document/store";
 import type { NormalDirs } from "../document/schema";
-import { removeShape, reorderShape, updateShape } from "../document/docOps";
+import { removeObject, reorderObject, updateObject } from "../document/docOps";
 import { findNode, findParentId, updateNode } from "../document/layerOps";
-import { isGroup, isShape } from "../field/types";
+import { isGroup, isObject } from "../field/types";
 import { polygonStats, regularPolygon, regularPolygonAligned, resamplePolyline, ringPhase } from "../field/controlPoints";
 import { setMaskFollow } from "../field/maskOps";
-import { getShapeType } from "../field/registry";
-import { snapShapeToGrid } from "../field/snap";
-import type { ShapeInstance } from "../field/types";
+import { getObjectType, ObjectTypeId } from "../field/registry";
+import { snapObjectToGrid } from "../field/snap";
+import type { ObjectInstance } from "../field/types";
 import { v2 } from "../field/vec";
 import { Inspector as PropertyInspector } from "@carapace/shell";
 import type { InspectorField, InspectorSectionInfo } from "@carapace/shell";
@@ -19,7 +19,7 @@ import type { ToolMode } from "./tools";
 const toDeg = (rad: number): number => Number(((rad * 180) / Math.PI).toFixed(1));
 const toRad = (deg: number): number => (deg * Math.PI) / 180;
 const wrapDeg = (deg: number): number => ((((deg + 180) % 360) + 360) % 360) - 180; // -> (-180, 180]
-const SCALE_MIN = 0.05; // min magnitude; sign is allowed (a flipped/mirrored axis is negative scale)
+const SCALE_MIN = 0; // 0 and negative are both valid — scrub continuously through zero to flip/mirror an axis
 
 /** Clamp a scale component to >= SCALE_MIN in magnitude, KEEPING its sign so a flip (negative scale)
  *  survives scrubbing. Zero -> +min. */
@@ -50,7 +50,7 @@ export function Inspector(props: {
 }): React.JSX.Element {
   const { store, state, selVerts, normalDirs, onNormalDirs, setTool, snap } = props;
   const selNode = state.selectedId ? findNode(state.doc.layers, state.selectedId) : null;
-  const shape = selNode && isShape(selNode) ? selNode : undefined;
+  const object = selNode && isObject(selNode) ? selNode : undefined;
   // when several layers are selected we edit the PRIMARY (last picked) and show a count banner
   const multiBanner =
     state.selectedIds.length > 1 ? (
@@ -89,11 +89,12 @@ export function Inspector(props: {
         onCommit: commitG,
       }),
       vec({
-        key: "gscale",
+        key: `gscale:${gid}`, // per-object key so the ephemeral link state resets on reselect
         label: "scale",
         group: "Transform",
         value: [g.transform.scale.x, g.transform.scale.y, g.transform.scale.z],
         size: 3,
+        link: true,
         onChange: (a) =>
           liveG(
             (n) => ({ ...n, transform: { ...n.transform, scale: new Vector3(clampScale(a[0]!), clampScale(a[1]!), clampScale(a[2]!)) } }),
@@ -153,7 +154,7 @@ export function Inspector(props: {
             variant="danger"
             className="flex-1"
             onClick={() => {
-              store.update((d) => removeShape(d, gid));
+              store.update((d) => removeObject(d, gid));
               commitG();
             }}
           >
@@ -164,7 +165,7 @@ export function Inspector(props: {
     );
   }
 
-  if (!shape) {
+  if (!object) {
     const doc = state.doc;
     const setDirs = (patch: Partial<NormalDirs>): void => onNormalDirs({ ...normalDirs, ...patch });
     const setOrigin = (origin: { x: number; y: number }): void => {
@@ -241,33 +242,36 @@ export function Inspector(props: {
           </Button>
         </div>
         <p className="mt-2 px-2 text-sm leading-snug text-fg-mid">
-          Project-wide; applies to exports and the normal view. Select a shape to edit its parameters.
+          Project-wide; applies to exports and the normal view. Select an object to edit its parameters.
         </p>
       </div>
     );
   }
 
-  const type = getShapeType(shape.typeId);
-  const live = (fn: (s: ShapeInstance) => ShapeInstance, key: string): void =>
-    store.update((d) => updateShape(d, shape.id, fn), { coalesce: `${key}:${shape.id}` });
+  const type = getObjectType(object.typeId);
+  const live = (fn: (s: ObjectInstance) => ObjectInstance, key: string): void =>
+    store.update((d) => updateObject(d, object.id, fn), { coalesce: `${key}:${object.id}` });
   const commit = (): void => store.endGesture();
 
   const fields: InspectorField[] = [];
 
-  // vertex count: ring shapes split into outer/inner; other control-point shapes get a single count
-  if (type.controlPoints.kind === "rings") {
+  // vertex count: ring objects split into outer/inner; other control-point objects get a single count.
+  // Bézier-bearing objects (baked-fill vectors) edit the path with the pen, so no vertex-count field.
+  if (object.bezier) {
+    // pen-edited: no polygon/ring vertex-count field
+  } else if (type.controlPoints.kind === "rings") {
     fields.push(
       num({
         key: "outer",
         label: "outer vertices",
         group: "Parameters",
-        value: shape.ringSplit ?? (shape.controlPoints.length >> 1),
+        value: object.ringSplit ?? (object.controlPoints.length >> 1),
         min: type.controlPoints.min ?? 3,
         max: 16,
         integer: true,
         onChange: (v) => {
           const n = Math.round(v);
-          if (n === (shape.ringSplit ?? (shape.controlPoints.length >> 1))) return;
+          if (n === (object.ringSplit ?? (object.controlPoints.length >> 1))) return;
           live((s) => {
             const split = s.ringSplit ?? (s.controlPoints.length >> 1);
             const base = polygonStats(s.controlPoints.slice(0, split));
@@ -275,7 +279,7 @@ export function Inspector(props: {
             // phase-lock the new outer ring to the inner ring so base[i] stays over top[i]
             const ring = regularPolygonAligned(base.centroid, base.radius, n, ringPhase(top));
             const next = { ...s, controlPoints: [...ring, ...top], ringSplit: n };
-            return snap ? snapShapeToGrid(next) : next;
+            return snap ? snapObjectToGrid(next) : next;
           }, "verts-outer");
         },
         onCommit: commit,
@@ -284,14 +288,14 @@ export function Inspector(props: {
         key: "inner",
         label: "inner vertices",
         group: "Parameters",
-        value: shape.controlPoints.length - (shape.ringSplit ?? (shape.controlPoints.length >> 1)),
+        value: object.controlPoints.length - (object.ringSplit ?? (object.controlPoints.length >> 1)),
         min: 1,
         max: 16,
         integer: true,
         onChange: (v) => {
           const n = Math.round(v);
-          const split = shape.ringSplit ?? (shape.controlPoints.length >> 1);
-          if (n === shape.controlPoints.length - split) return;
+          const split = object.ringSplit ?? (object.controlPoints.length >> 1);
+          if (n === object.controlPoints.length - split) return;
           live((s) => {
             const sp = s.ringSplit ?? (s.controlPoints.length >> 1);
             const base = s.controlPoints.slice(0, sp);
@@ -299,7 +303,7 @@ export function Inspector(props: {
             // phase-lock the new inner ring to the outer ring so base[i] stays over top[i]
             const ring = regularPolygonAligned(top.centroid, top.radius, n, ringPhase(base));
             const next = { ...s, controlPoints: [...base, ...ring], ringSplit: sp };
-            return snap ? snapShapeToGrid(next) : next;
+            return snap ? snapObjectToGrid(next) : next;
           }, "verts-inner");
         },
         onCommit: commit,
@@ -311,13 +315,13 @@ export function Inspector(props: {
         key: "vertices",
         label: "vertices",
         group: "Parameters",
-        value: shape.controlPoints.length,
+        value: object.controlPoints.length,
         min: type.controlPoints.min ?? (type.controlPoints.kind === "polyline" ? 2 : 3),
         max: 16,
         integer: true,
         onChange: (v) => {
           const n = Math.round(v);
-          if (n === shape.controlPoints.length) return;
+          if (n === object.controlPoints.length) return;
           live((s) => {
             if (type.controlPoints.kind === "polygon") {
               const { centroid, radius } = polygonStats(s.controlPoints);
@@ -331,17 +335,38 @@ export function Inspector(props: {
     );
   }
 
-  // shape parameters
+  // object parameters
   const hasTilt = "tiltX" in type.params && "tiltY" in type.params;
   for (const [key, spec] of Object.entries(type.params)) {
     if (hasTilt && (key === "tiltX" || key === "tiltY")) continue; // shown via the TiltPad, not scrubbers
+    if (key === "radius2") continue; // folded into the linked radius/radius2 vec
+    if (key === "radius" && "radius2" in type.params) {
+      // the two end radii of a Pipe bar: a linked vec2 (chain locks them = a uniform tube; unlink to taper)
+      fields.push(
+        vec({
+          key: `radii:${object.id}`, // per-object key so the ephemeral link state resets on reselect
+          label: "radii",
+          group: "Parameters",
+          layout: "rows", // radius / radius2 each as their own label|value row (aligned), chain spans them
+          value: [Number(object.params.radius), Number(object.params.radius2)],
+          size: 2,
+          min: 0, // 0 is valid: radius2 = 0 tapers the end to a point (a cone)
+          labels: ["radius", "radius2"],
+          link: true,
+          defaultLinked: true,
+          onChange: (a) => live((s) => ({ ...s, params: { ...s.params, radius: a[0]!, radius2: a[1]! } }), "radii"),
+          onCommit: commit,
+        }),
+      );
+      continue;
+    }
     if (spec.type === "enum") {
       fields.push({
         kind: "enum",
         key,
         label: humanizeLabel(key),
         group: "Parameters",
-        value: spec.options.indexOf(String(shape.params[key])),
+        value: spec.options.indexOf(String(object.params[key])),
         options: [...spec.options],
         onChange: (i) => {
           const v = spec.options[i]!;
@@ -350,9 +375,9 @@ export function Inspector(props: {
         },
       });
     } else {
-      // The bars (cylinder/frustum) grow from their +x (front) end: editing length pins the -x (back)
-      // end in place by shifting the centre forward along the local x axis by scale.x * delta/2.
-      const anchorsLength = key === "length" && (shape.typeId === "cylinder" || shape.typeId === "frustum");
+      // The Pipe bar grows from its +x (front) end: editing length pins the -x (back) end in place by
+      // shifting the centre forward along the local x axis by scale.x * delta/2.
+      const anchorsLength = key === "length" && object.typeId === ObjectTypeId.Pipe;
       const onChange = anchorsLength
         ? (v: number) =>
             live((s) => {
@@ -373,7 +398,7 @@ export function Inspector(props: {
           key,
           label: humanizeLabel(key),
           group: "Parameters",
-          value: Number(shape.params[key]),
+          value: Number(object.params[key]),
           min: spec.min,
           max: spec.max,
           // float params: 0.01 / Shift 0.1 (the universal scrub); non-float params stay integer.
@@ -392,7 +417,7 @@ export function Inspector(props: {
         key: "tilt",
         label: "tilt",
         group: "Parameters",
-        value: [Number(shape.params.tiltX ?? 0), Number(shape.params.tiltY ?? 0)],
+        value: [Number(object.params.tiltX ?? 0), Number(object.params.tiltY ?? 0)],
         size: 2,
         min: -1,
         max: 1,
@@ -402,13 +427,13 @@ export function Inspector(props: {
     );
   }
 
-  // the shape's own transform — ALWAYS shown (selected vertices get their own section below, they
+  // the object's own transform — ALWAYS shown (selected vertices get their own section below, they
   // don't hijack the Transform fields)
   {
-    const { pos, scale } = shape.transform;
+    const { pos, scale } = object.transform;
     // top-level positions display relative to the origin (pixel - origin); nested stay parent-relative
     const o = state.doc.canvas.origin;
-    const topLevel = findParentId(state.doc.layers, shape.id) === null;
+    const topLevel = findParentId(state.doc.layers, object.id) === null;
     const dx = topLevel ? o.x : 0;
     const dy = topLevel ? o.y : 0;
     fields.push(
@@ -426,16 +451,17 @@ export function Inspector(props: {
         key: "trot",
         label: "rotation",
         group: "Transform",
-        value: toDeg(shape.transform.rotation),
+        value: toDeg(object.transform.rotation),
         onChange: (v) => live((s) => ({ ...s, transform: { ...s.transform, rotation: toRad(wrapDeg(v)) } }), "trot"),
         onCommit: commit,
       }),
       vec({
-        key: "tscale",
+        key: `tscale:${object.id}`, // per-object key so the ephemeral link state resets on reselect
         label: "scale",
         group: "Transform",
         value: [scale.x, scale.y, scale.z],
         size: 3,
+        link: true,
         onChange: (a) =>
           live(
             (s) => ({ ...s, transform: { ...s.transform, scale: new Vector3(clampScale(a[0]!), clampScale(a[1]!), clampScale(a[2]!)) } }),
@@ -449,17 +475,17 @@ export function Inspector(props: {
   // selected control-point vertices get their OWN "Vertex" section. A single MESH vertex is one
   // Vector3 (x, y, height — z is the vertex height); a single non-mesh vertex is x/y; a multi-mesh
   // selection shows just height, applied to every selected vertex so a whole ridge raises at once.
-  const editVerts = selVerts.length > 0 && shape.controlPoints.length > 0;
+  const editVerts = selVerts.length > 0 && object.controlPoints.length > 0;
   if (editVerts) {
     const i0 = selVerts[0]!;
-    const cp = shape.controlPoints[i0];
-    if (selVerts.length === 1 && shape.mesh) {
+    const cp = object.controlPoints[i0];
+    if (selVerts.length === 1 && object.mesh) {
       fields.push(
         vec({
           key: "vpos3",
           label: "position",
           group: "Vertex",
-          value: [cp?.x ?? 0, cp?.y ?? 0, shape.mesh.z[i0] ?? 0],
+          value: [cp?.x ?? 0, cp?.y ?? 0, object.mesh.z[i0] ?? 0],
           size: 3,
           onChange: (a) =>
             live(
@@ -486,13 +512,13 @@ export function Inspector(props: {
           onCommit: commit,
         }),
       );
-    } else if (shape.mesh) {
+    } else if (object.mesh) {
       fields.push(
         num({
           key: "vz",
           label: "height",
           group: "Vertex",
-          value: Number((shape.mesh.z[i0] ?? 0).toFixed(2)),
+          value: Number((object.mesh.z[i0] ?? 0).toFixed(2)),
           onChange: (v) =>
             live(
               (s) => ({ ...s, mesh: s.mesh ? { ...s.mesh, z: s.mesh.z.map((z, i) => (selVerts.includes(i) ? v : z)) } : s.mesh }),
@@ -542,30 +568,30 @@ export function Inspector(props: {
       ) : null}
       <div className="my-3 border-t border-border" />
       <MaskList
-        masks={shape.masks ?? []}
+        masks={object.masks ?? []}
         emptyHint="No masks. Add one to trim this layer."
         onAdd={() => {
-          store.select(shape.id);
+          store.select(object.id);
           setTool("pen");
         }}
         onMode={(id, mode) => {
-          store.update((d) => updateShape(d, shape.id, (s) => ({ ...s, masks: s.masks?.map((mm) => (mm.id === id ? { ...mm, mode } : mm)) })));
+          store.update((d) => updateObject(d, object.id, (s) => ({ ...s, masks: s.masks?.map((mm) => (mm.id === id ? { ...mm, mode } : mm)) })));
           commit();
         }}
         onFollow={(id, follow) => {
-          store.update((d) => updateShape(d, shape.id, (s) => setMaskFollow(s, id, follow)));
+          store.update((d) => updateObject(d, object.id, (s) => setMaskFollow(s, id, follow)));
           commit();
         }}
         onToggleAA={(id, aa) => {
-          store.update((d) => updateShape(d, shape.id, (s) => ({ ...s, masks: s.masks?.map((mm) => (mm.id === id ? { ...mm, hard: !aa } : mm)) })));
+          store.update((d) => updateObject(d, object.id, (s) => ({ ...s, masks: s.masks?.map((mm) => (mm.id === id ? { ...mm, hard: !aa } : mm)) })));
           commit();
         }}
         onToggleVisible={(id, visible) => {
-          store.update((d) => updateShape(d, shape.id, (s) => ({ ...s, masks: s.masks?.map((mm) => (mm.id === id ? { ...mm, visible } : mm)) })));
+          store.update((d) => updateObject(d, object.id, (s) => ({ ...s, masks: s.masks?.map((mm) => (mm.id === id ? { ...mm, visible } : mm)) })));
           commit();
         }}
         onRemove={(id) => {
-          store.update((d) => updateShape(d, shape.id, (s) => ({ ...s, masks: s.masks?.filter((mm) => mm.id !== id) })));
+          store.update((d) => updateObject(d, object.id, (s) => ({ ...s, masks: s.masks?.filter((mm) => mm.id !== id) })));
           commit();
         }}
       />
@@ -574,7 +600,7 @@ export function Inspector(props: {
         <Button
           className="flex-1"
           onClick={() => {
-            store.update((d) => reorderShape(d, shape.id, -1));
+            store.update((d) => reorderObject(d, object.id, -1));
             commit();
           }}
         >
@@ -583,7 +609,7 @@ export function Inspector(props: {
         <Button
           className="flex-1"
           onClick={() => {
-            store.update((d) => reorderShape(d, shape.id, +1));
+            store.update((d) => reorderObject(d, object.id, +1));
             commit();
           }}
         >
@@ -593,7 +619,7 @@ export function Inspector(props: {
           variant="danger"
           className="flex-1"
           onClick={() => {
-            store.update((d) => removeShape(d, shape.id));
+            store.update((d) => removeObject(d, object.id));
             commit();
           }}
         >

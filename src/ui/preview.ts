@@ -1,11 +1,9 @@
 import { decode } from "fast-png";
-import { flattenLayers, type ResolvedShape } from "../field/flatten";
+import { flattenLayers, type ResolvedObject } from "../field/flatten";
 import { buildCompositeWgsl } from "../field/gpu/composite";
-import { packShapes } from "../field/gpu/pack";
+import { packObjects } from "../field/gpu/pack";
 import { GpuFieldRenderer } from "../field/gpu/pipeline";
 import { buildPreview3dWgsl, GRID3D_WGSL, Orbit, orbitMvp } from "../field/gpu/preview3d";
-import { renderField } from "../field/render";
-import { generateFull } from "../field/skyrat/normalmap";
 import type { LayerNode } from "../field/types";
 import type { Viewport } from "./viewport";
 
@@ -30,14 +28,12 @@ export interface PreviewParams {
   normalSigns: { red: number; green: number };
   /** Raster view: doc-res exported pixels (pixelated). false = crisp display-res vector view. */
   raster: boolean;
-  /** Lit mode only: preview the full Skyrat pipeline (alpha-volume + NX override + radial + gradient). */
-  fullPipeline?: boolean;
   /** Orbit camera for the attached 3D inspection canvas; null/undefined skips the pass. */
   orbit3d?: Orbit | null;
 }
 
 /** Owns the WebGPU canvas: the analytic 2D composite + the 3D inspection pass (both evaluate the
- *  field straight from the packed shape buffers — no pre-folded textures). */
+ *  field straight from the packed object buffers — no pre-folded textures). */
 export class PreviewRenderer {
   private gpu!: GpuFieldRenderer;
   private ctx!: GPUCanvasContext;
@@ -47,16 +43,8 @@ export class PreviewRenderer {
   // Decoded diffuse cache keyed on the source byte buffer (stable per open tab). Switching tabs just
   // rebinds the cached texture instead of re-decoding a multi-MP PNG + re-uploading. Bounded by open
   // tabs: when a tab closes its bytes are unreachable, so the entry (and its GPU texture) is GC'd.
-  private diffuseCache = new WeakMap<Uint8Array, { tex: GPUTexture; rgba: Uint8Array }>();
-  // full-pipeline (Skyrat) preview: the diffuse RGBA kept for the CPU generator, the baked normal
-  // texture (rgba32float, doc res), a 1x1 placeholder so the binding is always satisfiable, and a
-  // cache key (layer-tree ref + size) so the heavy CPU pass only re-runs when the inputs change.
-  private diffuseRGBA: Uint8Array | null = null;
-  private skyratTex: GPUTexture | null = null;
-  private skyratDummy: GPUTexture | null = null;
-  private skyratKey = "";
-  private skyratShapes: LayerNode[] | null = null;
-  // packed shape buffers the analytic 2D composite evaluates per fragment (cached on shape-list ref)
+  private diffuseCache = new WeakMap<Uint8Array, GPUTexture>();
+  // packed object buffers the analytic 2D composite evaluates per fragment (cached on object-list ref)
   private recordsBuf: GPUBuffer | null = null;
   private pointsBuf: GPUBuffer | null = null;
   private meshBuf: GPUBuffer | null = null;
@@ -197,7 +185,7 @@ export class PreviewRenderer {
     gub[22] = halfSize * 0.5; // distance at which the grid fully fades
     this.device.queue.writeBuffer(this.uniformsGrid, 0, gub);
 
-    // analytic field eval reuses the SAME packed shape buffers the 2D composite uploads (records/
+    // analytic field eval reuses the SAME packed object buffers the 2D composite uploads (records/
     // points/mesh/masks); no pre-folded field/normal textures. diffuse stays at binding 3.
     const bind = this.device.createBindGroup({
       layout: this.pipeline3d.getBindGroupLayout(0),
@@ -251,9 +239,7 @@ export class PreviewRenderer {
     // Switching back to an already-decoded tab: rebind its texture, skip the decode/build/upload.
     const cached = this.diffuseCache.get(pngBytes);
     if (cached) {
-      this.diffuseTex = cached.tex;
-      this.diffuseRGBA = cached.rgba;
-      this.skyratShapes = null;
+      this.diffuseTex = cached;
       return;
     }
     const decoded = decode(pngBytes);
@@ -275,52 +261,8 @@ export class PreviewRenderer {
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
     });
     this.device.queue.writeTexture({ texture: tex }, rgba, { bytesPerRow: width * 4 }, [width, height]);
-    this.diffuseCache.set(pngBytes, { tex, rgba });
+    this.diffuseCache.set(pngBytes, tex);
     this.diffuseTex = tex;
-    this.diffuseRGBA = rgba; // kept for the CPU Skyrat generator
-    this.skyratShapes = null; // diffuse changed -> rebake the full-pipeline normals
-  }
-
-  /** Lazily (re)bake the full Skyrat normal map and upload it as a doc-res rgba32float texture.
-   *  Cached on (layer-tree ref + size); the CPU pass only re-runs when the shapes or diffuse change. */
-  private ensureSkyratNormals(layers: LayerNode[], docW: number, docH: number, signs: { red: number; green: number }): void {
-    if (!this.diffuseRGBA) return;
-    const key = `${docW}x${docH}`;
-    if (this.skyratTex && this.skyratShapes === layers && this.skyratKey === key) return;
-    // Lambert's NX (canonical normals + authored mask) at doc res, then the full Skyrat pipeline.
-    const nx = renderField(flattenLayers(layers), docW, docH, { supersample: 1 });
-    const { normals } = generateFull(this.diffuseRGBA, docW, docH, nx.normals, nx.mask, signs);
-    const rgba = new Float32Array(docW * docH * 4);
-    for (let i = 0, n = docW * docH; i < n; i++) {
-      rgba[i * 4] = normals[i * 3]!;
-      rgba[i * 4 + 1] = normals[i * 3 + 1]!;
-      rgba[i * 4 + 2] = normals[i * 3 + 2]!;
-      rgba[i * 4 + 3] = 1;
-    }
-    if (!this.skyratTex || this.skyratKey !== key) {
-      this.skyratTex?.destroy();
-      this.skyratTex = this.device.createTexture({
-        size: [docW, docH],
-        format: "rgba32float",
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
-      });
-    }
-    this.device.queue.writeTexture({ texture: this.skyratTex }, rgba, { bytesPerRow: docW * 16 }, [docW, docH]);
-    this.skyratShapes = layers;
-    this.skyratKey = key;
-  }
-
-  /** 1x1 rgba32float placeholder so binding 8 is always present even when full mode is off. */
-  private skyratPlaceholder(): GPUTexture {
-    if (!this.skyratDummy) {
-      this.skyratDummy = this.device.createTexture({
-        size: [1, 1],
-        format: "rgba32float",
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
-      });
-      this.device.queue.writeTexture({ texture: this.skyratDummy }, new Float32Array([0, 0, 1, 1]), { bytesPerRow: 16 }, [1, 1]);
-    }
-    return this.skyratDummy;
   }
 
   /** Coalesce renders to one per animation frame. */
@@ -334,9 +276,9 @@ export class PreviewRenderer {
     });
   }
 
-  /** Pack the shape list into the storage buffers the analytic composite reads. */
-  private packShapeBuffers(resolved: ResolvedShape[]): void {
-    const packed = packShapes(resolved);
+  /** Pack the object list into the storage buffers the analytic composite reads. */
+  private packObjectBuffers(resolved: ResolvedObject[]): void {
+    const packed = packObjects(resolved);
     this.recordsBuf?.destroy();
     this.pointsBuf?.destroy();
     this.meshBuf?.destroy();
@@ -361,16 +303,12 @@ export class PreviewRenderer {
   private renderNow(docW: number, docH: number, p: PreviewParams): void {
     if (!this.diffuseTex) return;
 
-    // pack the shapes BOTH analytic passes evaluate (2D composite + 3D preview); re-pack only when the
+    // pack the objects BOTH analytic passes evaluate (2D composite + 3D preview); re-pack only when the
     // layer tree changes
     if (p.layers !== this.lastShapes2d || !this.recordsBuf) {
-      this.packShapeBuffers(flattenLayers(p.layers));
+      this.packObjectBuffers(flattenLayers(p.layers));
       this.lastShapes2d = p.layers;
     }
-
-    // full-pipeline preview (lit or normal view): bake the Skyrat normals on demand (cached on layers + size)
-    const full = (p.mode === "lit" || p.mode === "normal") && !!p.fullPipeline;
-    if (full) this.ensureSkyratNormals(p.layers, docW, docH, p.normalSigns);
 
     const dpr = this.canvas.width / (this.canvas.getBoundingClientRect().width || this.canvas.width) || 1;
     const ub = new ArrayBuffer(64);
@@ -390,8 +328,7 @@ export class PreviewRenderer {
     f[11] = p.normalSigns.red;
     f[12] = p.normalSigns.green;
     u[13] = p.raster ? 1 : 0;
-    u[14] = full && this.skyratTex ? 1 : 0;
-    f[15] = p.lightEnergy;
+    f[14] = p.lightEnergy;
     this.device.queue.writeBuffer(this.uniforms, 0, ub);
 
     const bind = this.device.createBindGroup({
@@ -404,7 +341,6 @@ export class PreviewRenderer {
         { binding: 5, resource: this.diffuseTex.createView() },
         { binding: 6, resource: { buffer: this.maskLoopsBuf! } },
         { binding: 7, resource: { buffer: this.maskVertsBuf! } },
-        { binding: 8, resource: (full && this.skyratTex ? this.skyratTex : this.skyratPlaceholder()).createView() },
       ],
     });
     const enc = this.device.createCommandEncoder();

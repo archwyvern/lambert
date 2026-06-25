@@ -3,21 +3,21 @@ import type { LambertDoc } from "./schema";
 import { duplicateNode, findParentId, moveNode, removeNode, siblingsOf, updateNode } from "./layerOps";
 import { deleteVertices } from "../field/controlPoints";
 import { deleteVerts } from "../field/meshOps";
-import { createShapeInstance, getShapeType } from "../field/registry";
-import { isShape, type ShapeInstance } from "../field/types";
+import { createObjectInstance, getObjectType } from "../field/registry";
+import { isObject, type ObjectInstance } from "../field/types";
 
 /**
- * Remove `verts` from a shape, dispatching on its kind and guarding each kind's minimum (returns the
- * shape unchanged if the delete would make it degenerate). Mesh re-triangulates; a ring keeps outer
+ * Remove `verts` from an object, dispatching on its kind and guarding each kind's minimum (returns the
+ * object unchanged if the delete would make it degenerate). Mesh re-triangulates; a ring keeps outer
  * >= 3 and inner >= 1 and re-derives ringSplit; polygon >= 3, polyline >= 2. Shared by the gizmo
  * context menu and the Delete key.
  */
-export function removeShapeVertices(s: ShapeInstance, verts: number[]): ShapeInstance {
+export function removeObjectVertices(s: ObjectInstance, verts: number[]): ObjectInstance {
   if (s.mesh) {
     const r = deleteVerts(s.controlPoints, s.mesh, verts);
     return r ? { ...s, controlPoints: r.controlPoints, mesh: r.mesh } : s;
   }
-  const kind = getShapeType(s.typeId).controlPoints.kind;
+  const kind = getObjectType(s.typeId).controlPoints.kind;
   if (kind === "rings") {
     const split = s.ringSplit ?? (s.controlPoints.length >> 1);
     const outerLeft = split - verts.filter((i) => i < split).length;
@@ -26,29 +26,34 @@ export function removeShapeVertices(s: ShapeInstance, verts: number[]): ShapeIns
     const keep = deleteVertices(s.controlPoints, verts, 4);
     return keep ? { ...s, controlPoints: keep, ringSplit: outerLeft } : s;
   }
-  const min = getShapeType(s.typeId).controlPoints.min ?? (kind === "polyline" ? 2 : 3);
+  const min = getObjectType(s.typeId).controlPoints.min ?? (kind === "polyline" ? 2 : 3);
   const keep = deleteVertices(s.controlPoints, verts, min);
   return keep ? { ...s, controlPoints: keep } : s;
 }
 
-export function addShape(doc: LambertDoc, typeId: string, pos: Vector2): LambertDoc {
-  return { ...doc, layers: [...doc.layers, createShapeInstance(typeId, pos)] };
+export function addObject(doc: LambertDoc, typeId: string, pos: Vector2): LambertDoc {
+  return { ...doc, layers: [...doc.layers, createObjectInstance(typeId, pos)] };
 }
 
-export function removeShape(doc: LambertDoc, id: string): LambertDoc {
+/** Append a pre-built object instance (e.g. one created from a palette preset). */
+export function addInstance(doc: LambertDoc, object: ObjectInstance): LambertDoc {
+  return { ...doc, layers: [...doc.layers, object] };
+}
+
+export function removeObject(doc: LambertDoc, id: string): LambertDoc {
   return { ...doc, layers: removeNode(doc.layers, id) };
 }
 
-export function updateShape(
+export function updateObject(
   doc: LambertDoc,
   id: string,
-  patch: (s: ShapeInstance) => ShapeInstance,
+  patch: (s: ObjectInstance) => ObjectInstance,
 ): LambertDoc {
-  return { ...doc, layers: updateNode(doc.layers, id, (n) => (isShape(n) ? patch(n) : n)) };
+  return { ...doc, layers: updateNode(doc.layers, id, (n) => (isObject(n) ? patch(n) : n)) };
 }
 
 /** Move a node by delta in z-order within its parent (+1 = later = on top). */
-export function reorderShape(doc: LambertDoc, id: string, delta: number): LambertDoc {
+export function reorderObject(doc: LambertDoc, id: string, delta: number): LambertDoc {
   const parent = findParentId(doc.layers, id);
   if (parent === undefined) return doc;
   const sibs = siblingsOf(doc.layers, id);
@@ -59,18 +64,18 @@ export function reorderShape(doc: LambertDoc, id: string, delta: number): Lamber
 }
 
 /** Move a node to a final index among its siblings. */
-export function moveShapeTo(doc: LambertDoc, id: string, finalIndex: number): LambertDoc {
+export function moveObjectTo(doc: LambertDoc, id: string, finalIndex: number): LambertDoc {
   const parent = findParentId(doc.layers, id);
   if (parent === undefined) return doc;
   return { ...doc, layers: moveNode(doc.layers, id, parent, finalIndex) };
 }
 
 /**
- * Deep copy a shape with a fresh id, offset by (dx, dy). Mutable containers (params, control
+ * Deep copy an object with a fresh id, offset by (dx, dy). Mutable containers (params, control
  * points, mesh arrays) are cloned; Vector2/Vector3 are immutable so refs are safe to share.
  * structuredClone would strip the Vector class prototypes, so the copy is built by hand.
  */
-export function cloneShape(src: ShapeInstance, dx = 5, dy = 5): ShapeInstance {
+export function cloneObject(src: ObjectInstance, dx = 5, dy = 5): ObjectInstance {
   return {
     ...src,
     id: crypto.randomUUID(),
@@ -92,6 +97,6 @@ export function cloneShape(src: ShapeInstance, dx = 5, dy = 5): ShapeInstance {
   };
 }
 
-export function duplicateShape(doc: LambertDoc, id: string): LambertDoc {
+export function duplicateObject(doc: LambertDoc, id: string): LambertDoc {
   return { ...doc, layers: duplicateNode(doc.layers, id).layers };
 }

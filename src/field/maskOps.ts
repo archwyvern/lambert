@@ -5,7 +5,7 @@ import { influence } from "./combine";
 import type { ResolvedMask } from "./flatten";
 import { sdPolygon } from "./sdf";
 import { fromLocal, toLocal } from "./transform";
-import type { Mask, ShapeInstance } from "./types";
+import type { Mask, ObjectInstance } from "./types";
 import { v2 } from "./vec";
 
 /** A fresh mask from clicked points (corner anchors: manual, zero handles), keep mode. AA is OFF by
@@ -28,8 +28,8 @@ export function bakeMasks(masks: Mask[]): Vector2[][] {
 /**
  * Combined trim coverage at a world point. Within a scope the rule is keepCov * (1 - cutCov), where
  * keepCov defaults to 1 with no keep masks; across scopes the coverages MULTIPLY (intersect) — a
- * shape shows only where its own keeps AND every ancestor group's keeps keep it. Each loop's coverage
- * is the same ½px box-filter (`influence`) over its baked polygon. follow loops test in the shape's
+ * object shows only where its own keeps AND every ancestor group's keeps keep it. Each loop's coverage
+ * is the same ½px box-filter (`influence`) over its baked polygon. follow loops test in the object's
  * resolved-local space (`invAffine` maps world->local; sd scaled by `scaleHint`); world loops test in
  * world space directly. `masks` must be scope-sorted (scope 0 first); `baked` aligns with `masks`.
  */
@@ -74,18 +74,18 @@ export function maskCoverage(
  * Toggle a mask's follow flag, converting its anchor coords through the node's CURRENT transform so
  * the loop does not visually jump: local<->world for the point and for each handle's absolute tip
  * (handles are offsets, so convert p+handle then subtract the new p). Works on any node with a
- * transform + masks (a shape or a group).
+ * transform + masks (an object or a group).
  */
-export function setMaskFollow<T extends { transform: ShapeInstance["transform"]; masks?: Mask[] }>(
-  shape: T,
+export function setMaskFollow<T extends { transform: ObjectInstance["transform"]; masks?: Mask[] }>(
+  object: T,
   maskId: string,
   follow: boolean,
 ): T {
-  if (!shape.masks) return shape;
+  if (!object.masks) return object;
   const conv = follow
-    ? (p: Vector2): Vector2 => toLocal(shape.transform, p)
-    : (p: Vector2): Vector2 => fromLocal(shape.transform, p);
-  const masks = shape.masks.map((m) => {
+    ? (p: Vector2): Vector2 => toLocal(object.transform, p)
+    : (p: Vector2): Vector2 => fromLocal(object.transform, p);
+  const masks = object.masks.map((m) => {
     if (m.id !== maskId || m.follow === follow) return m;
     const anchors = m.anchors.map((a) => {
       const p = conv(a.p);
@@ -95,5 +95,5 @@ export function setMaskFollow<T extends { transform: ShapeInstance["transform"];
     });
     return { ...m, follow, anchors };
   });
-  return { ...shape, masks };
+  return { ...object, masks };
 }

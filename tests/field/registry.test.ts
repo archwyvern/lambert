@@ -1,14 +1,14 @@
 import { expect, test } from "vitest";
 import { v2 } from "../../src/field/vec";
 import {
-  createShapeInstance,
-  defineShapeType,
-  getShapeType,
+  createObjectInstance,
+  defineObjectType,
+  getObjectType,
   numParam,
 } from "../../src/field/registry";
-import type { ShapeType } from "../../src/field/types";
+import type { ObjectType } from "../../src/field/types";
 
-const testType: ShapeType = {
+const testType: ObjectType = {
   id: "test-bump",
   name: "Test Bump",
   params: {
@@ -20,14 +20,14 @@ const testType: ShapeType = {
 };
 
 test("define + get round-trips, duplicate id throws", () => {
-  defineShapeType(testType);
-  expect(getShapeType("test-bump")).toBe(testType);
-  expect(() => defineShapeType(testType)).toThrow(/duplicate/);
-  expect(() => getShapeType("nope")).toThrow(/unknown shape type/);
+  defineObjectType(testType);
+  expect(getObjectType("test-bump")).toBe(testType);
+  expect(() => defineObjectType(testType)).toThrow(/duplicate/);
+  expect(() => getObjectType("nope")).toThrow(/unknown object type/);
 });
 
-test("createShapeInstance seeds defaults from the schema", () => {
-  const inst = createShapeInstance("test-bump", v2(10, 20));
+test("createObjectInstance seeds defaults from the schema", () => {
+  const inst = createObjectInstance("test-bump", v2(10, 20));
   expect(inst.typeId).toBe("test-bump");
   expect(inst.transform.pos).toEqual({ x: 10, y: 20, z: 0 });
   expect(inst.params.height).toBe(24);
