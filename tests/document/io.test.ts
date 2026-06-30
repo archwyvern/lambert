@@ -4,14 +4,30 @@ import { encode } from "fast-png";
 import "../../src/field/objects";
 import { basename, dirname, joinPath } from "../../src/document/paths";
 import { buildNxExport } from "../../src/document/exports";
-import { DEFAULT_NORMAL_DIRS, emptyDoc, serializeDoc } from "../../src/document/schema";
+import { DEFAULT_NORMAL_DIRS, emptyDoc, emptyProjectConfig, serializeDoc, serializeProjectConfig } from "../../src/document/schema";
 import { addObject } from "../../src/document/docOps";
 import { flattenLayers } from "../../src/field/flatten";
 import { renderField } from "../../src/field/render";
-import { hasSidecar, openImageTab, saveTab } from "../../src/document/io";
-import { sidecarPath } from "../../src/document/workspace";
+import {
+  exportTabNx,
+  newProjectFlow,
+  openDocTab,
+  openProjectByPath,
+  openProjectFlow,
+  saveTab,
+} from "../../src/document/io";
+import { DocumentStore } from "../../src/document/store";
+import { PROJECT_FILE, type Tab } from "../../src/document/workspace";
 import type { Host } from "../../src/ui/host";
 import { v2 } from "../../src/field/vec";
+
+// An untitled tab (no docPath) built directly — exercises saveTab's save-as path.
+const untitledTab = (uri: string, w: number, h: number, bytes: Uint8Array): Tab => ({
+  id: "t1",
+  docPath: null,
+  store: new DocumentStore(emptyDoc(uri, w, h), null),
+  diffuse: { bytes },
+});
 
 test("posix path helpers", () => {
   expect(dirname("/a/b/c.png")).toBe("/a/b");
@@ -22,6 +38,8 @@ test("posix path helpers", () => {
 
 const gray = (w: number, h: number) => encode({ width: w, height: h, data: new Uint8Array(w * h * 4).fill(128) });
 
+// fakeHost: `files` is keyed by both filesystem paths (readFile) and full URLs (fetchUrl), so a test
+// can stage either a local diffuse or a remote one.
 function fakeHost(files: Record<string, Uint8Array>): Host {
   return {
     openDialog: () => Promise.resolve(null),
@@ -35,9 +53,16 @@ function fakeHost(files: Record<string, Uint8Array>): Host {
       files[p] = d;
       return Promise.resolve();
     },
+    fetchUrl: (url) => {
+      const f = files[url];
+      return f ? Promise.resolve(f) : Promise.reject(new Error(`offline ${url}`));
+    },
     pathExists: (p) => Promise.resolve(p in files),
     loadSession: () => Promise.resolve(null),
     saveSession: () => Promise.resolve(),
+    notifyProjectOpened: () => {},
+    onOpenProjectPath: () => {},
+    takePendingOpen: () => Promise.resolve(null),
     onMenuAction: () => {},
     guardClose: () => {},
     onConfirmClose: () => {},
@@ -49,65 +74,120 @@ function fakeHost(files: Record<string, Uint8Array>): Host {
   };
 }
 
-test("openImageTab on an image without a sidecar yields an empty doc and null docPath", async () => {
-  const files = { "/p/ship.png": gray(32, 16) };
-  const tab = await openImageTab(fakeHost(files), "/p/ship.png");
-  expect(tab.docPath).toBe(null);
-  expect(tab.store.state.doc.layers.length).toBe(0);
-  expect(tab.store.state.doc.source).toEqual({ path: "ship.png", width: 32, height: 16 });
-  expect(tab.diffuse.dir).toBe("/p");
-});
-
-test("openImageTab loads an existing .lnb sidecar", async () => {
-  const doc = emptyDoc("ship.png", 32, 16);
+test("openDocTab resolves a file:// diffuse and builds a tab", async () => {
+  const doc = emptyDoc("file:///art/ship.df.png", 32, 16);
   const files = {
-    "/p/ship.png": gray(32, 16),
-    "/p/ship.lnb": new TextEncoder().encode(serializeDoc(doc)),
+    "/p/ship.lmb": new TextEncoder().encode(serializeDoc(doc)),
+    "/art/ship.df.png": gray(32, 16),
   };
-  const tab = await openImageTab(fakeHost(files), "/p/ship.png");
-  expect(tab.docPath).toBe("/p/ship.lnb");
+  const tab = await openDocTab(fakeHost(files), "/p/ship.lmb");
+  expect(tab.docPath).toBe("/p/ship.lmb");
+  expect(tab.id).toBeTruthy();
+  expect(tab.diffuse.bytes.length).toBeGreaterThan(0);
   expect(tab.store.state.doc.source.width).toBe(32);
 });
 
-test("openImageTab rejects on dimension mismatch (NX contract)", async () => {
-  const doc = emptyDoc("ship.png", 64, 64);
+test("openDocTab rejects on dimension mismatch (NX contract)", async () => {
+  const doc = emptyDoc("file:///art/ship.df.png", 64, 64);
   const files = {
-    "/p/ship.png": gray(32, 32),
-    "/p/ship.lnb": new TextEncoder().encode(serializeDoc(doc)),
+    "/p/ship.lmb": new TextEncoder().encode(serializeDoc(doc)),
+    "/art/ship.df.png": gray(32, 32),
   };
-  await expect(openImageTab(fakeHost(files), "/p/ship.png")).rejects.toThrow(/64x64/);
+  await expect(openDocTab(fakeHost(files), "/p/ship.lmb")).rejects.toThrow(/64x64/);
 });
 
-test("saveTab writes a .lnb, migrating a legacy .lambert sidecar", async () => {
-  const doc = emptyDoc("ship.png", 8, 8);
-  const files: Record<string, Uint8Array> = {
-    "/p/ship.png": gray(8, 8),
-    "/p/ship.lambert": new TextEncoder().encode(serializeDoc(doc)), // legacy sidecar
+test("saveTab writes the tab's docPath when it has one", async () => {
+  const doc = emptyDoc("file:///art/ship.df.png", 8, 8);
+  const files = { "/p/ship.lmb": new TextEncoder().encode(serializeDoc(doc)), "/art/ship.df.png": gray(8, 8) };
+  const host = fakeHost(files);
+  const tab = await openDocTab(host, "/p/ship.lmb");
+  expect(await saveTab(host, tab, "/p")).toBe("/p/ship.lmb");
+});
+
+test("saveTab on an untitled tab uses the save dialog, defaulting to the source stem .lmb", async () => {
+  const files: Record<string, Uint8Array> = { "/art/6powercoil.df.png": gray(8, 8) };
+  let defaulted: string | undefined;
+  const host: Host = {
+    ...fakeHost(files),
+    saveDialog: (opts) => {
+      defaulted = opts.defaultPath;
+      return Promise.resolve("/p/coil.lmb");
+    },
+    writeFile: (p, d) => {
+      files[p] = d;
+      return Promise.resolve();
+    },
   };
-  const host = fakeHost(files);
-  const tab = await openImageTab(host, "/p/ship.png");
-  expect(tab.docPath).toBe("/p/ship.lambert"); // resolved the legacy one
-  const written = await saveTab(host, tab);
-  expect(written).toBe("/p/ship.lnb");
-  expect("/p/ship.lnb" in files).toBe(true);
-  expect(tab.docPath).toBe("/p/ship.lnb");
-  expect(sidecarPath("/p/ship.png")).toBe("/p/ship.lnb");
+  const tab = untitledTab("file:///art/6powercoil.df.png", 8, 8, gray(8, 8));
+  const written = await saveTab(host, tab, "/p");
+  expect(written).toBe("/p/coil.lmb");
+  expect(tab.docPath).toBe("/p/coil.lmb");
+  expect(defaulted).toBe("/p/6powercoil.lmb");
 });
 
-test("hasSidecar reflects whether any sidecar exists", async () => {
-  const files = { "/p/a.png": gray(4, 4), "/p/b.png": gray(4, 4), "/p/b.lnb": new Uint8Array([1]) };
-  const host = fakeHost(files);
-  expect(await hasSidecar(host, "/p/a.png")).toBe(false);
-  expect(await hasSidecar(host, "/p/b.png")).toBe(true);
+test("saveTab returns null when the save dialog is cancelled", async () => {
+  const host = fakeHost({}); // default saveDialog resolves null
+  const tab = untitledTab("file:///art/x.df.png", 4, 4, gray(4, 4));
+  expect(await saveTab(host, tab, "/p")).toBe(null);
+  expect(tab.docPath).toBe(null);
 });
 
-test("buildNxExport: nx bytes + sibling path + empty-mask warning", () => {
-  let doc = emptyDoc("hull.df.png", 32, 32);
-  const empty = buildNxExport(doc, renderField(flattenLayers(doc.layers), 32, 32, { supersample: 1 }), "/p/hull.df.png", DEFAULT_NORMAL_DIRS);
+test("exportTabNx refuses an untitled doc (must be saved first)", async () => {
+  const tab = untitledTab("file:///art/x.df.png", 8, 8, gray(8, 8));
+  await expect(exportTabNx(fakeHost({}), tab, emptyProjectConfig())).rejects.toThrow(/Save the document/);
+});
+
+test("openProjectByPath reads the marker from a known folder, no dialog", async () => {
+  const files = { [`/proj/${PROJECT_FILE}`]: new TextEncoder().encode(serializeProjectConfig(emptyProjectConfig())) };
+  const opened = await openProjectByPath(fakeHost(files), "/proj");
+  expect(opened.projectPath).toBe("/proj");
+  expect(opened.config.schemaVersion).toBe(1);
+});
+
+test("openProjectByPath throws when the project marker is gone (stale recent → caller drops it)", async () => {
+  await expect(openProjectByPath(fakeHost({}), "/gone")).rejects.toThrow(/isn't a Lambert project/);
+});
+
+test("newProjectFlow creates project.lambert in the chosen folder", async () => {
+  const files: Record<string, Uint8Array> = {};
+  const host = { ...fakeHost(files), openFolderDialog: () => Promise.resolve("/new") };
+  const opened = await newProjectFlow(host);
+  expect(opened?.projectPath).toBe("/new");
+  expect(`/new/${PROJECT_FILE}` in files).toBe(true); // marker written
+});
+
+test("openProjectFlow opens an existing project folder", async () => {
+  const files = { [`/proj/${PROJECT_FILE}`]: new TextEncoder().encode(serializeProjectConfig(emptyProjectConfig())) };
+  const host = { ...fakeHost(files), openFolderDialog: () => Promise.resolve("/proj") };
+  const opened = await openProjectFlow(host);
+  expect(opened?.projectPath).toBe("/proj");
+});
+
+test("openProjectFlow accepts a selected project.lambert file, opening its folder", async () => {
+  const files = { [`/proj/${PROJECT_FILE}`]: new TextEncoder().encode(serializeProjectConfig(emptyProjectConfig())) };
+  const host = { ...fakeHost(files), openFolderDialog: () => Promise.resolve(`/proj/${PROJECT_FILE}`) };
+  const opened = await openProjectFlow(host);
+  expect(opened?.projectPath).toBe("/proj"); // resolved the marker file to its directory
+});
+
+test("openProjectFlow refuses a folder without project.lambert — no silent create", async () => {
+  const files: Record<string, Uint8Array> = {};
+  const host = { ...fakeHost(files), openFolderDialog: () => Promise.resolve("/empty") };
+  await expect(openProjectFlow(host)).rejects.toThrow(/isn't a Lambert project/);
+  expect(`/empty/${PROJECT_FILE}` in files).toBe(false); // nothing was written
+});
+
+test("openProjectFlow returns null when the folder dialog is cancelled", async () => {
+  expect(await openProjectFlow(fakeHost({}))).toBe(null); // fakeHost.openFolderDialog resolves null
+});
+
+test("buildNxExport: nx bytes at the given out path + empty-mask warning", () => {
+  let doc = emptyDoc("file:///art/hull.df.png", 32, 32);
+  const empty = buildNxExport(doc, renderField(flattenLayers(doc.layers), 32, 32, { supersample: 1 }), "/p/hull.nx.png", DEFAULT_NORMAL_DIRS);
   expect(empty.path).toBe("/p/hull.nx.png");
   expect(empty.warning).toMatch(/empty/);
   doc = addObject(doc, ObjectTypeId.Sphere, v2(16, 16));
-  const real = buildNxExport(doc, renderField(flattenLayers(doc.layers), 32, 32, { supersample: 1 }), "/p/hull.df.png", DEFAULT_NORMAL_DIRS);
+  const real = buildNxExport(doc, renderField(flattenLayers(doc.layers), 32, 32, { supersample: 1 }), "/p/hull.nx.png", DEFAULT_NORMAL_DIRS);
   expect(real.warning).toBe(null);
   expect(real.bytes.length).toBeGreaterThan(0);
 });

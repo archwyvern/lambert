@@ -4,8 +4,7 @@ import { bakeMaskLoop, bezierAnchor } from "./bezier";
 import { influence } from "./combine";
 import type { ResolvedMask } from "./flatten";
 import { sdPolygon } from "./sdf";
-import { fromLocal, toLocal } from "./transform";
-import type { Mask, ObjectInstance } from "./types";
+import type { Mask } from "./types";
 import { v2 } from "./vec";
 
 /** A fresh mask from clicked points (corner anchors: manual, zero handles), keep mode. AA is OFF by
@@ -71,29 +70,38 @@ export function maskCoverage(
 }
 
 /**
- * Toggle a mask's follow flag, converting its anchor coords through the node's CURRENT transform so
- * the loop does not visually jump: local<->world for the point and for each handle's absolute tip
- * (handles are offsets, so convert p+handle then subtract the new p). Works on any node with a
- * transform + masks (an object or a group).
+ * Re-express one mask's anchors in the other space (object-local <-> world) so flipping its `follow`
+ * flag doesn't visually move the loop. `worldAffine`/`invWorld` are the OWNING node's RESOLVED world
+ * frame ({@link nodeFrames}) — the SAME frame the eval and gizmo use, so it stays correct when the node
+ * sits under transformed ancestors (a grouped object, or a nested group's own mask); the node's own
+ * transform alone is not enough. Handles are offsets, so each absolute tip (p+handle) is converted and
+ * the offset re-derived from the new p.
  */
-export function setMaskFollow<T extends { transform: ObjectInstance["transform"]; masks?: Mask[] }>(
-  object: T,
+export function setMaskSpace(mask: Mask, follow: boolean, worldAffine: Affine, invWorld: Affine): Mask {
+  if (mask.follow === follow) return mask;
+  const conv = follow
+    ? (p: Vector2): Vector2 => affineApply(invWorld, p) // world -> local
+    : (p: Vector2): Vector2 => affineApply(worldAffine, p); // local -> world
+  const anchors = mask.anchors.map((a) => {
+    const p = conv(a.p);
+    const out = conv(v2(a.p.x + a.hOut.x, a.p.y + a.hOut.y));
+    const inn = conv(v2(a.p.x + a.hIn.x, a.p.y + a.hIn.y));
+    return { ...a, p, hOut: v2(out.x - p.x, out.y - p.y), hIn: v2(inn.x - p.x, inn.y - p.y) };
+  });
+  return { ...mask, follow, anchors };
+}
+
+/** Set one mask's follow flag on a node, converting its anchors through the node's world frame. */
+export function setMaskFollow<T extends { masks?: Mask[] }>(
+  node: T,
   maskId: string,
   follow: boolean,
+  worldAffine: Affine,
+  invWorld: Affine,
 ): T {
-  if (!object.masks) return object;
-  const conv = follow
-    ? (p: Vector2): Vector2 => toLocal(object.transform, p)
-    : (p: Vector2): Vector2 => fromLocal(object.transform, p);
-  const masks = object.masks.map((m) => {
-    if (m.id !== maskId || m.follow === follow) return m;
-    const anchors = m.anchors.map((a) => {
-      const p = conv(a.p);
-      const out = conv(v2(a.p.x + a.hOut.x, a.p.y + a.hOut.y));
-      const inn = conv(v2(a.p.x + a.hIn.x, a.p.y + a.hIn.y));
-      return { ...a, p, hOut: v2(out.x - p.x, out.y - p.y), hIn: v2(inn.x - p.x, inn.y - p.y) };
-    });
-    return { ...m, follow, anchors };
-  });
-  return { ...object, masks };
+  if (!node.masks) return node;
+  return {
+    ...node,
+    masks: node.masks.map((m) => (m.id === maskId ? setMaskSpace(m, follow, worldAffine, invWorld) : m)),
+  };
 }

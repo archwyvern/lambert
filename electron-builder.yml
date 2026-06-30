@@ -13,6 +13,13 @@ files:
   - package.json
 asar: true
 
+# Double-clicking a project.lambert (or any .lambert) opens it in Lambert. The main process resolves
+# a project.lambert path to its folder and opens the project; the renderer validates the marker.
+fileAssociations:
+  - ext: lambert
+    name: Lambert Project
+    role: Editor
+
 # Draft GitHub release per tag (electron-builder default releaseType: draft). The CI publishes here.
 publish:
   provider: github

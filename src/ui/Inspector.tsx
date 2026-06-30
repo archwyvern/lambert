@@ -1,7 +1,7 @@
 import type { DocumentStore, EditorState } from "../document/store";
 import type { NormalDirs } from "../document/schema";
 import { removeObject, reorderObject, updateObject } from "../document/docOps";
-import { findNode, findParentId, updateNode } from "../document/layerOps";
+import { findNode, findParentId, nodeFrames, updateNode } from "../document/layerOps";
 import { isGroup, isObject } from "../field/types";
 import { polygonStats, regularPolygon, regularPolygonAligned, resamplePolyline, ringPhase } from "../field/controlPoints";
 import { setMaskFollow } from "../field/maskOps";
@@ -143,7 +143,16 @@ export function Inspector(props: {
             setTool("pen");
           }}
           onMode={(id, mode) => patchGMasks((n) => ({ ...n, masks: n.masks?.map((mm) => (mm.id === id ? { ...mm, mode } : mm)) }))}
-          onFollow={(id, follow) => patchGMasks((n) => setMaskFollow(n, id, follow))}
+          onFollow={(id, follow) => {
+            store.update((d) => {
+              const { worldAffine, invWorld } = nodeFrames(d.layers, gid);
+              return {
+                ...d,
+                layers: updateNode(d.layers, gid, (n) => (isGroup(n) ? setMaskFollow(n, id, follow, worldAffine, invWorld) : n)),
+              };
+            });
+            commitG();
+          }}
           onToggleAA={(id, aa) => patchGMasks((n) => ({ ...n, masks: n.masks?.map((mm) => (mm.id === id ? { ...mm, hard: !aa } : mm)) }))}
           onToggleVisible={(id, visible) => patchGMasks((n) => ({ ...n, masks: n.masks?.map((mm) => (mm.id === id ? { ...mm, visible } : mm)) }))}
           onRemove={(id) => patchGMasks((n) => ({ ...n, masks: n.masks?.filter((mm) => mm.id !== id) }))}
@@ -227,7 +236,7 @@ export function Inspector(props: {
       <div>
         <div className="mb-2 border-b border-border pb-1.5 text-md font-semibold text-fg">Document</div>
         <p className="mb-2 px-2 text-sm text-fg-mid">
-          {doc.source.path} · {doc.source.width}×{doc.source.height}
+          {doc.source.uri.split("/").pop()} · {doc.source.width}×{doc.source.height}
         </p>
         <PropertyInspector fields={fields} sections={[{ name: "Canvas" }, { name: "Normal Directions" }]} />
         <div className="mt-1 mb-2 flex gap-1 px-2">
@@ -579,7 +588,10 @@ export function Inspector(props: {
           commit();
         }}
         onFollow={(id, follow) => {
-          store.update((d) => updateObject(d, object.id, (s) => setMaskFollow(s, id, follow)));
+          store.update((d) => {
+            const { worldAffine, invWorld } = nodeFrames(d.layers, object.id);
+            return updateObject(d, object.id, (s) => setMaskFollow(s, id, follow, worldAffine, invWorld));
+          });
           commit();
         }}
         onToggleAA={(id, aa) => {

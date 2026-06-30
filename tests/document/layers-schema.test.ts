@@ -6,7 +6,7 @@ import { isGroup } from "../../src/field/types";
 
 const docJson = JSON.stringify({
   schemaVersion: 1,
-  source: { path: "a.png", width: 8, height: 8 },
+  source: { uri: "a.png", width: 8, height: 8 },
   layers: [
     {
       id: "s1",

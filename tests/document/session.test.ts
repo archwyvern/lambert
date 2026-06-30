@@ -15,20 +15,28 @@ const view = {
   raster: false,
 };
 
-function tab(imagePath: string, docPath: string | null, dirty: boolean, selectedId: string | null = null): TabSession {
-  return { imagePath, docPath, dirty, doc: addObject(emptyDoc("hull.png", 64, 64), ObjectTypeId.Sphere, v2(10, 10)), view, selectedId };
+function tab(id: string, docPath: string | null, dirty: boolean, selectedId: string | null = null): TabSession {
+  return {
+    id,
+    docPath,
+    dirty,
+    doc: addObject(emptyDoc("file:///art/hull.df.png", 64, 64), ObjectTypeId.Sphere, v2(10, 10)),
+    view,
+    selectedId,
+  };
 }
 
 test("workspace session round-trips project, tabs, active index, and hydrates docs", () => {
   const session = {
     projectPath: "/proj",
     activeIndex: 1,
-    tabs: [tab("/proj/a.png", "/proj/a.lnb", false), tab("/proj/b.png", null, true)],
+    tabs: [tab("a", "/proj/a.lmb", false), tab("b", null, true)],
   };
   const s = parseSessionJson(buildSessionJson(session));
   expect(s.projectPath).toBe("/proj");
   expect(s.activeIndex).toBe(1);
   expect(s.tabs.length).toBe(2);
+  expect(s.tabs[0]!.id).toBe("a");
   expect(s.tabs[1]!.docPath).toBe(null);
   expect(s.tabs[1]!.dirty).toBe(true);
   // objects hydrate back into Vector instances (have methods, not plain objects)

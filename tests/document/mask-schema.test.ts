@@ -7,7 +7,7 @@ import type { ObjectInstance } from "../../src/field/types";
 
 const baseDoc = (): LambertDoc => ({
   schemaVersion: 1,
-  source: { path: "a.png", width: 8, height: 8 },
+  source: { uri: "a.png", width: 8, height: 8 },
   canvas: { origin: { x: 4, y: 4 }, guides: [], guidesLocked: false, snapToGuides: false },
   layers: [
     {

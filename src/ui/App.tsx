@@ -1,14 +1,17 @@
 import "./styles.css";
 import { useEffect, useReducer, useRef, useState } from "react";
+import { decode } from "fast-png";
 import { DocumentStore } from "../document/store";
 import { addInstance, duplicateObject, removeObject, removeObjectVertices, updateObject } from "../document/docOps";
 import { createFromPreset } from "../field/presets";
 import { findNode, ungroup, wrapInGroup } from "../document/layerOps";
 import { flattenLayers } from "../field/flatten";
 import { isGroup, isObject } from "../field/types";
-import { emptyDoc, NormalDirs, parseProjectConfig, serializeProjectConfig } from "../document/schema";
-import { exportTabNx, hasSidecar, newProjectFlow, openImageTab, openProjectFlow, saveTab } from "../document/io";
+import { emptyDoc, NormalDirs, parseProjectConfig, serializeDoc, serializeProjectConfig } from "../document/schema";
+import { exportTabNx, newProjectFlow, openDocTab, openProjectByPath, openProjectFlow, saveTab, type OpenedProject } from "../document/io";
+import { resolveDiffuse } from "../document/diffuseSource";
 import { basename, dirname, joinPath } from "../document/paths";
+import { pushRecent, removeRecent, type RecentProject } from "../document/recents";
 import { buildSessionJson, parseSessionJson } from "../document/session";
 import { PROJECT_FILE, Tab, Workspace } from "../document/workspace";
 import { CanvasView } from "./CanvasView";
@@ -24,12 +27,14 @@ import { Library } from "./Library";
 import { Button, SectionLabel } from "./kit";
 import { UpdateNotice } from "./UpdateNotice";
 import { FileExplorer } from "@carapace/shell";
-import type { DirEntry, FileExplorerProps, MenuModel } from "@carapace/shell";
+import type { DirEntry, FileExplorerActions, FileExplorerProps, MenuModel } from "@carapace/shell";
 import { DocumentRegular, FolderRegular, ImageRegular } from "@fluentui/react-icons";
 import { usePersistentState } from "./persist";
-import { Sash, EditorTabs, StatusBar, useConfirm, useToast, EmptyState } from "@carapace/shell";
+import { Sash, EditorTabs, StatusBar, useConfirm, EmptyState } from "@carapace/shell";
 import { Toolbar } from "./Toolbar";
 import { LambertMark } from "./LambertMark";
+import { LaunchScreen } from "./LaunchScreen";
+import { NewDocumentDialog } from "./NewDocumentDialog";
 import { AboutDialog } from "./AboutDialog";
 import type { ViewMode } from "./preview";
 import { VIEW_MODES } from "./preview";
@@ -65,21 +70,26 @@ const DEFAULT_VIEW: ViewState = { mode: "lit", opacity: 1, lightDir: [-0.5, -0.5
 
 export function App(): React.JSX.Element {
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
-  const [views, setViews] = useState<Record<string, ViewState>>({});
-  const [viewports, setViewports] = useState<Record<string, Viewport>>({}); // per-image 2D pan/zoom
-  const [orbits, setOrbits] = useState<Record<string, Orbit>>({}); // per-image 3D camera
+  const [views, setViews] = useState<Record<string, ViewState>>({}); // per-tab (by tab.id) view state
+  const [viewports, setViewports] = useState<Record<string, Viewport>>({}); // per-tab 2D pan/zoom
+  const [orbits, setOrbits] = useState<Record<string, Orbit>>({}); // per-tab 3D camera
   const [tool, setTool] = useState<ToolMode>("select");
   const [selVerts, setSelVerts] = useState<number[]>([]);
   const [showAbout, setShowAbout] = useState(false);
-  const [status, setStatus] = useState<string | null>(null);
+  // New Document = name-first: the explorer's inline editor sets the path, then a modal picks the
+  // diffuse source; the .lmb is written only if the source resolves. newDocPath holds that path.
+  const [newDocPath, setNewDocPath] = useState<string | null>(null);
+  const explorerActions = useRef<FileExplorerActions | null>(null);
+  const [status, setStatus] = useState<{ text: string; tone: "info" | "error" } | null>(null);
   const selVertsRef = useRef(selVerts);
   selVertsRef.current = selVerts;
   const nudgeEndTimer = useRef<ReturnType<typeof setTimeout> | null>(null); // commits a nudge burst's undo group
   const [snap, setSnap] = usePersistentState("snap", true); // global ½px grid snap for all edits
   const [rulers, setRulers] = usePersistentState("rulers", true); // top/left canvas rulers (View > Rulers)
+  const [recents, setRecents] = usePersistentState<RecentProject[]>("recentProjects", []); // launch-screen MRU
+  const [lastDir, setLastDir] = usePersistentState<string | null>("lastProjectDir", null); // open-dialog defaultPath
   const [leftWidth, setLeftWidth] = usePersistentState("panel:left", 220);
   const [rightWidth, setRightWidth] = usePersistentState("panel:right", 288);
-  const toast = useToast();
   const confirm = useConfirm();
   const cam3d = use3DCamera();
   const canvas3dRef = useRef<HTMLCanvasElement>(null);
@@ -91,36 +101,35 @@ export function App(): React.JSX.Element {
   const active = workspace?.active ?? null;
   const state = active?.store.state ?? null;
 
-  const notify = (msg: string, tone: "info" | "error" = "info"): void => toast.notify(msg, { tone });
+  // All transient feedback lands in the status bar — no toasts. Info auto-clears, errors linger longer.
+  const statusTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const notify = (msg: string, tone: "info" | "error" = "info"): void => {
+    setStatus({ text: msg, tone });
+    if (statusTimer.current) clearTimeout(statusTimer.current);
+    statusTimer.current = setTimeout(() => setStatus(null), tone === "error" ? 8000 : 4000);
+  };
   const run = (p: Promise<unknown>): void =>
     void p
       .then((msg) => {
         if (typeof msg === "string") notify(msg);
       })
       .catch((err: unknown) => notify(err instanceof Error ? err.message : String(err), "error"));
-  // transient status-bar message (e.g. "Saved …") — replaces the old save toast; auto-clears
-  const statusTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const flashStatus = (msg: string): void => {
-    setStatus(msg);
-    if (statusTimer.current) clearTimeout(statusTimer.current);
-    statusTimer.current = setTimeout(() => setStatus(null), 4000);
-  };
 
   // re-render whenever the workspace structure or the active document changes
   useEffect(() => (workspace ? workspace.subscribe(forceUpdate) : undefined), [workspace]);
   useEffect(() => (active ? active.store.subscribe(forceUpdate) : undefined), [active]);
   useEffect(() => setSelVerts([]), [state?.selectedId]);
-  useEffect(() => setSelVerts([]), [active?.imagePath]); // drop stale vertex indices when switching tabs
+  useEffect(() => setSelVerts([]), [active?.id]); // drop stale vertex indices when switching tabs
 
   // 3D camera persistence: re-seed the orbit from the per-image saved camera when the active image
   // changes (default framing on first open), and report camera moves back so each image keeps its own
   // angle — survives tab switch + reload, instead of one global camera shared across all images.
   useEffect(() => {
-    if (active) cam3d.setOrbit(orbitsRef.current[active.imagePath] ?? { ...DEFAULT_ORBIT });
+    if (active) cam3d.setOrbit(orbitsRef.current[active.id] ?? { ...DEFAULT_ORBIT });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active?.imagePath]);
+  }, [active?.id]);
   useEffect(() => {
-    if (active) setOrbits((m) => (m[active.imagePath] === cam3d.orbit ? m : { ...m, [active.imagePath]: cam3d.orbit }));
+    if (active) setOrbits((m) => (m[active.id] === cam3d.orbit ? m : { ...m, [active.id]: cam3d.orbit }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cam3d.orbit]);
 
@@ -134,50 +143,157 @@ export function App(): React.JSX.Element {
   const orbitsRef = useRef(orbits);
   orbitsRef.current = orbits;
 
-  const activeView = (active && views[active.imagePath]) || DEFAULT_VIEW;
+  const activeView = (active && views[active.id]) || DEFAULT_VIEW;
   const setActiveView = (fn: (v: ViewState) => ViewState): void => {
     const t = workspaceRef.current?.active;
     if (!t) return;
-    setViews((vs) => ({ ...vs, [t.imagePath]: fn(vs[t.imagePath] ?? DEFAULT_VIEW) }));
+    setViews((vs) => ({ ...vs, [t.id]: fn(vs[t.id] ?? DEFAULT_VIEW) }));
+  };
+
+  // launch-screen recent-projects list. Record on every open (button or restore) so it stays honest;
+  // a failed open self-heals by dropping the dead row.
+  const recordRecent = (path: string): void =>
+    setRecents((rs) => pushRecent(rs, path, basename(path.replace(/\/+$/, "")) || path, Date.now()));
+  const removeRecentProject = (path: string): void => setRecents((rs) => removeRecent(rs, path));
+
+  const enterProject = (opened: OpenedProject): string => {
+    setWorkspace(new Workspace(opened.projectPath, opened.config));
+    setViews({});
+    recordRecent(opened.projectPath);
+    setLastDir(dirname(opened.projectPath)); // reopen the dialog at the project's containing folder next time
+    getHost().notifyProjectOpened(); // grow the welcome window to the remembered editor size
+    return `Opened ${opened.projectPath}`;
   };
 
   const openProject = (which: "open" | "new"): void =>
     run(
       (async () => {
-        const opened = await (which === "new" ? newProjectFlow : openProjectFlow)(getHost());
+        const opened = await (which === "new" ? newProjectFlow : openProjectFlow)(getHost(), lastDir ?? undefined);
         if (!opened) return;
-        setWorkspace(new Workspace(opened.projectPath, opened.config));
-        setViews({});
-        return `Opened ${opened.projectPath}`;
+        return enterProject(opened);
       })(),
     );
 
-  const openImage = (imagePath: string): void => {
+  // one-click reopen from the launch screen; a moved/deleted project drops itself from the list
+  const openRecent = (path: string): void =>
+    run(
+      (async () => {
+        try {
+          return enterProject(await openProjectByPath(getHost(), path));
+        } catch {
+          removeRecentProject(path);
+          throw new Error(`${basename(path)} is no longer available — removed from recent projects`);
+        }
+      })(),
+    );
+
+  // open a project from an explicit folder path — the OS handing us a double-clicked project.lambert
+  const openPath = (dir: string): void => run((async () => enterProject(await openProjectByPath(getHost(), dir)))());
+  const openPathRef = useRef(openPath);
+  openPathRef.current = openPath;
+
+  // open a saved .lmb from the explorer; focus it if already open, else load + resolve its diffuse
+  const openDoc = (docPath: string): void => {
     const ws = workspaceRef.current;
     if (!ws) return;
-    if (ws.indexOf(imagePath) >= 0) {
-      ws.focus(imagePath);
+    const existing = ws.indexByDocPath(docPath);
+    if (existing >= 0) {
+      ws.focus(ws.tabs[existing]!.id);
       return;
     }
     run(
       (async () => {
-        const tab = await openImageTab(getHost(), imagePath);
+        const tab = await openDocTab(getHost(), docPath);
         // a new tab inherits the current tab's view (mode/opacity/light) rather than snapping to the
-        // lit/100% default — so flipping between images keeps the working view.
-        const prevView = (ws.active && viewsRef.current[ws.active.imagePath]) || DEFAULT_VIEW;
-        setViews((vs) => (vs[imagePath] ? vs : { ...vs, [imagePath]: { ...prevView } }));
+        // lit/100% default — so flipping between docs keeps the working view.
+        const prevView = (ws.active && viewsRef.current[ws.active.id]) || DEFAULT_VIEW;
+        setViews((vs) => ({ ...vs, [tab.id]: { ...prevView } }));
         ws.openTab(tab);
       })(),
     );
   };
 
-  const closeImage = async (imagePath: string): Promise<void> => {
+  // New Document (menu / empty-state): start the explorer's inline name editor at the project root.
+  // Naming happens in the tree; beginNewDoc fires on commit with the chosen .lmb path.
+  const newDocument = (): void => explorerActions.current?.startNewFile();
+
+  // explorer committed a new .lmb name → open the source modal for that path (no file written yet)
+  const beginNewDoc = (path: string): void => setNewDocPath(path);
+
+  // keep open tabs in sync when the explorer renames/moves or deletes their .lmb underneath them
+  const reconcileRename = (from: string, to: string): void => {
     const ws = workspaceRef.current;
     if (!ws) return;
-    const t = ws.tabs[ws.indexOf(imagePath)];
+    let changed = false;
+    for (const t of ws.tabs) {
+      if (!t.docPath) continue;
+      const next = t.docPath === from ? to : t.docPath.startsWith(from + "/") ? to + t.docPath.slice(from.length) : null;
+      if (next) {
+        t.docPath = next;
+        t.store.setDocPath(next);
+        changed = true;
+      }
+    }
+    if (changed) ws.notify();
+  };
+  const reconcileDelete = (paths: string[]): void => {
+    const ws = workspaceRef.current;
+    if (!ws) return;
+    const gone = (p: string): boolean => paths.some((d) => p === d || p.startsWith(d + "/"));
+    for (const t of [...ws.tabs]) if (t.docPath && gone(t.docPath)) ws.closeTab(t.id);
+  };
+
+  // source chosen → write the .lmb ONLY if the diffuse resolves + decodes; otherwise leave no file
+  const createDoc = (uri: string): void => {
+    const path = newDocPath;
+    setNewDocPath(null);
+    const ws = workspaceRef.current;
+    if (!ws || !path) return;
+    run(
+      (async () => {
+        const bytes = await resolveDiffuse(getHost(), uri); // throws on bad source → nothing written
+        const d = decode(bytes); // validates it's a real image; records dims
+        await getHost().writeFile(path, new TextEncoder().encode(serializeDoc(emptyDoc(uri, d.width, d.height))));
+        const tab = await openDocTab(getHost(), path);
+        const prevView = (ws.active && viewsRef.current[ws.active.id]) || DEFAULT_VIEW;
+        setViews((vs) => ({ ...vs, [tab.id]: { ...prevView } }));
+        ws.openTab(tab);
+        return `Created ${basename(path)}`;
+      })(),
+    );
+  };
+
+  // Reload the active doc's diffuse from its source (refresh remote cache), re-validating dims
+  const reloadDiffuse = (): void => {
+    const ws = workspaceRef.current;
+    const t = ws?.active;
+    if (!ws || !t) return;
+    run(
+      (async () => {
+        const doc = t.store.state.doc;
+        const bytes = await resolveDiffuse(getHost(), doc.source.uri, { refresh: true });
+        const d = decode(bytes);
+        if (d.width !== doc.source.width || d.height !== doc.source.height) {
+          throw new Error(
+            `reloaded diffuse is ${d.width}x${d.height} but the document expects ` +
+              `${doc.source.width}x${doc.source.height} — the NX contract requires an exact match`,
+          );
+        }
+        t.diffuse.bytes = bytes; // new array → preview's WeakMap<bytes,tex> cache misses → re-decode
+        ws.notify();
+        return "Reloaded diffuse";
+      })(),
+    );
+  };
+
+  const closeDoc = async (id: string): Promise<void> => {
+    const ws = workspaceRef.current;
+    if (!ws) return;
+    const t = ws.tabs[ws.indexById(id)];
     if (t?.store.state.dirty) {
+      const name = t.docPath ? basename(t.docPath) : "Untitled document";
       const r = await confirm({
-        title: `${basename(imagePath)} has unsaved changes`,
+        title: `${name} has unsaved changes`,
         message: "Close anyway? Your unsaved changes will be lost.",
         confirmLabel: "Close",
         cancelLabel: "Cancel",
@@ -185,15 +301,17 @@ export function App(): React.JSX.Element {
       });
       if (r !== "confirm") return;
     }
-    ws.closeTab(imagePath);
+    ws.closeTab(id);
   };
 
   const saveActive = (): void => {
     const ws = workspaceRef.current;
     const t = ws?.active;
     if (!ws || !t) return;
-    saveTab(getHost(), t)
-      .then((p) => flashStatus(`Saved ${basename(p)}`))
+    saveTab(getHost(), t, ws.projectPath)
+      .then((p) => {
+        if (p) notify(`Saved ${basename(p)}`); // null = save-as dialog cancelled
+      })
       .catch((err: unknown) => notify(err instanceof Error ? err.message : String(err), "error"));
   };
 
@@ -202,8 +320,9 @@ export function App(): React.JSX.Element {
     if (!ws) return;
     void (async () => {
       const dirty = ws.tabs.filter((t) => t.store.state.dirty);
-      for (const t of dirty) await saveTab(getHost(), t);
-      flashStatus(`Saved ${dirty.length} file${dirty.length === 1 ? "" : "s"}`);
+      let saved = 0;
+      for (const t of dirty) if (await saveTab(getHost(), t, ws.projectPath)) saved += 1;
+      notify(`Saved ${saved} file${saved === 1 ? "" : "s"}`);
     })().catch((err: unknown) => notify(err instanceof Error ? err.message : String(err), "error"));
   };
 
@@ -245,14 +364,14 @@ export function App(): React.JSX.Element {
       projectPath: ws.projectPath,
       activeIndex: ws.activeIndex,
       tabs: ws.tabs.map((t) => ({
-        imagePath: t.imagePath,
+        id: t.id,
         docPath: t.docPath,
         dirty: t.store.state.dirty,
         doc: t.store.state.doc,
-        view: vs[t.imagePath] ?? DEFAULT_VIEW,
+        view: vs[t.id] ?? DEFAULT_VIEW,
         selectedId: t.store.state.selectedId,
-        viewport: vpts[t.imagePath],
-        orbit: obs[t.imagePath],
+        viewport: vpts[t.id],
+        orbit: obs[t.id],
       })),
     });
   };
@@ -268,6 +387,10 @@ export function App(): React.JSX.Element {
         return openProject("new");
       case "open-project":
         return openProject("open");
+      case "new-document":
+        return newDocument();
+      case "reload-diffuse":
+        return reloadDiffuse();
       case "save":
         return saveActive();
       case "save-all":
@@ -352,12 +475,20 @@ export function App(): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // session restore: reopen the last project and its tabs
+  // session restore (+ OS open): reopen the last project and its tabs — unless the OS handed us a
+  // project to open (double-clicked project.lambert), which wins. Also register the live "open with"
+  // push so an already-running window opens a freshly double-clicked project.
   useEffect(() => {
     if (new URLSearchParams(location.search).has("demo")) return;
+    getHost().onOpenProjectPath((dir) => openPathRef.current(dir));
     void (async () => {
       try {
         const host = getHost();
+        const pending = await host.takePendingOpen();
+        if (pending) {
+          openPathRef.current(pending);
+          return;
+        }
         const json = await host.loadSession();
         if (!json) return;
         const s = parseSessionJson(json);
@@ -370,21 +501,26 @@ export function App(): React.JSX.Element {
         const restoredViewports: Record<string, Viewport> = {};
         const restoredOrbits: Record<string, Orbit> = {};
         for (const ts of s.tabs) {
-          const bytes = await host.readFile(ts.imagePath);
-          const store = new DocumentStore(ts.doc, ts.docPath);
-          if (ts.dirty) store.reset(ts.doc, ts.docPath, { dirty: true });
-          if (ts.selectedId && findNode(ts.doc.layers, ts.selectedId)) store.select(ts.selectedId);
-          const tab: Tab = { imagePath: ts.imagePath, docPath: ts.docPath, store, diffuse: { bytes, dir: dirname(ts.imagePath) } };
-          ws.openTab(tab);
-          restoredViews[ts.imagePath] = { ...DEFAULT_VIEW, ...ts.view }; // backfill fields added since the session was saved
-          if (ts.viewport) restoredViewports[ts.imagePath] = ts.viewport;
-          if (ts.orbit) restoredOrbits[ts.imagePath] = ts.orbit;
+          try {
+            const bytes = await resolveDiffuse(host, ts.doc.source.uri); // file:// or cached http(s)
+            const store = new DocumentStore(ts.doc, ts.docPath);
+            if (ts.dirty) store.reset(ts.doc, ts.docPath, { dirty: true });
+            if (ts.selectedId && findNode(ts.doc.layers, ts.selectedId)) store.select(ts.selectedId);
+            const tab: Tab = { id: ts.id, docPath: ts.docPath, store, diffuse: { bytes } };
+            ws.openTab(tab);
+            restoredViews[ts.id] = { ...DEFAULT_VIEW, ...ts.view }; // backfill fields added since the session was saved
+            if (ts.viewport) restoredViewports[ts.id] = ts.viewport;
+            if (ts.orbit) restoredOrbits[ts.id] = ts.orbit;
+          } catch {
+            // diffuse moved (file://) or offline + uncached (http) — skip this tab, keep the rest
+          }
         }
         if (ws.tabs.length > 0) ws.activeIndex = Math.min(Math.max(0, s.activeIndex), ws.tabs.length - 1);
         setWorkspace(ws);
         setViews(restoredViews);
         setViewports(restoredViewports);
         setOrbits(restoredOrbits);
+        recordRecent(s.projectPath);
         notify(`Restored ${s.projectPath}`);
       } catch {
         // no session, corrupt session, or moved files: start with no project
@@ -431,13 +567,13 @@ export function App(): React.JSX.Element {
           data[i * 4 + 3] = 255;
         }
         const objects = q.has("masked") ? maskedObjects() : q.has("mesh") ? meshObjects() : goldenObjects();
-        const doc = { ...emptyDoc("demo.png", w, h), layers: objects };
+        const doc = { ...emptyDoc("file:///demo/demo.df.png", w, h), layers: objects };
         const ws = new Workspace("/demo", { schemaVersion: 1, normalDirs: { red: "right", green: "up" } });
         const tab: Tab = {
-          imagePath: "/demo/demo.png",
+          id: crypto.randomUUID(),
           docPath: null,
           store: new DocumentStore(doc, null),
-          diffuse: { bytes: encode({ width: w, height: h, data }), dir: "/demo" },
+          diffuse: { bytes: encode({ width: w, height: h, data }) },
         };
         ws.openTab(tab);
         const mode = q.get("mode");
@@ -445,8 +581,9 @@ export function App(): React.JSX.Element {
         if (mode && (VIEW_MODES as string[]).includes(mode)) v.mode = mode as ViewMode;
         if (q.has("raster")) v.raster = true;
         if (q.has("swap")) setSwapped(true);
+        if (q.has("newdoc")) setNewDocPath("/demo/untitled.lmb"); // capture aid: open the source modal
         setWorkspace(ws);
-        setViews({ "/demo/demo.png": v });
+        setViews({ [tab.id]: v });
         const select = q.get("select");
         if (select) tab.store.select(findNode(doc.layers, select)?.id ?? doc.layers[0]?.id ?? null);
         const t = q.get("tool");
@@ -582,7 +719,11 @@ export function App(): React.JSX.Element {
   }, []);
 
   const tabInfos = workspace
-    ? workspace.tabs.map((t) => ({ imagePath: t.imagePath, name: basename(t.imagePath), dirty: t.store.state.dirty }))
+    ? workspace.tabs.map((t) => ({
+        id: t.id,
+        name: t.docPath ? basename(t.docPath) : "untitled",
+        dirty: t.store.state.dirty,
+      }))
     : [];
 
   const hasSel = !!state && state.selectedIds.length > 0;
@@ -592,6 +733,9 @@ export function App(): React.JSX.Element {
       items: [
         { label: "New Project…", shortcut: "Ctrl+Shift+N", run: () => runMenuAction("new-project") },
         { label: "Open Project…", shortcut: "Ctrl+O", run: () => runMenuAction("open-project") },
+        { separator: true },
+        { label: "New Document…", shortcut: "Ctrl+N", enabled: !!workspace, run: () => runMenuAction("new-document") },
+        { label: "Reload Diffuse", enabled: !!active, run: () => runMenuAction("reload-diffuse") },
         { separator: true },
         { label: "Save", shortcut: "Ctrl+S", enabled: !!active, run: () => runMenuAction("save") },
         { label: "Save All", shortcut: "Ctrl+Shift+S", enabled: !!workspace, run: () => runMenuAction("save-all") },
@@ -633,16 +777,19 @@ export function App(): React.JSX.Element {
 
   return (
     <div className="flex h-screen flex-col bg-bg text-base text-fg">
-      <Toolbar
-        menu={menuModel}
-        store={active?.store}
-        state={active && state ? state : undefined}
-        view={activeView}
-        setView={setActiveView}
-        snap={snap}
-        setSnap={setSnap}
-      />
+      {workspace ? (
+        <Toolbar
+          menu={menuModel}
+          store={active?.store}
+          state={active && state ? state : undefined}
+          view={activeView}
+          setView={setActiveView}
+          snap={snap}
+          setSnap={setSnap}
+        />
+      ) : null}
       {showAbout ? <AboutDialog onClose={() => setShowAbout(false)} /> : null}
+      {newDocPath !== null ? <NewDocumentDialog onConfirm={createDoc} onClose={() => setNewDocPath(null)} /> : null}
       <div className="flex min-h-0 flex-1">
         {workspace ? (
           <>
@@ -659,10 +806,17 @@ export function App(): React.JSX.Element {
                   <FileExplorer
                     root={workspace.projectPath}
                     onOpen={(p) => {
-                      if (/\.png$/i.test(p) && !/\.nx\.png$/i.test(p)) openImage(p);
+                      if (/\.lmb$/i.test(p)) openDoc(p);
                     }}
+                    newFile={{ extension: ".lmb", label: "Document" }}
+                    onNewFile={beginNewDoc}
+                    onDidRename={reconcileRename}
+                    onDidDelete={reconcileDelete}
+                    actionsRef={explorerActions}
                     getIcon={fileIcon as FileExplorerProps["getIcon"]}
-                    exclude={(e) => (e.isDir ? IGNORED_DIRS.has(e.name) : /\.(lnb|flatland)$/i.test(e.name))}
+                    // show only .lmb documents + folders. project.lambert is hidden (infra) so it can't be
+                    // renamed/deleted from the tree, which would break the project.
+                    exclude={(e) => (e.isDir ? IGNORED_DIRS.has(e.name) : !/\.lmb$/i.test(e.name))}
                     ariaLabel="Project files"
                     storageKey="lambert.explorer.expanded"
                   />
@@ -676,10 +830,10 @@ export function App(): React.JSX.Element {
         <div className="flex min-w-0 flex-1 flex-col">
           {tabInfos.length > 0 ? (
             <EditorTabs
-              tabs={tabInfos.map((t) => ({ id: t.imagePath, title: t.name, dirty: t.dirty }))}
-              activeId={tabInfos[workspace?.activeIndex ?? -1]?.imagePath ?? null}
+              tabs={tabInfos.map((t) => ({ id: t.id, title: t.name, dirty: t.dirty }))}
+              activeId={tabInfos[workspace?.activeIndex ?? -1]?.id ?? null}
               onSelect={(id) => workspaceRef.current?.focus(id)}
-              onClose={closeImage}
+              onClose={closeDoc}
             />
           ) : null}
           {active && state ? (
@@ -706,9 +860,9 @@ export function App(): React.JSX.Element {
                   orbit3d={cam3d.orbit}
                   normalDirs={workspace!.config.normalDirs}
                   swapped={swapped}
-                  imagePath={active.imagePath}
-                  savedViewport={viewports[active.imagePath]}
-                  onViewportChange={(vp) => setViewports((m) => ({ ...m, [active.imagePath]: vp }))}
+                  tabId={active.id}
+                  savedViewport={viewports[active.id]}
+                  onViewportChange={(vp) => setViewports((m) => ({ ...m, [active.id]: vp }))}
                   setTool={setTool}
                   snap={snap}
                   rulers={rulers}
@@ -750,35 +904,32 @@ export function App(): React.JSX.Element {
                 />
               </div>
             </div>
-          ) : (
+          ) : workspace ? (
             <div className="flex min-h-0 flex-1 bg-[var(--color-viewport-bg)]">
               <EmptyState
                 status="info"
                 icon={<LambertMark className="!h-[108px] !w-[108px]" />}
-                message={
-                  workspace
-                    ? "Open an image from the Explorer to start placing objects."
-                    : "Create a new project or open an existing one to start authoring height fields."
-                }
+                message="Open a .lmb document from the Explorer, or create a New Document."
                 action={
-                  workspace ? undefined : (
-                    <div className="flex gap-2">
-                      <Button variant="primary" onClick={() => openProject("new")}>
-                        New Project
-                      </Button>
-                      <Button variant="ghost" onClick={() => openProject("open")}>
-                        Open Project
-                      </Button>
-                    </div>
-                  )
+                  <Button variant="primary" onClick={newDocument}>
+                    New Document
+                  </Button>
                 }
               />
             </div>
+          ) : (
+            <LaunchScreen
+              recents={recents}
+              onOpenRecent={openRecent}
+              onRemoveRecent={removeRecentProject}
+              onNew={() => openProject("new")}
+              onOpen={() => openProject("open")}
+            />
           )}
         </div>
       </div>
       <StatusBar
-        left={status}
+        left={status ? <span className={status.tone === "error" ? "text-error" : "text-fg-mid"}>{status.text}</span> : null}
         right={state ? `${state.doc.source.width}×${state.doc.source.height} · ${flattenLayers(state.doc.layers).length} objects` : null}
       />
       <UpdateNotice />

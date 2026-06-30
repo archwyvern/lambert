@@ -41,10 +41,3 @@ export function diffuseOpacity(img: {
   for (let i = 0; i < n; i++) out[i] = img.data[i * img.channels + (img.channels - 1)]! > 0 ? 1 : 0;
   return out;
 }
-
-/** hull.df.png -> hull.nx.png; hull.png -> hull.nx.png (strip a .df tag if present). */
-export function nxFileName(diffuseName: string): string {
-  const m = diffuseName.match(/^(.*?)(\.df)?\.png$/i);
-  if (!m) throw new Error(`not a png filename: ${diffuseName}`);
-  return `${m[1]}.nx.png`;
-}

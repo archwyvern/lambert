@@ -29,6 +29,13 @@ test("doc no longer carries normalDirs; a legacy normalDirs field is dropped on 
   expect("normalDirs" in back).toBe(false);
 });
 
+test("source is referenced by uri and round-trips", () => {
+  const doc = emptyDoc("file:///art/6powercoil.df.png", 64, 64);
+  expect(doc.source.uri).toBe("file:///art/6powercoil.df.png");
+  const back = parseDoc(serializeDoc(doc));
+  expect(back.source.uri).toBe("file:///art/6powercoil.df.png");
+});
+
 test("empty doc round-trips", () => {
   const doc = emptyDoc("hull.df.png", 256, 128);
   const back = parseDoc(serializeDoc(doc));

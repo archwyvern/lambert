@@ -1,5 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu } from "electron";
-import { access, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { serveFs } from "@carapace/shell/node";
@@ -36,6 +38,52 @@ const captureIndex = process.argv.indexOf("--capture");
 const capturePath = captureIndex >= 0 ? process.argv[captureIndex + 1] : undefined;
 const queryIndex = process.argv.indexOf("--query");
 const extraQuery = queryIndex >= 0 ? process.argv[queryIndex + 1] : undefined;
+
+// Opening a project by double-clicking its project.lambert (OS file association / "open with").
+// Linux & Windows pass the path in argv; macOS delivers it via the open-file event. A project.lambert
+// file resolves to its containing folder; a folder is passed through (the renderer validates the marker).
+const PROJECT_MARKER = "project.lambert";
+const projectDirFromArg = (arg: string): string =>
+  path.basename(arg) === PROJECT_MARKER ? path.dirname(arg) : arg;
+function projectArgFromArgv(argv: string[]): string | null {
+  const args = argv.slice(1);
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]!;
+    if (a === "--query" || a === "--capture") {
+      i++; // skip the flag's value too
+      continue;
+    }
+    if (a === "." || a.startsWith("-")) continue; // app path / electron switches
+    return projectDirFromArg(a);
+  }
+  return null;
+}
+
+let mainWindow: BrowserWindow | null = null;
+// a project the OS asked us to open, captured before the window/renderer exists; consumed on mount
+let pendingProjectPath: string | null = isAutomation ? null : projectArgFromArgv(process.argv);
+const sendOpenProject = (dir: string): void => mainWindow?.webContents.send("open-project-path", dir);
+
+// macOS "open with" / double-click; may fire before app is ready
+app.on("open-file", (e, p) => {
+  e.preventDefault();
+  const dir = projectDirFromArg(p);
+  if (mainWindow) sendOpenProject(dir);
+  else pendingProjectPath = dir;
+});
+
+// Single instance (packaged only): a second "open project.lambert" focuses the running window and
+// opens there instead of spawning a rival that fights over the session file. Dev & automation launch
+// freely (separate userData → separate lock anyway).
+const gotInstanceLock = !app.isPackaged || isAutomation || app.requestSingleInstanceLock();
+if (!gotInstanceLock) app.quit();
+app.on("second-instance", (_e, argv) => {
+  const dir = projectArgFromArgv(argv);
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.focus();
+  if (dir) sendOpenProject(dir);
+});
 
 // Set just before quitAndInstall so the unsaved-changes close guard lets the window close. Without
 // it, app.quit() is vetoed by the guard, the update never installs, and "Restarting" hangs forever.
@@ -80,6 +128,7 @@ function setupAutoUpdate(win: BrowserWindow) {
 }
 
 app.whenReady().then(() => {
+  if (!gotInstanceLock) return;
   ipcMain.handle("dialog:open", async (_e, opts: { title: string; filters: Electron.FileFilter[] }) => {
     const r = await dialog.showOpenDialog({ title: opts.title, filters: opts.filters, properties: ["openFile"] });
     return r.canceled ? null : r.filePaths[0];
@@ -96,8 +145,32 @@ app.whenReady().then(() => {
     await writeFile(p, data);
   });
 
-  ipcMain.handle("dialog:openFolder", async (_e, opts: { title: string }) => {
-    const r = await dialog.showOpenDialog({ title: opts.title, properties: ["openDirectory"] });
+  // Remote diffuse fetch + cache. Fetched here (no renderer CORS/CSP), cached in userData keyed by a
+  // hash of the URL so a committed .lmb resolves offline once seen. refresh forces a re-fetch.
+  const diffuseCacheDir = path.join(app.getPath("userData"), "diffuse-cache");
+  ipcMain.handle("net:fetchUrl", async (_e, url: string, opts?: { refresh?: boolean }) => {
+    const cacheFile = path.join(diffuseCacheDir, createHash("sha256").update(url).digest("hex"));
+    if (!opts?.refresh && existsSync(cacheFile)) return new Uint8Array(await readFile(cacheFile));
+    let bytes: Uint8Array;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      bytes = new Uint8Array(await res.arrayBuffer());
+    } catch (err) {
+      if (existsSync(cacheFile)) return new Uint8Array(await readFile(cacheFile)); // offline → fall back to cache
+      throw new Error(`couldn't fetch the diffuse (${url}) and it isn't cached: ${String(err)}`);
+    }
+    await mkdir(diffuseCacheDir, { recursive: true });
+    await writeFile(cacheFile, bytes);
+    return bytes;
+  });
+
+  ipcMain.handle("dialog:openFolder", async (_e, opts: { title: string; defaultPath?: string }) => {
+    const r = await dialog.showOpenDialog({
+      title: opts.title,
+      defaultPath: opts.defaultPath,
+      properties: ["openDirectory"],
+    });
     return r.canceled ? null : r.filePaths[0];
   });
   ipcMain.handle("fs:exists", async (_e, p: string) => {
@@ -122,9 +195,44 @@ app.whenReady().then(() => {
     await writeFile(sessionPath, json, "utf8");
   });
 
-  const win = new BrowserWindow({
-    width: 1280,
-    height: 760,
+  // the renderer pulls any OS-requested project (double-clicked project.lambert) once, on mount
+  ipcMain.handle("project:take-pending-open", () => {
+    const dir = pendingProjectPath;
+    pendingProjectPath = null;
+    return dir;
+  });
+
+  // Window geometry: land on the launch screen in a compact, centered "welcome" window, then grow
+  // to the remembered editor bounds once a project opens. When a prior session will auto-restore a
+  // project, skip the welcome size and open straight at the remembered bounds (no resize flash).
+  type Bounds = { width: number; height: number; x?: number; y?: number };
+  const windowStatePath = path.join(app.getPath("userData"), "window.json");
+  const WELCOME_BOUNDS: Bounds = { width: 960, height: 680 };
+  const DEFAULT_EDITOR_BOUNDS: Bounds = { width: 1280, height: 760 };
+  const readJsonSync = <T>(p: string): T | null => {
+    try {
+      return JSON.parse(readFileSync(p, "utf8")) as T;
+    } catch {
+      return null;
+    }
+  };
+  const savedBounds = readJsonSync<Bounds>(windowStatePath);
+  // Only "restoring" if the project still exists — a stale/dead pointer (e.g. a removed demo project)
+  // must fall through to the welcome-sized launch screen, not open editor-sized on nothing.
+  const sessionProjectPath = readJsonSync<{ projectPath?: string | null }>(sessionPath)?.projectPath;
+  const restoringProject = !!sessionProjectPath && existsSync(path.join(sessionProjectPath, PROJECT_MARKER));
+  // welcome size only when we'll actually land on the launch screen — not when a session restores a
+  // project, nor when the OS handed us a project.lambert to open
+  let welcomeMode = !restoringProject && !pendingProjectPath;
+  const initialBounds = welcomeMode ? WELCOME_BOUNDS : (savedBounds ?? DEFAULT_EDITOR_BOUNDS);
+
+  const winOpts: Electron.BrowserWindowConstructorOptions = {
+    width: initialBounds.width,
+    height: initialBounds.height,
+    // the welcome size is also the floor: the window never shrinks below it (the editor may grow,
+    // the home screen has no reason to). Keeps both layouts from breaking when dragged too small.
+    minWidth: WELCOME_BOUNDS.width,
+    minHeight: WELCOME_BOUNDS.height,
     show: !selftest,
     webPreferences: {
       preload: path.join(import.meta.dirname, "../preload/index.mjs"),
@@ -132,6 +240,43 @@ app.whenReady().then(() => {
       // with the renderer sandbox off. contextIsolation stays on.
       sandbox: false,
     },
+  };
+  // restore the saved position too (only in editor mode — welcome mode stays centered)
+  if (!welcomeMode && savedBounds?.x !== undefined && savedBounds.y !== undefined) {
+    winOpts.x = savedBounds.x;
+    winOpts.y = savedBounds.y;
+  }
+  const win = new BrowserWindow(winOpts);
+  mainWindow = win;
+
+  // Persist editor bounds (debounced) so "remembered state" survives restarts. Never while on the
+  // welcome screen (its compact size must not overwrite the editor geometry) or in automation.
+  let boundsSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  const persistBounds = (): void => {
+    if (welcomeMode || isAutomation) return;
+    if (win.isMinimized() || win.isMaximized() || win.isFullScreen()) return;
+    if (boundsSaveTimer) clearTimeout(boundsSaveTimer);
+    boundsSaveTimer = setTimeout(() => {
+      const b = win.getBounds();
+      void writeFile(windowStatePath, JSON.stringify({ width: b.width, height: b.height, x: b.x, y: b.y })).catch(
+        () => {},
+      );
+    }, 400);
+  };
+  win.on("resize", persistBounds);
+  win.on("move", persistBounds);
+
+  // The renderer signals when a project opens; grow the welcome window to the remembered editor size.
+  ipcMain.on("window:enter-project", () => {
+    if (!welcomeMode) return;
+    welcomeMode = false;
+    const b = savedBounds ?? DEFAULT_EDITOR_BOUNDS;
+    if (b.x !== undefined && b.y !== undefined) {
+      win.setBounds({ x: b.x, y: b.y, width: b.width, height: b.height });
+    } else {
+      win.setSize(b.width, b.height);
+      win.center();
+    }
   });
 
   // carapace fs protocol: backs the shared <FileExplorer> (renderer createIpcFs <-> this).
@@ -150,6 +295,9 @@ app.whenReady().then(() => {
         submenu: [
           { label: "New Project…", accelerator: "CmdOrCtrl+Shift+N", click: send("new-project") },
           { label: "Open Project…", accelerator: "CmdOrCtrl+O", click: send("open-project") },
+          { type: "separator" },
+          { label: "New Document…", accelerator: "CmdOrCtrl+N", click: send("new-document") },
+          { label: "Reload Diffuse", click: send("reload-diffuse") },
           { type: "separator" },
           { label: "Save", accelerator: "CmdOrCtrl+S", click: send("save") },
           { label: "Save All", accelerator: "CmdOrCtrl+Shift+S", click: send("save-all") },

@@ -7,12 +7,17 @@ contextBridge.exposeInMainWorld("lambertHost", {
   saveDialog: (opts: unknown) => ipcRenderer.invoke("dialog:save", opts),
   readFile: (path: string) => ipcRenderer.invoke("fs:read", path),
   writeFile: (path: string, data: Uint8Array) => ipcRenderer.invoke("fs:write", path, data),
+  fetchUrl: (url: string, opts?: { refresh?: boolean }) => ipcRenderer.invoke("net:fetchUrl", url, opts),
   openFolderDialog: (opts: unknown) => ipcRenderer.invoke("dialog:openFolder", opts),
   pathExists: (path: string) => ipcRenderer.invoke("fs:exists", path),
   loadSession: () => ipcRenderer.invoke("session:load"),
   saveSession: (json: string) => ipcRenderer.invoke("session:save", json),
   onMenuAction: (cb: (action: string) => void) =>
     ipcRenderer.on("menu:action", (_e, action: string) => cb(action)),
+  notifyProjectOpened: () => ipcRenderer.send("window:enter-project"),
+  onOpenProjectPath: (cb: (dir: string) => void) =>
+    ipcRenderer.on("open-project-path", (_e, dir: string) => cb(dir)),
+  takePendingOpen: () => ipcRenderer.invoke("project:take-pending-open"),
   guardClose: () => ipcRenderer.send("guard-close"),
   onConfirmClose: (cb: () => void) => ipcRenderer.on("confirm-close", cb),
   respondClose: (ok: boolean) => ipcRenderer.send("close-response", ok),

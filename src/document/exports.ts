@@ -1,7 +1,6 @@
-import { encodeNxPng, nxFileName } from "../exporters/nx";
+import { encodeNxPng } from "../exporters/nx";
 import type { RenderResult } from "../field/render";
 import type { LambertDoc, NormalDirs } from "./schema";
-import { basename, dirname, joinPath } from "./paths";
 
 export interface ExportFile {
   path: string;
@@ -9,12 +8,13 @@ export interface ExportFile {
   warning: string | null;
 }
 
-/** NX export next to the diffuse; warns (not errors) on an empty authored mask. The normal-channel
- *  convention is project-level (project.lambert), passed in by the caller. */
+/** NX export at the given output path; warns (not errors) on an empty authored mask. The normal-channel
+ *  convention is project-level (project.lambert), passed in by the caller, as is the output path (named
+ *  from the doc stem next to the `.lmb`, since the diffuse may be remote). */
 export function buildNxExport(
   doc: LambertDoc,
   render: RenderResult,
-  diffusePath: string,
+  nxOutPath: string,
   normalDirs: NormalDirs,
   opaque?: Uint8Array | null,
 ): ExportFile {
@@ -24,7 +24,7 @@ export function buildNxExport(
   const bytes = encodeNxPng(render.normals, render.mask, render.width, render.height, normalDirs, opaque);
   const empty = render.mask.every((m) => m === 0);
   return {
-    path: joinPath(dirname(diffusePath), nxFileName(basename(diffusePath))),
+    path: nxOutPath,
     bytes,
     warning: empty ? "authored mask is empty — this NX changes nothing" : null,
   };

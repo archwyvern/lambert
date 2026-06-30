@@ -17,17 +17,26 @@ export type UpdateEvent =
 export interface Host {
   openDialog(opts: { title: string; filters: FileFilter[] }): Promise<string | null>;
   saveDialog(opts: { title: string; defaultPath?: string; filters: FileFilter[] }): Promise<string | null>;
-  /** Folder picker (project open/new). */
-  openFolderDialog(opts: { title: string }): Promise<string | null>;
+  /** Folder picker (project open/new); defaultPath reopens the dialog at the last-used directory. */
+  openFolderDialog(opts: { title: string; defaultPath?: string }): Promise<string | null>;
   readFile(path: string): Promise<Uint8Array>;
   writeFile(path: string, data: Uint8Array): Promise<void>;
-  /** Whether a path exists (used to detect an image's existing sidecar). */
+  /** Fetch a remote diffuse (main-process fetch, no renderer CORS/CSP), cached in userData by URL hash.
+   *  refresh bypasses the cache. Throws if offline with no cached copy. */
+  fetchUrl(url: string, opts?: { refresh?: boolean }): Promise<Uint8Array>;
+  /** Whether a path exists (project-marker / file checks). */
   pathExists(path: string): Promise<boolean>;
   /** Session memory in Electron userData; null when no prior session exists. */
   loadSession(): Promise<string | null>;
   saveSession(json: string): Promise<void>;
   /** Application-menu actions (open-image/save/export-nx/undo/zoom-fit/...). */
   onMenuAction(cb: (action: string) => void): void;
+  /** Tell main a project opened, so it can grow the compact welcome window to the remembered editor size. */
+  notifyProjectOpened(): void;
+  /** A project folder the OS asked us to open while running (double-clicked project.lambert). */
+  onOpenProjectPath(cb: (dir: string) => void): void;
+  /** Pull (once, on mount) any project folder the OS asked us to open at launch; null if none. */
+  takePendingOpen(): Promise<string | null>;
   /** Tell main this window has a close guard; close events then ask before closing. */
   guardClose(): void;
   onConfirmClose(cb: () => void): void;
