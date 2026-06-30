@@ -68,26 +68,34 @@ function mirrorAffines(mode: GroupLayer["mirror"]): Affine[] {
 /** A mask trims unless it's been disabled (visible === false). */
 const shown = (m: Mask): boolean => m.visible !== false;
 
-/** Bake a group mask into world space through `frame` (anchors are local; handles are offsets), so
- *  it tests as a world (follow=false) mask on every descendant. A pinned mask is already world. */
-function worldBakeMask(m: Mask, frame: Affine, scope: number): ResolvedMask {
-  if (!m.follow) return { ...m, scope };
+/** Bake a mask's anchors through `xf` into world space; the result tests as a world (follow=false)
+ *  mask. Handles are offsets, so each absolute tip (p+handle) is converted and the offset re-derived. */
+function bakeThrough(m: Mask, xf: Affine, scope: number): ResolvedMask {
   const anchors = m.anchors.map((a) => {
-    const p = affineApply(frame, a.p);
-    const out = affineApply(frame, v2(a.p.x + a.hOut.x, a.p.y + a.hOut.y));
-    const inn = affineApply(frame, v2(a.p.x + a.hIn.x, a.p.y + a.hIn.y));
+    const p = affineApply(xf, a.p);
+    const out = affineApply(xf, v2(a.p.x + a.hOut.x, a.p.y + a.hOut.y));
+    const inn = affineApply(xf, v2(a.p.x + a.hIn.x, a.p.y + a.hIn.y));
     return { ...a, p, hOut: v2(out.x - p.x, out.y - p.y), hIn: v2(inn.x - p.x, inn.y - p.y) };
   });
   return { ...m, follow: false, anchors, scope };
 }
 
+/** Resolve an ANCESTOR-group mask to world for a descendant. follow (local) masks bake through the
+ *  group's full frame (so they reflect with a mirror copy); pinned (world) masks bake through the
+ *  copy's world reflection `frame ∘ base⁻¹` (identity for the source copy / a plain group). */
+function worldBakeMask(m: Mask, frame: Affine, base: Affine, scope: number): ResolvedMask {
+  return bakeThrough(m, m.follow ? frame : affineCompose(frame, affineInvert(base)), scope);
+}
+
 interface ScopeFrame {
-  frame: Affine; // the group's world frame (with any active mirror folded in)
+  frame: Affine; // the group's world frame WITH any active mirror reflection folded in
+  base: Affine; // the group's MIRROR-FREE world frame (to reflect pinned masks across the copy's axis)
   masks: Mask[]; // the group's authored masks (group-local)
 }
 
 interface Ctx {
-  affine: Affine; // accumulated forward affine of this node's PARENT frame (local -> world)
+  affine: Affine; // accumulated forward affine of this node's PARENT frame WITH mirror reflections
+  baseAffine: Affine; // same, but WITHOUT any mirror reflections — lets pinned masks reflect per copy
   elevation: number;
   tallness: number;
   scopes: ScopeFrame[]; // ancestor group mask scopes, outermost first
@@ -97,6 +105,7 @@ function walk(nodes: LayerNode[], ctx: Ctx, out: ResolvedObject[]): void {
   for (const n of nodes) {
     if (!n.visible) continue; // hidden subtree contributes nothing
     const fwd = affineCompose(ctx.affine, affineFromTRS(n.transform));
+    const baseFwd = affineCompose(ctx.baseAffine, affineFromTRS(n.transform)); // mirror-free version of fwd
     const elevation = ctx.elevation + n.transform.pos.z;
     const tallness = ctx.tallness * n.transform.scale.z;
     if (isGroup(n)) {
@@ -108,14 +117,19 @@ function walk(nodes: LayerNode[], ctx: Ctx, out: ResolvedObject[]): void {
         let scopes = ctx.scopes;
         // auto SOURCE clip: each copy shows only the source side of its (reflected) frame, so content
         // crossing the axis is cut and the far side is a pure reflection (no manual mask needed).
-        if (mirrored) scopes = [...scopes, { frame, masks: [mirrorClipMask(n.mirror)] }];
+        if (mirrored) scopes = [...scopes, { frame, base: baseFwd, masks: [mirrorClipMask(n.mirror)] }];
         const groupMasks = (n.masks ?? []).filter(shown);
-        if (groupMasks.length) scopes = [...scopes, { frame, masks: groupMasks }];
-        walk(n.children, { affine: frame, elevation, tallness, scopes }, out);
+        if (groupMasks.length) scopes = [...scopes, { frame, base: baseFwd, masks: groupMasks }];
+        walk(n.children, { affine: frame, baseAffine: baseFwd, elevation, tallness, scopes }, out);
       }
     } else {
-      const masks: ResolvedMask[] = (n.masks ?? []).filter(shown).map((m) => ({ ...m, scope: 0 }));
-      ctx.scopes.forEach((sc, i) => sc.masks.forEach((m) => masks.push(worldBakeMask(m, sc.frame, i + 1))));
+      // This copy's world reflection (identity unless the object sits in a mirror copy). A pinned
+      // (world) object mask must reflect with the copy too — a follow mask already does via invAffine.
+      const reflect = affineCompose(fwd, affineInvert(baseFwd));
+      const masks: ResolvedMask[] = (n.masks ?? [])
+        .filter(shown)
+        .map((m) => (m.follow ? { ...m, scope: 0 } : bakeThrough(m, reflect, 0)));
+      ctx.scopes.forEach((sc, i) => sc.masks.forEach((m) => masks.push(worldBakeMask(m, sc.frame, sc.base, i + 1))));
       out.push({
         object: n,
         invAffine: affineInvert(fwd),
@@ -132,7 +146,7 @@ function walk(nodes: LayerNode[], ctx: Ctx, out: ResolvedObject[]): void {
  *  subtrees are dropped. The fold consumes this instead of a raw ObjectInstance[]. */
 export function flattenLayers(layers: LayerNode[]): ResolvedObject[] {
   const out: ResolvedObject[] = [];
-  walk(layers, { affine: affineIdentity(), elevation: 0, tallness: 1, scopes: [] }, out);
+  walk(layers, { affine: affineIdentity(), baseAffine: affineIdentity(), elevation: 0, tallness: 1, scopes: [] }, out);
   return out;
 }
 

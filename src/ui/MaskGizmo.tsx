@@ -6,6 +6,7 @@ import { nodeFrames, updateNode } from "../document/layerOps";
 import { affineApply } from "../field/affine";
 import { BezierAnchor, bakeMaskLoop, resolveHandlesClosed } from "../field/bezier";
 import { dragHandle, insertOnClosed, isCornerAnchor as isCorner, movePoint, toggleMode } from "../field/bezierEdit";
+import { setMaskSpace } from "../field/maskOps";
 import type { Mask } from "../field/types";
 import { v2 } from "../field/vec";
 import { ContextMenu, MenuEntry } from "./kit";
@@ -91,17 +92,7 @@ export function MaskGizmo(props: {
   }, [maskSel, masks, nodeId]);
 
   // flip a mask's follow flag, converting its anchors through the node's WORLD frame so it doesn't jump
-  const toggleFollow = (m: Mask): Mask => {
-    const follow = !m.follow;
-    const conv = follow ? (p: Vector2): Vector2 => w2l(p) : (p: Vector2): Vector2 => affineApply(worldAffine, p);
-    const anchors = m.anchors.map((a) => {
-      const p = conv(a.p);
-      const out = conv(v2(a.p.x + a.hOut.x, a.p.y + a.hOut.y));
-      const inn = conv(v2(a.p.x + a.hIn.x, a.p.y + a.hIn.y));
-      return { ...a, p, hOut: v2(out.x - p.x, out.y - p.y), hIn: v2(inn.x - p.x, inn.y - p.y) };
-    });
-    return { ...m, follow, anchors };
-  };
+  const toggleFollow = (m: Mask): Mask => setMaskSpace(m, !m.follow, worldAffine, invWorld);
 
   return (
     <>

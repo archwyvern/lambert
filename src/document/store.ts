@@ -130,4 +130,9 @@ export class DocumentStore {
     this.savedDoc = this.current.doc;
     this.emit({ dirty: false, docPath: path });
   }
+
+  /** Update the on-disk path without touching dirty/undo — the file was renamed/moved underneath us. */
+  setDocPath(path: string): void {
+    this.emit({ docPath: path });
+  }
 }

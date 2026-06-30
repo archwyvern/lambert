@@ -1,14 +1,16 @@
 import { expect, test } from "vitest";
 import { DocumentStore } from "../../src/document/store";
 import { emptyDoc, emptyProjectConfig } from "../../src/document/schema";
-import { legacySidecarCandidates, sidecarPath, Tab, Workspace } from "../../src/document/workspace";
+import { Tab, Workspace } from "../../src/document/workspace";
 
-function tab(imagePath: string): Tab {
+let n = 0;
+function tab(opts?: { id?: string; docPath?: string | null }): Tab {
+  const docPath = opts?.docPath ?? null;
   return {
-    imagePath,
-    docPath: null,
-    store: new DocumentStore(emptyDoc("x.png", 8, 8), null),
-    diffuse: { bytes: new Uint8Array(0), dir: "/p" },
+    id: opts?.id ?? `t${n++}`,
+    docPath,
+    store: new DocumentStore(emptyDoc("file:///p/x.df.png", 8, 8), docPath),
+    diffuse: { bytes: new Uint8Array(0) },
   };
 }
 
@@ -16,72 +18,71 @@ function ws(): Workspace {
   return new Workspace("/p", emptyProjectConfig());
 }
 
-test("sidecarPath / legacy candidates drop the image suffix", () => {
-  expect(sidecarPath("/p/ship.png")).toBe("/p/ship.lnb");
-  expect(sidecarPath("/p/ship.df.png")).toBe("/p/ship.lnb");
-  expect(legacySidecarCandidates("/p/ship.png")).toEqual(["/p/ship.lnb", "/p/ship.lambert", "/p/ship.flatland"]);
-});
-
-test("openTab pushes and activates; reopening the same image focuses, no duplicate", () => {
+test("untitled tabs never dedup; openTab activates the newest", () => {
   const w = ws();
-  w.openTab(tab("/p/a.png"));
-  w.openTab(tab("/p/b.png"));
+  w.openTab(tab()); // untitled (docPath null)
+  w.openTab(tab()); // untitled
   expect(w.tabs.length).toBe(2);
   expect(w.activeIndex).toBe(1);
-  w.openTab(tab("/p/a.png")); // same image again
+});
+
+test("reopening a tab with the same docPath focuses, no duplicate", () => {
+  const w = ws();
+  w.openTab(tab({ id: "a", docPath: "/p/a.lmb" }));
+  w.openTab(tab({ id: "b", docPath: "/p/b.lmb" }));
   expect(w.tabs.length).toBe(2);
+  expect(w.activeIndex).toBe(1);
+  w.openTab(tab({ id: "a2", docPath: "/p/a.lmb" })); // same doc again
+  expect(w.tabs.length).toBe(2);
+  expect(w.active?.docPath).toBe("/p/a.lmb");
   expect(w.activeIndex).toBe(0); // focused, not duplicated
 });
 
-test("focus selects an open tab", () => {
+test("focus selects an open tab by id", () => {
   const w = ws();
-  w.openTab(tab("/p/a.png"));
-  w.openTab(tab("/p/b.png"));
-  w.focus("/p/a.png");
-  expect(w.active?.imagePath).toBe("/p/a.png");
+  w.openTab(tab({ id: "a" }));
+  w.openTab(tab({ id: "b" }));
+  w.focus("a");
+  expect(w.active?.id).toBe("a");
 });
 
-test("closeTab adjusts activeIndex", () => {
+test("closeTab(id) adjusts activeIndex", () => {
   const make = (): Workspace => {
     const w = ws();
-    w.openTab(tab("/p/a.png"));
-    w.openTab(tab("/p/b.png"));
-    w.openTab(tab("/p/c.png"));
+    w.openTab(tab({ id: "a" }));
+    w.openTab(tab({ id: "b" }));
+    w.openTab(tab({ id: "c" }));
     return w;
   };
-  // active = B (1); close A (before active) -> active shifts to still point at B
   let w = make();
   w.activeIndex = 1;
-  w.closeTab("/p/a.png");
-  expect(w.active?.imagePath).toBe("/p/b.png");
-  // active = B (1); close B (the active) -> the tab that slid into slot 1 (C) becomes active
+  w.closeTab("a"); // before active -> active still points at B
+  expect(w.active?.id).toBe("b");
   w = make();
   w.activeIndex = 1;
-  w.closeTab("/p/b.png");
-  expect(w.active?.imagePath).toBe("/p/c.png");
-  // active = B (1); close C (after active) -> active unchanged
+  w.closeTab("b"); // the active -> C slides into slot 1
+  expect(w.active?.id).toBe("c");
   w = make();
   w.activeIndex = 1;
-  w.closeTab("/p/c.png");
-  expect(w.active?.imagePath).toBe("/p/b.png");
-  // close the last remaining tab -> no active
+  w.closeTab("c"); // after active -> unchanged
+  expect(w.active?.id).toBe("b");
   const solo = ws();
-  solo.openTab(tab("/p/only.png"));
-  solo.closeTab("/p/only.png");
-  expect(w.tabs.length).toBeGreaterThan(0); // sanity: previous w untouched
+  solo.openTab(tab({ id: "only" }));
+  solo.closeTab("only");
   expect(solo.activeIndex).toBe(-1);
   expect(solo.active).toBe(null);
 });
 
-test("subscribe fires on structural changes", () => {
+test("subscribe fires on structural changes and on notify()", () => {
   const w = ws();
   let hits = 0;
   const unsub = w.subscribe(() => (hits += 1));
-  w.openTab(tab("/p/a.png"));
-  w.openTab(tab("/p/b.png"));
-  w.focus("/p/a.png");
-  w.closeTab("/p/a.png");
+  w.openTab(tab({ id: "a" }));
+  w.openTab(tab({ id: "b" }));
+  w.focus("a");
+  w.closeTab("a");
+  w.notify();
   unsub();
-  w.openTab(tab("/p/c.png")); // after unsub: no further hits
-  expect(hits).toBe(4);
+  w.openTab(tab({ id: "c" })); // after unsub: no further hits
+  expect(hits).toBe(5);
 });

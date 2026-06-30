@@ -75,9 +75,9 @@ export function CanvasView(props: {
   normalDirs: NormalDirs;
   /** 3D preview is occupying the big slot (this 2D view is hidden behind it) — hide the 2D guide. */
   swapped: boolean;
-  /** Per-image viewport persistence: the image key, its saved pan/zoom (undefined = not yet fitted),
-   *  and a reporter so App can stash it per-image (survives tab switch + reload). */
-  imagePath: string;
+  /** Per-tab viewport persistence: the tab's stable id, its saved pan/zoom (undefined = not yet fitted),
+   *  and a reporter so App can stash it per-tab (survives tab switch + reload). */
+  tabId: string;
   savedViewport: Viewport | undefined;
   onViewportChange: (vp: Viewport) => void;
   /** Switch the active tool (double-click a control-point object to jump into vertex editing). */
@@ -89,7 +89,7 @@ export function CanvasView(props: {
 }): React.JSX.Element {
   const { store, state, view, tool, diffuseBytes, selVerts, setSelVerts, onLightChange, onEnergyChange, canvas3dRef, orbit3d, normalDirs, swapped } =
     props;
-  const { imagePath, savedViewport, onViewportChange, setTool, snap, rulers } = props;
+  const { tabId, savedViewport, onViewportChange, setTool, snap, rulers } = props;
   const inset = rulers ? RULER : 0;
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -106,6 +106,8 @@ export function CanvasView(props: {
   const dragRef = useRef<Drag | null>(null);
   // a guide being dragged out of a ruler (not yet committed); `over` = cursor is over the canvas area
   const [guideDraft, setGuideDraft] = useState<{ orient: "v" | "h"; at: number; over: boolean } | null>(null);
+  // an existing guide being dragged — drives the floating position tooltip (the new-guide case uses guideDraft)
+  const [guideDrag, setGuideDrag] = useState<{ orient: "v" | "h"; at: number } | null>(null);
   const [guideMenu, setGuideMenu] = useState<{ x: number; y: number; index: number } | null>(null);
   const [marquee, setMarquee] = useState<{ a: Vector2; b: Vector2 } | null>(null);
   // click-to-place ("pen") mode: a new point follows the cursor; left-click drops it (chains)
@@ -131,7 +133,7 @@ export function CanvasView(props: {
   // mask pen: a draft of placed points (canvas/world space); committed into a Mask on close
   const [penPts, setPenPts] = useState<Vector2[]>([]);
   const CLOSE_PX = 10; // screen px: clicking within this of the first point closes the loop
-  useEffect(() => setPenPts([]), [tool, state.selectedId, imagePath]); // leaving pen abandons the draft
+  useEffect(() => setPenPts([]), [tool, state.selectedId, tabId]); // leaving pen abandons the draft
   useEffect(() => {
     if (tool !== "pen") return;
     const onKey = (e: KeyboardEvent): void => {
@@ -192,11 +194,14 @@ export function CanvasView(props: {
     const move = (ev: PointerEvent): void => {
       const { docX, docY } = hostPoint(ev);
       const raw = orient === "h" ? docY : docX;
-      store.update((x) => moveGuide(x, index, snap ? snapHalf(raw) : raw), { coalesce: `guide:${index}` });
+      const at = snap ? snapHalf(raw) : raw;
+      setGuideDrag({ orient, at });
+      store.update((x) => moveGuide(x, index, at), { coalesce: `guide:${index}` });
     };
     const up = (ev: PointerEvent): void => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
+      setGuideDrag(null);
       const r = hostRef.current!.getBoundingClientRect();
       const offRuler = orient === "h" ? ev.clientY - r.top < 0 : ev.clientX - r.left < 0;
       if (offRuler) store.update((x) => removeGuide(x, index));
@@ -276,7 +281,7 @@ export function CanvasView(props: {
     const rect = hostRef.current!.getBoundingClientRect();
     setViewport(savedViewportRef.current ?? fitViewport(doc.source.width, doc.source.height, rect.width, rect.height, 40));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [imagePath]);
+  }, [tabId]);
   useEffect(() => {
     onViewportChangeRef.current(viewport);
   }, [viewport]);
@@ -764,6 +769,26 @@ export function CanvasView(props: {
             : null}
         </svg>
       ) : null}
+      {/* floating position readout while dragging a guide (new or existing) — origin-relative, to match the rulers */}
+      {(() => {
+        const tip = guideDraft ? { orient: guideDraft.orient, at: guideDraft.at } : guideDrag;
+        if (!tip) return null;
+        const horiz = tip.orient === "h";
+        const s = canvasToScreen(viewport, horiz ? v2(0, tip.at) : v2(tip.at, 0));
+        const rel = tip.at - (horiz ? doc.canvas.origin.y : doc.canvas.origin.x);
+        const label = `${horiz ? "y" : "x"} ${Number.isInteger(rel) ? rel : rel.toFixed(1)}`;
+        const style = horiz
+          ? { top: s.y, left: 6, transform: "translateY(-50%)" }
+          : { left: s.x, top: 6, transform: "translateX(-50%)" };
+        return (
+          <div
+            className="pointer-events-none absolute z-20 whitespace-nowrap rounded-sm border border-border px-1.5 py-0.5 text-sm font-medium text-fg shadow-md"
+            style={{ background: "var(--color-surface2)", ...style }}
+          >
+            {label}
+          </div>
+        );
+      })()}
       {/* mirror axes: faint dashed line(s) through a selected mirror group's origin along its seam(s) */}
       {(() => {
         const sel = state.selectedId ? findNode(doc.layers, state.selectedId) : null;

@@ -1,4 +1,4 @@
-import type { ObjectInstance, ObjectType } from "./types";
+import { isGroup, type LayerNode, type ObjectInstance, type ObjectType } from "./types";
 import { Vector2, Vector3 } from "@carapace/primitives";
 import { v2 } from "./vec";
 
@@ -17,6 +17,26 @@ export function getObjectType(id: string): ObjectType {
   const t = types.get(id);
   if (!t) throw new Error(`unknown object type: ${id}`);
   return t;
+}
+
+/** Whether a type id is registered. */
+export function hasObjectType(id: string): boolean {
+  return types.has(id);
+}
+
+/**
+ * Graceful degrade on load: drop object layers whose type isn't registered (legacy/removed types
+ * from before a model change), so an unrecognized layer is deleted rather than crashing the render.
+ * Groups are kept and recursed into.
+ */
+export function dropUnknownLayers(layers: LayerNode[]): LayerNode[] {
+  const out: LayerNode[] = [];
+  for (const n of layers) {
+    if (isGroup(n)) out.push({ ...n, children: dropUnknownLayers(n.children) });
+    else if (hasObjectType(n.typeId)) out.push(n);
+    // else: unrecognized object type → dropped
+  }
+  return out;
 }
 
 export function allObjectTypes(): ObjectType[] {

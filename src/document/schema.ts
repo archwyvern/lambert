@@ -140,7 +140,8 @@ export function defaultCanvas(width: number, height: number): CanvasState {
 export const docSchema = z.object({
   schemaVersion: z.literal(1),
   source: z.object({
-    path: z.string().min(1),
+    // The diffuse reference, as a URI: file:///abs/path or http(s)://… (resolved by diffuseSource).
+    uri: z.string().min(1),
     width: z.number().int().positive(),
     height: z.number().int().positive(),
   }),
@@ -153,10 +154,10 @@ export type LambertDoc = Omit<z.infer<typeof docSchema>, "layers" | "canvas"> & 
   canvas: CanvasState;
 };
 
-export function emptyDoc(sourcePath: string, width: number, height: number): LambertDoc {
+export function emptyDoc(uri: string, width: number, height: number): LambertDoc {
   return {
     schemaVersion: 1,
-    source: { path: sourcePath, width, height },
+    source: { uri, width, height },
     layers: [],
     canvas: defaultCanvas(width, height),
   };

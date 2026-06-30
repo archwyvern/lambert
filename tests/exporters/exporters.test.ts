@@ -2,7 +2,7 @@ import { decode } from "fast-png";
 import { expect, test } from "vitest";
 import { encodeHeightmapPng } from "../../src/exporters/heightmap";
 import { encodeNormalPng } from "../../src/exporters/normalmap";
-import { diffuseOpacity, encodeNxPng, nxFileName } from "../../src/exporters/nx";
+import { diffuseOpacity, encodeNxPng } from "../../src/exporters/nx";
 
 const flatNormals = (n: number) => {
   const a = new Float32Array(n * 3);
@@ -78,11 +78,4 @@ test("diffuseOpacity: flags A>0 per pixel, null when there's no alpha channel", 
   const rgba = { width: 2, height: 1, channels: 4, data: [0, 0, 0, 255, 0, 0, 0, 0] };
   expect(diffuseOpacity(rgba)).toEqual(new Uint8Array([1, 0]));
   expect(diffuseOpacity({ width: 1, height: 1, channels: 3, data: [10, 20, 30] })).toBeNull();
-});
-
-test("nxFileName strips a .df tag and appends .nx", () => {
-  expect(nxFileName("hull.df.png")).toBe("hull.nx.png");
-  expect(nxFileName("hull.png")).toBe("hull.nx.png");
-  expect(nxFileName("hull.foo.png")).toBe("hull.foo.nx.png");
-  expect(() => nxFileName("hull.jpg")).toThrow(/png/);
 });
