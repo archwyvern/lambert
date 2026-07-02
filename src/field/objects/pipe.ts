@@ -6,13 +6,13 @@ import { clamp, mix } from "../vec";
  * Pipe — a straight profiled bar: a tube of `length` and `radius`, optionally tapering to `radius2` at
  * the +x end, with round or flat `cap`s, the cross-section shaped by `profile`. Cylinder = flat cap,
  * Capsule = round cap, Frustum = flat cap + radius2 ≠ radius (all palette presets of this type). The
- * Bézier twin is Pipe (Vector), which generalizes the straight taper to a per-anchor width. Pure
+ * Bézier twin is Cable, which generalizes the straight taper to a per-anchor width. Pure
  * parametric — no editable vertices.
  */
 export const Pipe = defineObjectType({
   id: ObjectTypeId.Pipe,
   name: "Pipe",
-  category: "Primitives",
+  category: "Shapes",
   params: {
     length: { type: "px", default: 64, min: 1, float: true },
     radius: { type: "px", default: 16, min: 1, float: true },
@@ -27,11 +27,11 @@ export const Pipe = defineObjectType({
   // ends (cylinder/frustum); round cap = inflate a clamped centreline segment (capsule).
   wgsl: /* wgsl */ `
 fn shape_pipe(p: vec2f, base: u32) -> vec2f {
-  let half = rec(base, 13u) * 0.5;
-  let r1 = rec(base, 14u);
-  let r2 = rec(base, 15u);
-  let flatCap = rec(base, 16u) > 0.5;
-  let prof = u32(rec(base, 17u));
+  let half = rec(base, SLOT_PARAM0) * 0.5;
+  let r1 = rec(base, SLOT_PARAM1);
+  let r2 = rec(base, SLOT_PARAM2);
+  let flatCap = rec(base, SLOT_PARAM3) > 0.5;
+  let prof = u32(rec(base, SLOT_PARAM4));
   let t = clamp((p.x + half) / (2.0 * half), 0.0, 1.0);
   let r = mix(r1, r2, t);
   if (flatCap) {

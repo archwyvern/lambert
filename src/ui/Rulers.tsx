@@ -55,6 +55,7 @@ export function Rulers(props: {
         className="absolute"
         style={{ left: RULER, top: 0, width: `calc(100% - ${RULER}px)`, height: RULER, cursor: "row-resize" }}
         onPointerDown={(e) => {
+          if (e.button !== 0) return; // left only — guides are a left-drag gesture
           e.preventDefault();
           onGuideDragStart?.("h");
         }}
@@ -78,6 +79,7 @@ export function Rulers(props: {
         className="absolute"
         style={{ left: 0, top: RULER, width: RULER, height: `calc(100% - ${RULER}px)`, cursor: "col-resize" }}
         onPointerDown={(e) => {
+          if (e.button !== 0) return; // left only — guides are a left-drag gesture
           e.preventDefault();
           onGuideDragStart?.("v");
         }}

@@ -4,10 +4,17 @@ import { buildFieldLibWgsl } from "./wgsl";
  * Screen composite for the 2D editor: a single analytic fragment pass. Each fragment maps screen px
  * -> doc coordinate via the viewport, then evaluates the field directly (fold_at) — no pre-rendered
  * field/normal textures. The normal is a minmod of fold_at's one-sided slopes (so vertical walls
- * vanish like a 3D bake instead of smearing to a 1px ramp); in vector mode the step is ~1 display px
- * (crisp at any zoom), in raster mode the coord snaps to the doc pixel and the step is 1 doc px (the
- * pixelated, exported result). Mode 0 diffuse, 1 normal, 2 lit. The normal overlay
- * blends over the diffuse by mask*opacity — previewing the NX alpha masking exactly.
+ * vanish like a 3D bake instead of smearing to a 1px ramp); the coord snaps to the doc pixel and the
+ * step is 1 doc px, so the preview always matches the pixelated, exported result. Mode 0 diffuse, 1
+ * normal, 2 lit. The normal overlay blends over the diffuse by mask*opacity — previewing the NX alpha
+ * masking exactly.
+ *
+ * PARITY NOTE (accepted): this preview derives its normal at DOC resolution (1-doc-px minmod step),
+ * whereas the NX EXPORT renders at supersample=2 and downsamples (see gpu/pipeline.ts). So along a
+ * slope the exported normal is a slightly smoother 2×-averaged version of what's shown here — the two
+ * agree on flats, walls, and mask coverage, but not bit-for-bit on anti-aliased slope edges. This is
+ * deliberate: sampling the preview at ss2 would cost ~4× the per-fragment fold work for a difference
+ * only visible under magnification. If exact WYSIWYG on slopes ever matters, preview at ss2 here.
  */
 const COMPOSITE_IO = /* wgsl */ `
 struct CompositeUniforms {
@@ -24,7 +31,6 @@ struct CompositeUniforms {
   lightZ: f32,
   redSign: f32,       // project normal-direction signs for the normal view encode
   greenSign: f32,
-  raster: u32,        // 1 = snap to doc pixels + 1-doc-px gradient (exported look); 0 = crisp vector
   lightEnergy: f32,   // lit mode: scales the diffuse light term (1 = default; >1 brightens)
 }
 
@@ -56,11 +62,10 @@ fn fs(@builtin(position) fragPos: vec4f) -> @location(0) vec4f {
   // composite over white using the diffuse's straight (un-premultiplied) alpha.
   let base = mix(vec3f(1.0, 1.0, 1.0), diffuse.rgb, diffuse.a);
   if (cu.mode == 0u) { return vec4f(base, 1.0); }
-  // raster: snap to doc pixel center + diff at 1 doc px (the exported sobel). vector: exact coord +
-  // diff at ~1 display px (-> the analytic gradient as you zoom in).
-  let snap = cu.raster == 1u;
-  let pe = select(p, floor(p) + vec2f(0.5, 0.5), snap);
-  let e = select(1.0 / cu.zoom, 1.0, snap);
+  // Always the exported (raster) look: snap to the doc pixel centre + gradient at 1 doc px, so the
+  // preview matches the pixelated NX bake exactly — there is no crisp "vector" mode that could mislead.
+  let pe = floor(p) + vec2f(0.5, 0.5);
+  let e = 1.0;
   let center = fold_at(pe, cu.shapeCount);
   let mask = center.y;
   let hc = center.x;

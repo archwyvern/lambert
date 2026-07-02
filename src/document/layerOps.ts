@@ -263,7 +263,9 @@ function spliceReplace(layers: LayerNode[], id: string, replacement: LayerNode[]
 }
 
 /** Deep-clone a node with fresh ids. The top node is offset by (dx,dy); descendants are not. */
-function cloneNode(n: LayerNode, dx: number, dy: number): LayerNode {
+/** Deep-clone a node (and its subtree) with fresh ids, offset by (dx, dy) in the node's own space.
+ *  Used by Duplicate (0,0) and Paste (a small offset). */
+export function cloneNode(n: LayerNode, dx: number, dy: number): LayerNode {
   if (isGroup(n)) {
     return {
       ...n,

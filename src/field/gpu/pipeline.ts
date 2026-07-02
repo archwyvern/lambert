@@ -238,6 +238,19 @@ export class GpuFieldRenderer {
     const hiH = height * f;
     const packed = packObjects(f === 1 ? resolved : scaleResolvedForSupersample(resolved, f));
 
+    // Guard the transient hi-res heap before allocating: hiHeight + hiMask + hiNormals = 5 floats/px ×
+    // 4 B = 20 B/px. An 8192² source at ss2 is 16384² ≈ 268M px ≈ 5.4 GB and OOM-crashes the renderer
+    // mid-export — fail with a clear, actionable error instead. (~150M px ≈ 3 GB ceiling; real diffuses
+    // are far smaller, so this only ever trips on a pathological source.)
+    const hiPixels = hiW * hiH;
+    const MAX_HI_PIXELS = 150_000_000;
+    if (hiPixels > MAX_HI_PIXELS) {
+      throw new Error(
+        `Export too large: ${width}×${height}${f > 1 ? ` at ${f}× supersample` : ""} = ${hiW}×${hiH} working ` +
+          `pixels exceeds the limit (~${Math.round((hiPixels * 20) / 1e9)} GB needed). Reduce the source size or supersample.`,
+      );
+    }
+
     const hiHeight = new Float32Array(hiW * hiH);
     const hiMask = new Float32Array(hiW * hiH);
     const hiNormals = new Float32Array(hiW * hiH * 3);

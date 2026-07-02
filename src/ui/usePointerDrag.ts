@@ -1,4 +1,12 @@
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
+
+/** Window event that aborts any in-flight pointer drag (Esc mid-drag). Drag owners clear their state on
+ *  it; the store separately reverts the partial edit via cancelGesture(). */
+export const CANCEL_DRAG_EVENT = "lambert-cancel-drag";
+
+/** Screen-px a handle must move before it commits an edit — stops a sub-pixel click-drift on a
+ *  vertex/anchor/bezier handle from writing a spurious move + undo entry. */
+export const HANDLE_DRAG_PX = 3;
 
 export interface PointerDragHandlers {
   onPointerDown: (e: React.PointerEvent) => void;
@@ -26,6 +34,16 @@ export interface PointerDragSpec<S> {
  */
 export function usePointerDrag<S>(): (spec: PointerDragSpec<S>) => PointerDragHandlers {
   const ref = useRef<{ start: S; x: number; y: number; moved: boolean } | null>(null);
+  // Esc mid-drag: drop the active drag so no further move/up commits. The store reverts the partial edit
+  // (cancelGesture); a subsequent pointer-up finds a null ref and no-ops. Capture is released by the OS
+  // on pointer-up regardless.
+  useEffect(() => {
+    const cancel = (): void => {
+      ref.current = null;
+    };
+    window.addEventListener(CANCEL_DRAG_EVENT, cancel);
+    return () => window.removeEventListener(CANCEL_DRAG_EVENT, cancel);
+  }, []);
   return (spec) => ({
     onPointerDown: (e) => {
       const start = spec.onStart(e);
@@ -38,7 +56,10 @@ export function usePointerDrag<S>(): (spec: PointerDragSpec<S>) => PointerDragHa
       const d = ref.current;
       if (!d) return;
       if (!d.moved && Math.hypot(e.clientX - d.x, e.clientY - d.y) > (spec.threshold ?? 0)) d.moved = true;
-      spec.onMove(e, d.start, d.moved);
+      // Suppress onMove entirely until the threshold is crossed, so a threshold actually prevents a
+      // sub-pixel click-drift from writing a move (+ undo entry). No-op for threshold-0 drags, where
+      // `moved` starts true. Consumers that hand-roll their own `moved` no longer need to gate it.
+      if (d.moved) spec.onMove(e, d.start, d.moved);
     },
     onPointerUp: (e) => {
       const d = ref.current;

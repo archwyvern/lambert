@@ -1,12 +1,41 @@
 import { allObjectTypes } from "../registry";
 
-export const RECORD_F32 = 27;
-export const PARAMS_OFFSET = 13;
-export const MAX_PARAMS = 8;
+/**
+ * The ONE authoritative record-slot layout — f32 offsets into a packed object record. pack.ts writes
+ * by these names, and the WGSL reads matching `SLOT_*` consts generated from this same map (see
+ * SLOT_CONSTS_WGSL), so renumbering a slot propagates to both sides instead of needing ~15 files
+ * hand-mirrored (the class of drift that let a magic-index bug ship before). PARAM0..7 is an 8-slot
+ * region for a type's params AND, for Contour, its hole counts packed right after — it MUST
+ * end before ELEVATION.
+ */
+export const RECORD_SLOT = {
+  TYPE: 0, // gpuTypeIndex (fold dispatch)
+  OP: 1, // 0 = raise/max, 1 = carve
+  RING: 2, // base-ring count for rings objects (ringSplit)
+  TALLNESS: 3, // composed extrude multiplier
+  INV_A: 4, INV_B: 5, INV_C: 6, INV_D: 7, INV_E: 8, INV_F: 9, // inverse affine (world -> local)
+  SCALE: 10, // forward scale hint (sd px scaling)
+  CP_START: 11, // first control point / bezier anchor index
+  CP_COUNT: 12, // control-point / anchor count
+  PARAM0: 13, PARAM1: 14, PARAM2: 15, PARAM3: 16, PARAM4: 17, PARAM5: 18, PARAM6: 19, PARAM7: 20,
+  ELEVATION: 21, // composed base elevation (post-extrude add)
+  TRI_START: 22, // mesh: first vec4 of this object's triangles
+  TRI_COUNT: 23, // mesh: triangle count
+  MASK_START: 24, // first mask loop index
+  MASK_COUNT: 25, // mask loop count
+  CLOSED: 26, // analytic path is a closed loop
+  OPACITY: 27, // fold-contribution weight 0..1 (1 = full effect)
+} as const;
 
-/** Record layout (f32 slots): see pack.ts — typeIndex, op, ringSplit, scaleZ, invAffine(a,b,c,d)
- *  = slots 4-7, invAffine translation(e,f) = slots 8-9, distScale, cpStart, cpCount, params[8],
- *  elevation, meshTriStart, meshTriCount, maskLoopStart, maskLoopCount, closed(26). */
+export const PARAMS_OFFSET = RECORD_SLOT.PARAM0; // 13
+export const MAX_PARAMS = RECORD_SLOT.ELEVATION - RECORD_SLOT.PARAM0; // 8: params (+holes) must end before elevation
+export const RECORD_F32 = RECORD_SLOT.OPACITY + 1; // 28 f32 per record
+
+// WGSL mirror of RECORD_SLOT, generated so the two can't drift: emitted into FIELD_LIB, referenced by
+// every object's shader as `rec(base, SLOT_*)` instead of a bare integer literal.
+const SLOT_CONSTS_WGSL = Object.entries(RECORD_SLOT)
+  .map(([k, v]) => `const SLOT_${k}: u32 = ${v}u;`)
+  .join("\n");
 
 // Fold-compute-only bindings: the per-tile uniforms and the storage-texture output. The composite
 // fragment does NOT include these (it has its own uniforms + a diffuse texture instead).
@@ -41,19 +70,21 @@ const FIELD_LIB = /* wgsl */ `
 @group(0) @binding(7) var<storage, read> maskVerts: array<vec2f>;
 
 const RECORD: u32 = ${RECORD_F32}u;
+${SLOT_CONSTS_WGSL}
 
 fn rec(base: u32, i: u32) -> f32 { return records[base + i]; }
 
 // slots 4..9 hold the inverse affine (world -> object-local): local = M_inv * p + t_inv.
 fn to_local(base: u32, p: vec2f) -> vec2f {
   return vec2f(
-    rec(base, 4u) * p.x + rec(base, 5u) * p.y + rec(base, 8u),
-    rec(base, 6u) * p.x + rec(base, 7u) * p.y + rec(base, 9u),
+    rec(base, SLOT_INV_A) * p.x + rec(base, SLOT_INV_B) * p.y + rec(base, SLOT_INV_E),
+    rec(base, SLOT_INV_C) * p.x + rec(base, SLOT_INV_D) * p.y + rec(base, SLOT_INV_F),
   );
 }
 
 fn combine_height(op: u32, bigH: f32, h: f32) -> f32 {
   if (op == 1u) { return min(bigH, bigH - h); } // carve
+  if (op == 2u) { return h; } // replace (stencil: this object's surface wins outright)
   return max(bigH, h); // max (clip)
 }
 
@@ -62,6 +93,8 @@ fn influence(sd: f32) -> f32 {
   return t * t * (3.0 - 2.0 * t);
 }
 
+// kind indices MUST match PROFILE_KINDS in profiles.ts (round=0, linear=1, cove=2, smooth=3) — pack.ts
+// derives them via indexOf. Keep this switch and that array in lockstep (mirrors applyProfile CPU-side).
 fn apply_profile(kind: u32, inside: f32, width: f32) -> f32 {
   if (width <= 0.0) { return select(0.0, 1.0, inside > 0.0); }
   let t = clamp(inside / width, 0.0, 1.0);
@@ -74,7 +107,7 @@ fn apply_profile(kind: u32, inside: f32, width: f32) -> f32 {
 }
 
 // Barycentric height inside triangle abc (corner heights ha/hb/hc); .y = 1 if p is inside, else 0.
-// Shared by the Plateau / Plateau (Vector) slope-band loft.
+// Shared by the Plateau / Mesa slope-band loft.
 fn plateau_tri(p: vec2f, a: vec2f, b: vec2f, c: vec2f, ha: f32, hb: f32, hc: f32) -> vec2f {
   let det = (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
   if (abs(det) < 1e-9) { return vec2f(0.0, 0.0); }
@@ -141,10 +174,10 @@ fn sd_mask_polygon(start: u32, count: u32, p: vec2f) -> f32 {
 // masks intersect the object's own). Mirrors maskOps.ts maskCoverage — follow loops test pLocal (sd
 // scaled to canvas by distScale rec(10)), world loops test pWorld. Loops are scope-sorted (lane w).
 fn mask_cover(base: u32, pWorld: vec2f, pLocal: vec2f) -> f32 {
-  let loopStart = u32(rec(base, 24u));
-  let loopCount = u32(rec(base, 25u));
+  let loopStart = u32(rec(base, SLOT_MASK_START));
+  let loopCount = u32(rec(base, SLOT_MASK_COUNT));
   if (loopCount == 0u) { return 1.0; }
-  let dscale = rec(base, 10u);
+  let dscale = rec(base, SLOT_SCALE);
   var total = 1.0;
   var keep = 0.0;
   var cut = 0.0;
@@ -176,13 +209,6 @@ fn mask_cover(base: u32, pWorld: vec2f, pLocal: vec2f) -> f32 {
   }
   total = total * (select(1.0, keep, hasKeep) * (1.0 - cut));
   return total;
-}
-
-fn sd_ellipse(p: vec2f, r: vec2f) -> f32 {
-  if (r.x == r.y) { return length(p) - r.x; }
-  let k1 = length(p / r);
-  let k2 = length(p / (r * r));
-  return k1 * (k1 - 1.0) / max(k2, 1e-12);
 }
 
 // cubic Bézier point + derivatives (mirror bezier.ts) — the cable samples these per pixel
@@ -238,28 +264,12 @@ fn cubic_dist(p: vec2f, p0: vec2f, c0: vec2f, c1: vec2f, p1: vec2f, cutStart: bo
   return cubic_dist_t(p, p0, c0, c1, p1, cutStart, cutEnd).x;
 }
 
-// spine with a separate profile slope width (slopeW < halfW gives a flat-topped section)
-fn shape_spine_s(p: vec2f, base: u32, h: f32, halfW: f32, slopeW: f32, prof: u32) -> vec2f {
-  let cs = u32(rec(base, 11u));
-  let cc = u32(rec(base, 12u));
-  var d = 1e30;
-  for (var i = 0u; i + 1u < cc; i = i + 1u) {
-    d = min(d, sd_segment(p, points[cs + i], points[cs + i + 1u]));
-  }
-  let sd = d - halfW;
-  return vec2f(h * apply_profile(prof, -sd, slopeW), sd);
-}
-
-fn shape_spine(p: vec2f, base: u32, h: f32, halfW: f32, prof: u32) -> vec2f {
-  return shape_spine_s(p, base, h, halfW, halfW, prof);
-}
-
-// Shared triangulated height-field eval for Mesh/Grid/Revolve/Loft/Noise: barycentric height in the
-// triangle under p (blended toward Phong by smoothness at slot 13), else sd to the nearest edge.
+// Triangulated height-field eval for Mesh: barycentric height in the
+// triangle under p (blended toward Phong by smoothness, the mesh's first param), else sd to nearest edge.
 fn shape_meshfield(p: vec2f, base: u32) -> vec2f {
-  let sm = rec(base, 13u);
-  let triStart = u32(rec(base, 22u));
-  let triCount = u32(rec(base, 23u));
+  let sm = rec(base, SLOT_PARAM0);
+  let triStart = u32(rec(base, SLOT_TRI_START));
+  let triCount = u32(rec(base, SLOT_TRI_COUNT));
   for (var t = 0u; t < triCount; t = t + 1u) {
     let o = triStart + t * 6u;
     let a = meshTris[o];
@@ -300,13 +310,15 @@ fn fold_at(p: vec2f, count: u32) -> vec2f {
   for (var s = 0u; s < count; s = s + 1u) {
     let base = s * RECORD;
     let pl = to_local(base, p);
-    let smp = eval_shape(u32(rec(base, 0u)), pl, base);
-    let sd = smp.y * rec(base, 10u);
-    var inf = influence(sd);
+    let smp = eval_shape(u32(rec(base, SLOT_TYPE)), pl, base);
+    let sd = smp.y * rec(base, SLOT_SCALE);
+    // per-object opacity scales the whole contribution: the mask influence AND the height step below
+    let alpha = rec(base, SLOT_OPACITY);
+    var inf = influence(sd) * alpha;
     inf = inf * mask_cover(base, p, pl);
     if (inf <= 0.0) { continue; }
-    let h = rec(base, 21u) + smp.x * rec(base, 3u); // elevation + extrude
-    let op = u32(rec(base, 1u));
+    let h = rec(base, SLOT_ELEVATION) + smp.x * rec(base, SLOT_TALLNESS); // elevation + extrude
+    let op = u32(rec(base, SLOT_OP));
     // the FIRST object (a non-carve "max" object) to cover a pixel SETS the surface, so it can go below
     // the ground plane — negative Z is allowed. Later overlapping objects, and carve objects (which
     // subtract from the ground), always combine.
@@ -315,8 +327,9 @@ fn fold_at(p: vec2f, count: u32) -> vec2f {
     // the low end of a slope) still writes its normal instead of vanishing (see evalCpu.ts).
     bigM = max(bigM, inf);
     // height is a HARD step at the footprint boundary so a vertical wall stays a wall — otherwise
-    // the 1px influence ramp reads as a slope at the silhouette and minmod can't flatten it.
-    bigH = select(bigH, combined, sd < 0.0);
+    // the 1px influence ramp reads as a slope at the silhouette and minmod can't flatten it. Opacity
+    // lerps the step toward the accumulated surface (0.5 = half effect).
+    bigH = select(bigH, mix(bigH, combined, alpha), sd < 0.0);
     covered = covered || (sd < 0.0);
   }
   return vec2f(bigH, bigM);

@@ -1,10 +1,11 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu } from "electron";
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
-import { existsSync, readFileSync } from "node:fs";
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
+import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
-import { serveFs } from "@carapace/shell/node";
+import { serveFs, serveOs } from "@carapace/shell/node";
 import electronUpdater from "electron-updater";
 
 // electron-updater is CJS; its named exports come off the default import under bundling.
@@ -16,9 +17,13 @@ app.setName("lambert");
 
 const isAutomation = process.argv.includes("--selftest") || process.argv.includes("--capture");
 if (isAutomation) {
-  // automated runs must not share the live instance's profile: LevelDB/Dawn cache
-  // locks make captures flaky-black and stall GPU init when an editor is open
-  app.setPath("userData", path.join(os.tmpdir(), "lambert-automation"));
+  // Automated runs must not share the live instance's profile: LevelDB/Dawn cache locks make captures
+  // flaky-black and stall GPU init when an editor is open. Each run gets a FRESH unique dir by default
+  // (a fixed, never-cleared dir let stale session/state leak between runs and collided when two ran at
+  // once); pass --profile <dir> to use a prepared profile instead (the seeded-session workflow).
+  const profileIndex = process.argv.indexOf("--profile");
+  const profileDir = profileIndex >= 0 ? process.argv[profileIndex + 1] : undefined;
+  app.setPath("userData", profileDir ?? mkdtempSync(path.join(os.tmpdir(), "lambert-automation-")));
 }
 
 // WebGPU is default-on for Windows/macOS Chromium but flag-gated on Linux; we own the
@@ -57,6 +62,30 @@ function projectArgFromArgv(argv: string[]): string | null {
     return projectDirFromArg(a);
   }
   return null;
+}
+
+// Crash-safe persistence: write to a unique sibling temp file, then atomic rename over the target.
+// A crash/OOM/power-loss mid-write leaves the temp (garbage) behind and the real file untouched,
+// instead of a half-truncated .lmb/session/cache. The unique per-write suffix also stops two
+// concurrent writers to the same path (e.g. the debounced session stash racing the close-flush)
+// from clobbering each other's temp; the renames still last-writer-win, which is fine for a
+// "latest state" stash. Same-directory temp keeps the rename on one filesystem (so it's atomic).
+// The 8-byte PNG signature. Diffuse sources are always PNG (the renderer decodes with fast-png), so a
+// body that doesn't start with this is an error page / wrong URL / truncated download, not a diffuse.
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+const isPng = (bytes: Uint8Array): boolean =>
+  bytes.length >= 8 && PNG_SIGNATURE.every((b, i) => bytes[i] === b);
+
+let atomicSeq = 0;
+async function atomicWrite(target: string, data: Uint8Array | string): Promise<void> {
+  const tmp = `${target}.${process.pid}.${atomicSeq++}.tmp`;
+  try {
+    await writeFile(tmp, data);
+    await rename(tmp, target);
+  } catch (err) {
+    await rm(tmp, { force: true }).catch(() => {});
+    throw err;
+  }
 }
 
 let mainWindow: BrowserWindow | null = null;
@@ -100,7 +129,14 @@ function setupAutoUpdate(win: BrowserWindow) {
       send({ type: "not-available" });
       return;
     }
-    await autoUpdater.checkForUpdates();
+    // A manual check can reject (404 when no release is published, or a network error). The auto-check
+    // below swallows its own rejection; the manual path must too, or the renderer's invoke() rejects
+    // and surfaces as an unhandled error. Report it as an update error event instead.
+    try {
+      await autoUpdater.checkForUpdates();
+    } catch (err) {
+      send({ type: "error", message: String((err as Error)?.message ?? err) });
+    }
   });
   ipcMain.handle("update:download", async () => {
     if (app.isPackaged) await autoUpdater.downloadUpdate();
@@ -142,7 +178,7 @@ app.whenReady().then(() => {
   );
   ipcMain.handle("fs:read", async (_e, p: string) => new Uint8Array(await readFile(p)));
   ipcMain.handle("fs:write", async (_e, p: string, data: Uint8Array) => {
-    await writeFile(p, data);
+    await atomicWrite(p, data);
   });
 
   // Remote diffuse fetch + cache. Fetched here (no renderer CORS/CSP), cached in userData keyed by a
@@ -153,15 +189,20 @@ app.whenReady().then(() => {
     if (!opts?.refresh && existsSync(cacheFile)) return new Uint8Array(await readFile(cacheFile));
     let bytes: Uint8Array;
     try {
-      const res = await fetch(url);
+      // Time-box the fetch: a slow/hung server otherwise stalls New/Open/Restore indefinitely with no
+      // cancel and no feedback.
+      const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       bytes = new Uint8Array(await res.arrayBuffer());
+      // Validate it's actually a PNG (Lambert's only diffuse format) before trusting/caching it — a
+      // "200 OK" HTML error page or a truncated body would otherwise be cached and served forever.
+      if (!isPng(bytes)) throw new Error("response is not a PNG image (wrong URL or an error page?)");
     } catch (err) {
       if (existsSync(cacheFile)) return new Uint8Array(await readFile(cacheFile)); // offline → fall back to cache
       throw new Error(`couldn't fetch the diffuse (${url}) and it isn't cached: ${String(err)}`);
     }
     await mkdir(diffuseCacheDir, { recursive: true });
-    await writeFile(cacheFile, bytes);
+    await atomicWrite(cacheFile, bytes);
     return bytes;
   });
 
@@ -182,6 +223,32 @@ app.whenReady().then(() => {
     }
   });
 
+  ipcMain.handle("window:minimize", () => mainWindow?.minimize());
+  ipcMain.handle("window:toggleMaximize", () => {
+    if (mainWindow?.isMaximized()) mainWindow.unmaximize();
+    else mainWindow?.maximize();
+  });
+  ipcMain.handle("window:close", () => mainWindow?.close());
+  ipcMain.handle("window:isMaximized", () => mainWindow?.isMaximized() ?? false);
+
+  ipcMain.handle("fs:mkdir", async (_e, p: string) => {
+    await mkdir(p, { recursive: true });
+  });
+
+  // `git status --porcelain=v1 -z` in the given dir — raw stdout for the renderer's clean-room parser
+  // (Explorer SCM row tinting). Any failure (no git, not a repo) degrades to "" = no decorations.
+  ipcMain.handle("git:status", async (_e, dir: string) => {
+    try {
+      return await new Promise<string>((resolve) => {
+        execFile("git", ["status", "--porcelain=v1", "-z"], { cwd: dir, timeout: 5000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) =>
+          resolve(err ? "" : stdout),
+        );
+      });
+    } catch {
+      return "";
+    }
+  });
+
   // session memory: last working state, stashed in userData (see src/document/session.ts)
   const sessionPath = path.join(app.getPath("userData"), "session.json");
   ipcMain.handle("session:load", async () => {
@@ -192,7 +259,7 @@ app.whenReady().then(() => {
     }
   });
   ipcMain.handle("session:save", async (_e, json: string) => {
-    await writeFile(sessionPath, json, "utf8");
+    await atomicWrite(sessionPath, json);
   });
 
   // the renderer pulls any OS-requested project (double-clicked project.lambert) once, on mount
@@ -234,6 +301,9 @@ app.whenReady().then(() => {
     minWidth: WELCOME_BOUNDS.width,
     minHeight: WELCOME_BOUNDS.height,
     show: !selftest,
+    // chromeless (vscode-style): the carapace TopBar is the titlebar — draggable region + in-bar
+    // window controls (window:* IPC below)
+    frame: false,
     webPreferences: {
       preload: path.join(import.meta.dirname, "../preload/index.mjs"),
       // electron-vite emits the preload as ESM (.mjs); Electron only loads ESM preloads
@@ -258,7 +328,7 @@ app.whenReady().then(() => {
     if (boundsSaveTimer) clearTimeout(boundsSaveTimer);
     boundsSaveTimer = setTimeout(() => {
       const b = win.getBounds();
-      void writeFile(windowStatePath, JSON.stringify({ width: b.width, height: b.height, x: b.x, y: b.y })).catch(
+      void atomicWrite(windowStatePath, JSON.stringify({ width: b.width, height: b.height, x: b.x, y: b.y })).catch(
         () => {},
       );
     }, 400);
@@ -282,6 +352,7 @@ app.whenReady().then(() => {
   // carapace fs protocol: backs the shared <FileExplorer> (renderer createIpcFs <-> this).
   // Default real-path provider (createNodeFs) — Lambert addresses files by absolute path.
   serveFs(ipcMain, { send: (channel, ...args) => win.webContents.send(channel, ...args) });
+  serveOs(ipcMain, { shell, resolve: (p) => p }); // real absolute paths — no virtual schemes to resolve
 
   setupAutoUpdate(win);
 
@@ -303,6 +374,7 @@ app.whenReady().then(() => {
           { label: "Save All", accelerator: "CmdOrCtrl+Shift+S", click: send("save-all") },
           { type: "separator" },
           { label: "Export NX", accelerator: "CmdOrCtrl+E", click: send("export-nx") },
+          { label: "Export All NX", accelerator: "CmdOrCtrl+Shift+E", click: send("export-all") },
           { type: "separator" },
           { role: "quit" },
         ],
@@ -324,6 +396,7 @@ app.whenReady().then(() => {
         label: "View",
         submenu: [
           { label: "Fit", accelerator: "CmdOrCtrl+0", click: send("zoom-fit") },
+          { label: "Fit Selection", accelerator: "CmdOrCtrl+Shift+0", click: send("zoom-fit-selection") },
           { label: "100%", accelerator: "CmdOrCtrl+1", click: send("zoom-100") },
           { type: "separator" },
           { label: "Rulers", accelerator: "CmdOrCtrl+R", click: send("toggle-rulers") },

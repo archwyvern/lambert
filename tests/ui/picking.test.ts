@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 import "../../src/field/objects";
 import { createObjectInstance, ObjectTypeId } from "../../src/field/registry";
 import { resolveObjects } from "../../src/field/flatten";
+import { createMask } from "../../src/field/maskOps";
 import { axisScaleFromDrag, constrainAxis, grabGroup, groupScaleFactor, pointsBounds, pointsInBox, scalePointsAbout, pickObject, rotationFromDrag, snapAngle, toggleIndex } from "../../src/ui/picking";
 import { toLocal } from "../../src/field/transform";
 import { v2 } from "../../src/field/vec";
@@ -29,13 +30,24 @@ test("pickObject: topmost (last in z-order) wins, slop catches near-misses", () 
   expect(pickObject(resolveObjects([below, above]),v2(50, 98.5))?.id).toBe(below.id); // within slop
 });
 
-test("pickObject skips invisible and locked objects", () => {
+test("pickObject skips invisible and locked objects (but includeLocked reaches locked ones)", () => {
   const a = createObjectInstance(ObjectTypeId.Sphere, v2(0, 0));
   a.visible = false;
   const b = createObjectInstance(ObjectTypeId.Sphere, v2(0, 0));
   b.locked = true;
   expect(pickObject(resolveObjects([a]), v2(0, 0))).toBe(null);
-  expect(pickObject(resolveObjects([b]), v2(0, 0))).toBe(null);
+  expect(pickObject(resolveObjects([b]), v2(0, 0))).toBe(null); // drag-pick skips locked
+  expect(pickObject(resolveObjects([b]), v2(0, 0), true)?.id).toBe(b.id); // right-click reaches it (to Unlock)
+  expect(pickObject(resolveObjects([a]), v2(0, 0), true)).toBe(null); // invisible stays unpickable (flatten dropped it)
+});
+
+test("pickObject respects masks: a cut-away region isn't selectable through the shape's own hole", () => {
+  const slab = createObjectInstance(ObjectTypeId.Plateau, v2(32, 32));
+  slab.transform.scale = new Vector3(1.2, 1.2, 1); // covers most of a 64x64 canvas
+  slab.masks = [createMask([v2(24, 24), v2(40, 24), v2(40, 40), v2(24, 40)], false)]; // keep only 24..40
+  const resolved = resolveObjects([slab]);
+  expect(pickObject(resolved, v2(32, 32))?.id).toBe(slab.id); // inside the keep loop -> selectable
+  expect(pickObject(resolved, v2(6, 6))).toBe(null); // inside the footprint but masked away -> not pickable
 });
 
 test("rotationFromDrag: quarter turn around the pivot", () => {

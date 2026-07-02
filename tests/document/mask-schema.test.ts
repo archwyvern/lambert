@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import "../../src/field/objects"; // register object types (parseDoc drops unknown typeIds)
 import { ObjectTypeId } from "../../src/field/objectTypeIds";
 import { Vector2, Vector3 } from "@carapace/primitives";
 import { parseDoc, serializeDoc } from "../../src/document/schema";

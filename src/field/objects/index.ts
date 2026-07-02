@@ -10,19 +10,19 @@ export { Berm } from "./berm";
 export { Surface } from "./surface";
 export { Plateau } from "./plateau";
 
-// Vectors — Bézier paths (SVG model). Strokes: Pipe (Vector) = round tube, Berm (Vector) = flat-top
-// embankment. Fills (closed, baked to a polygon): Surface (Vector).
+// Vectors — Bézier paths (SVG model). Strokes: Cable = round tube, Ridge = flat-top
+// embankment. Fills (closed, baked to a polygon): Contour.
 export { PipeVector } from "./pipeVector";
 export { BermVector } from "./bermVector";
 export { SurfaceVector } from "./surfaceVector";
 export { PlateauVector } from "./plateauVector";
+export { Pillow } from "./pillow";
 
-// Meshes — triangulated height fields (per-vertex Z); differ only in their starting seed.
+// Meshes — the free triangulated height field (per-vertex Z); flat primitives bake into it (convert.ts).
 export { Mesh } from "./mesh";
-export { Grid } from "./grid";
-export { Revolve } from "./revolve";
-export { Loft } from "./loft";
-export { Noise } from "./noise";
+
+// Effects — adjustment-layer prototypes (QC-REQ-5); region-scoped field contributions.
+export { Gradient } from "./gradient";
 
 // Palette presets (familiar tiles backed by the parameterized types) — side-effect registration.
 import "../presetDefs";

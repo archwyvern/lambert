@@ -2,6 +2,11 @@ name: release
 
 # Cut a release from the command line:
 #   gh workflow run release.yml -f version=0.1.0 -f publish=true
+#
+# IMPORTANT — push before you dispatch. The `tag` job tags the REMOTE branch HEAD, so any local
+# unpushed commits are silently excluded and a "fix-less" version can ship. Run `git push` first;
+# the `cut` step below echoes the exact SHA + subject it tagged so you can confirm the right commit.
+#
 # Flow: bump package.json + tag -> build installers (Windows NSIS + Linux AppImage) as ARTIFACTS ->
 # a single job assembles ONE GitHub release from all artifacts -> publish it (only if `publish`;
 # otherwise it stays a DRAFT). Pushing a v* tag by hand also builds a draft (no bump, no publish).
@@ -57,6 +62,11 @@ jobs:
           git rev-parse "$TAG" >/dev/null 2>&1 || git tag "$TAG"
           git push origin "$TAG"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          # Surface exactly what got tagged so an operator can catch a stale/wrong HEAD (unpushed fixes).
+          echo "### Tagged $TAG" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          git log -1 --format='%H%n%s%n(%ci)' "$TAG" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
   build:
     needs: tag
@@ -105,6 +115,14 @@ jobs:
       - name: Install lambert deps
         working-directory: lambert
         run: pnpm install --frozen-lockfile
+
+      # Release gate: a red tree must never ship. Same checks ci.yml runs on push/PR, enforced here
+      # too because a pushed tag / dispatch can tag a commit that never went through a PR.
+      - name: Typecheck + test (release gate)
+        working-directory: lambert
+        run: |
+          pnpm typecheck
+          pnpm test
 
       - name: Build renderer/main/preload
         working-directory: lambert

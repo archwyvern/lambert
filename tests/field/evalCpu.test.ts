@@ -94,3 +94,25 @@ test("unknown typeId throws", () => {
   const ghost = { ...createObjectInstance(ObjectTypeId.Sphere, v2(0, 0)), typeId: "ghost" };
   expect(() => evaluateField(resolveObjects([ghost]), 8, 8)).toThrow(/unknown object type/);
 });
+
+test("per-object opacity: 0.5 halves the height contribution + the mask; 0 is inert", () => {
+  const dome = createObjectInstance(ObjectTypeId.Sphere, v2(64, 64));
+  const full = evaluateField(resolveObjects([dome]), 128, 128).heightMap[px({ width: 128 }, 64, 64)]!;
+  dome.opacity = 0.5;
+  const r = evaluateField(resolveObjects([dome]), 128, 128);
+  expect(r.heightMap[px(r, 64, 64)]!).toBeCloseTo(full / 2, 5);
+  expect(r.mask[px(r, 64, 64)]!).toBeCloseTo(0.5, 5);
+  dome.opacity = 0;
+  const zero = evaluateField(resolveObjects([dome]), 128, 128);
+  expect(zero.heightMap[px(zero, 64, 64)]!).toBe(0);
+  expect(zero.mask[px(zero, 64, 64)]!).toBe(0);
+});
+
+test("per-object opacity lerps against the accumulated surface (half-opacity stud on a slab)", () => {
+  const slab = createObjectInstance(ObjectTypeId.Plateau, v2(64, 64)); // 24px slab
+  const stud = createObjectInstance(ObjectTypeId.Sphere, v2(64, 64)); // 48px dome on top
+  stud.opacity = 0.5;
+  const r = evaluateField(resolveObjects([slab, stud]), 128, 128);
+  // slab surface 24, dome combined (max) = 48; half opacity -> midway = 36
+  expect(r.heightMap[px(r, 64, 64)]!).toBeCloseTo((24 + 48) / 2, 0);
+});

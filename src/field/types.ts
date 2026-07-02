@@ -8,9 +8,9 @@ export interface ParamSpecPx {
   default: number;
   min?: number;
   max?: number;
-  /** Inspector scrub/step increment (default 1). Use a fraction for 0..1 sliders. */
-  step?: number;
-  /** Allow fractional values (inspector edits to 0.01 precision instead of whole numbers). */
+  /** Allow fractional values (inspector edits to 0.01 precision instead of whole numbers). The scrub
+   *  increment itself is universal in carapace's SpinSlider (0.01 / Shift 0.1 / Ctrl 1.0), so there is
+   *  no per-param step. */
   float?: boolean;
 }
 
@@ -66,17 +66,17 @@ export interface ObjectInstance {
   transform: Transform2D;
   params: Record<string, number | string | boolean>;
   controlPoints: Vector2[];
-  /** Analytic vector paths (Pipe/Berm (Vector)): the cubic-Bézier pen path (anchors + tangent
+  /** Analytic vector paths (Cable/Ridge): the cubic-Bézier pen path (anchors + tangent
    *  handles), evaluated directly; controlPoints stays empty so the packer ships the anchors. */
   bezier?: BezierAnchor[];
-  /** Bézier path is a closed loop (last anchor joins the first): an O-ring pipe/berm, and the basis
+  /** Bézier path is a closed loop (last anchor joins the first): an O-ring cable/ridge, and the basis
    *  for a filled vector outline. Open by default. */
   closed?: boolean;
   /** Anchor indices where each Bézier subpath (loop) begins; absent = a single path starting at 0.
-   *  Used by Plateau (Vector) (base + top ring) and Surface (Vector) holes. */
+   *  Used by Mesa (base + top ring) and Contour holes. */
   subpathStarts?: number[];
   /** Baked vertex count of each contour after baking the subpaths ([outer, hole1, hole2, ...] for a
-   *  Surface (Vector); [base, top] for a Plateau (Vector)). Set by the bake; drives the multi-contour
+   *  Contour; [base, top] for a Mesa). Set by the bake; drives the multi-contour
    *  hole CSG. Absent = a single contour. */
   contourCounts?: number[];
   /** "rings" objects (plateau): index where the top ring begins = base-ring vertex count.
@@ -86,6 +86,9 @@ export interface ObjectInstance {
   mesh?: MeshData;
   /** Per-object trim masks; each gates ONLY this object's influence. Absent = unmasked. */
   masks?: Mask[];
+  /** Fold-contribution weight 0..1: 1/absent = full effect, 0 = inert. Lerps the object's height step
+   *  into the accumulated surface and scales its mask influence (meaningful for carve/replace too). */
+  opacity?: number;
   visible: boolean;
   locked: boolean;
 }
@@ -140,7 +143,7 @@ export interface FieldSample {
 export interface ObjectType {
   id: string;
   name: string;
-  /** Library palette group: "Primitives", "Vectors", or "Meshes". Absent = ungrouped/hidden. */
+  /** Library palette group: "Shapes", "Paths", or "Mesh". Absent = ungrouped/hidden. */
   category?: string;
   params: Record<string, ParamSpec>;
   controlPoints: ControlPointSpec;

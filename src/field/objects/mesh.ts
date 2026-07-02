@@ -22,13 +22,13 @@ function seedQuad(object: ObjectInstance): void {
  * Mesh — a free triangulated height surface. Vertices live in controlPoints (xy) with a parallel z[]
  * and a triangle list in ObjectInstance.mesh; eval (CPU + the shared `shape_meshfield` WGSL) is the
  * barycentric height under each pixel, blended toward Phong by `smoothness`. Dragged from the library
- * as a flat quad, then sculpted by moving vertices and editing heights. Grid/Revolve/Loft/Noise are
- * the same surface with a richer starting seed.
+ * as a flat quad (2 triangles — start simple, refine with edge splits), then sculpted by moving
+ * vertices and editing heights. Flat/faceted primitives can also bake INTO a Mesh (convert.ts).
  */
 export const Mesh = defineObjectType({
   id: ObjectTypeId.Mesh,
   name: "Mesh",
-  category: "Meshes",
+  category: "Mesh",
   params: { ...MESH_PARAMS },
   controlPoints: { kind: "mesh", default: [] },
   onCreate: seedQuad,

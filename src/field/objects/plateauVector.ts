@@ -5,7 +5,7 @@ import { v2 } from "../vec";
 import { plateauEval, plateauWgsl } from "./plateau";
 
 /**
- * Plateau (Vector) — the Bézier twin of the primitive Plateau: a base ring and a top rim, both CLOSED
+ * Mesa — the Bézier twin of the primitive Plateau: a base ring and a top rim, both CLOSED
  * Bézier loops (subpaths) baked into the two controlPoint rings the shared Plateau eval/WGSL consume
  * (base + top split at ringSplit, analytic distance ramp between them). `bezier` holds both loops
  * concatenated; `subpathStarts` marks the boundary; Gizmos rebakes the rings on every edit. Drawable
@@ -13,8 +13,8 @@ import { plateauEval, plateauWgsl } from "./plateau";
  */
 export const PlateauVector = defineObjectType({
   id: ObjectTypeId.PlateauVector,
-  name: "Plateau (Vector)",
-  category: "Vectors",
+  name: "Mesa",
+  category: "Paths",
   params: {
     profile: { type: "enum", options: PROFILE_KINDS, default: "linear" },
   },
@@ -31,6 +31,6 @@ export const PlateauVector = defineObjectType({
     o.ringSplit = r.ringSplit;
     o.contourCounts = r.contourCounts;
   },
-  wgsl: plateauWgsl("shape_plateau_vector_"),
+  wgsl: plateauWgsl("shape_mesa"),
   eval: plateauEval,
 });

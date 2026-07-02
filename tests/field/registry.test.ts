@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import { v2 } from "../../src/field/vec";
 import {
+  countUnknownLayers,
   createObjectInstance,
   defineObjectType,
   dropUnknownLayers,
@@ -66,6 +67,9 @@ test("dropUnknownLayers deletes unrecognized object types, keeps known, recurses
       { ...known, id: "child-legacy", typeId: "frustum" }, // unrecognized, nested
     ],
   } as unknown as LayerNode;
+
+  // countUnknownLayers reports what dropUnknownLayers would remove (top-level cable + nested frustum)
+  expect(countUnknownLayers([known, legacy, group])).toBe(2);
 
   const result = dropUnknownLayers([known, legacy, group]);
   expect(result.map((n) => n.id)).toEqual([known.id, "g"]); // legacy object dropped, group kept

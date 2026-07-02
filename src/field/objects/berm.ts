@@ -5,12 +5,12 @@ import { defineObjectType, enumParam, numParam, ObjectTypeId } from "../registry
  * Berm — a straight flat-topped embankment (a levee; the trapezoid sibling of the Pipe bar). A bar of
  * `length` whose cross-section is a flat top spanning (width − slope) either side of the centreline,
  * with linear sloped sides over `slope`, rising to `height`. `cap` flat-cuts the ends (round rounds
- * them off). The Bézier twin is Berm (Vector). Pure parametric — no editable vertices.
+ * them off). The Bézier twin is Ridge. Pure parametric — no editable vertices.
  */
 export const Berm = defineObjectType({
   id: ObjectTypeId.Berm,
   name: "Berm",
-  category: "Primitives",
+  category: "Shapes",
   params: {
     length: { type: "px", default: 80, min: 1, float: true },
     width: { type: "px", default: 16, min: 1, float: true },
@@ -24,11 +24,11 @@ export const Berm = defineObjectType({
   // segment; linear sides over `slope` (apply_profile kind 1), flat top where the ramp clamps to 1.
   wgsl: /* wgsl */ `
 fn shape_berm(p: vec2f, base: u32) -> vec2f {
-  let half = rec(base, 13u) * 0.5;
-  let width = rec(base, 14u);
-  let slope = rec(base, 15u);
-  let H = rec(base, 16u);
-  let flatCap = rec(base, 17u) > 0.5;
+  let half = rec(base, SLOT_PARAM0) * 0.5;
+  let width = rec(base, SLOT_PARAM1);
+  let slope = rec(base, SLOT_PARAM2);
+  let H = rec(base, SLOT_PARAM3);
+  let flatCap = rec(base, SLOT_PARAM4) > 0.5;
   if (flatCap) {
     let dy = abs(p.y) - width;
     let dx = abs(p.x) - half;

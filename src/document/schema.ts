@@ -1,6 +1,7 @@
 import { Vector2, Vector3 } from "@carapace/primitives";
 import { z } from "zod";
 import type { CanvasState, LayerNode, ObjectInstance } from "../field/types";
+import { dropUnknownLayers } from "../field/registry";
 
 const vec2Schema = z.object({ x: z.number(), y: z.number() });
 const bezierAnchorSchema = z.object({
@@ -9,7 +10,10 @@ const bezierAnchorSchema = z.object({
   hOut: vec2Schema,
   mode: z.enum(["smooth", "manual"]).optional(),
   sym: z.boolean().optional(),
-  radius: z.number().optional(), // Pipe (Vector) per-anchor taper
+  /** Per-anchor cross-section multiplier (stroke taper); default 1. */
+  scale: z.number().optional(),
+  /** LEGACY (pre-scale): Cable per-anchor radius — migrated to `scale` on load. */
+  radius: z.number().optional(),
 });
 
 const maskSchema = z.object({
@@ -39,11 +43,11 @@ const objectSchema = z.object({
   }),
   params: z.record(z.string(), z.union([z.number(), z.string(), z.boolean()])),
   controlPoints: z.array(vec2Schema),
-  /** Analytic vector paths (Pipe/Berm (Vector)): the cubic-Bézier pen path. */
+  /** Analytic vector paths (Cable/Ridge): the cubic-Bézier pen path. */
   bezier: z.array(bezierAnchorSchema).optional(),
   /** Bézier path is a closed loop (last anchor joins the first). Open by default. */
   closed: z.boolean().optional(),
-  /** Anchor indices where each Bézier subpath begins (Plateau (Vector) rings / Surface holes). */
+  /** Anchor indices where each Bézier subpath begins (Mesa rings / Surface holes). */
   subpathStarts: z.array(z.number().int().nonnegative()).optional(),
   /** Baked per-contour vertex counts ([outer, ...holes] / [base, top]); drives the hole CSG. */
   contourCounts: z.array(z.number().int().nonnegative()).optional(),
@@ -59,6 +63,8 @@ const objectSchema = z.object({
     .optional(),
   /** Per-object trim masks (closed Bézier loops). */
   masks: z.array(maskSchema).optional(),
+  /** Fold-contribution weight 0..1 (absent = 1). */
+  opacity: z.number().min(0).max(1).optional(),
   visible: z.boolean(),
   locked: z.boolean(),
 });
@@ -100,13 +106,49 @@ const normalDirsSchema = z
     red: z.enum(["right", "left"]).default("right"),
     green: z.enum(["up", "down"]).default("up"),
   })
-  .default(DEFAULT_NORMAL_DIRS);
+  // factory, not the shared constant: a plain `.default(DEFAULT_NORMAL_DIRS)` hands every default-parse
+  // the SAME object, so one in-place mutation would poison the module constant for all later parses
+  .default(() => ({ ...DEFAULT_NORMAL_DIRS }));
 
 // --- project file (project.lambert): folder-level config ---
+
+/** The highest on-disk schema this build understands. Files above it were written by a newer Lambert. */
+export const SUPPORTED_SCHEMA_VERSION = 1;
+
+/** Turn a newer-than-supported file into a clear "update Lambert" message instead of a raw zod
+ *  "expected 1" error (which reads like corruption). Version 1 and malformed files fall through to
+ *  the normal schema parse. */
+function assertSupportedVersion(raw: unknown, kind: "project" | "document"): void {
+  const v = (raw as { schemaVersion?: unknown } | null)?.schemaVersion;
+  if (typeof v === "number" && v > SUPPORTED_SCHEMA_VERSION) {
+    throw new Error(
+      `This ${kind} was made by a newer version of Lambert (schema v${v}; this build supports ` +
+        `v${SUPPORTED_SCHEMA_VERSION}). Update Lambert to open it.`,
+    );
+  }
+}
+
+/** A user-saved object preset: a serialized ObjectInstance used as a template (ids re-rolled and the
+ *  position replaced on instantiation). Lives in project.lambert so it travels with the project; the
+ *  File menu imports/exports these as a standalone .json library. */
+export const savedPresetSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  object: objectSchema,
+});
+export type SavedPreset = z.infer<typeof savedPresetSchema>;
+
+/** The import/export envelope for a shared preset library file. */
+export const presetLibrarySchema = z.object({
+  schemaVersion: z.literal(1),
+  presets: z.array(savedPresetSchema),
+});
 
 export const projectConfigSchema = z.object({
   schemaVersion: z.literal(1),
   normalDirs: normalDirsSchema,
+  /** User-saved object presets (the palette's "Project" section). */
+  presets: z.array(savedPresetSchema).optional(),
 });
 
 export type ProjectConfig = z.infer<typeof projectConfigSchema>;
@@ -116,14 +158,16 @@ export function emptyProjectConfig(): ProjectConfig {
 }
 
 export function parseProjectConfig(json: string): ProjectConfig {
-  return projectConfigSchema.parse(JSON.parse(json));
+  const raw = JSON.parse(json);
+  assertSupportedVersion(raw, "project");
+  return projectConfigSchema.parse(raw);
 }
 
 export function serializeProjectConfig(config: ProjectConfig): string {
   return JSON.stringify(config, null, 2) + "\n";
 }
 
-// --- per-image document (.lnb): one image's objects + view state ---
+// --- per-image document (.lmb): one image's objects + view state ---
 
 const canvasSchema = z.object({
   origin: z.object({ x: z.number(), y: z.number() }),
@@ -172,7 +216,8 @@ const hydrateAnchor = (a: any) => ({
   hOut: new Vector2(a.hOut.x, a.hOut.y),
   mode: a.mode,
   sym: a.sym,
-  radius: a.radius,
+  scale: a.scale,
+  radius: a.radius, // legacy carry — hydrateObjectRaw migrates it to scale
 });
 const hydrateMask = (m: any) => ({ ...m, anchors: m.anchors.map(hydrateAnchor) });
 const hydrateTransform = (t: any) => ({
@@ -181,12 +226,23 @@ const hydrateTransform = (t: any) => ({
   scale: new Vector3(t.scale.x, t.scale.y, t.scale.z),
 });
 
-function hydrateObjectRaw(s: any): ObjectInstance {
+/** Hydrate one plain-JSON object into a live ObjectInstance (real Vector2/3s). Exported for the saved
+ *  preset templates (project.lambert), which store objects in the same serialized shape as .lmb. */
+export function hydrateObjectRaw(s: any): ObjectInstance {
+  let bezier = s.bezier?.map(hydrateAnchor);
+  // LEGACY migration: pre-scale files stored a Cable taper as absolute per-anchor `radius`;
+  // the model is now a relative per-anchor `scale` multiplier (radius_param · scale).
+  if (bezier?.some((a: any) => typeof a.radius === "number")) {
+    const base = typeof s.params?.radius === "number" && s.params.radius > 0 ? s.params.radius : 1;
+    bezier = bezier.map(({ radius, ...a }: any) => (typeof radius === "number" ? { ...a, scale: radius / base } : a));
+  } else {
+    bezier = bezier?.map(({ radius: _radius, ...a }: any) => a);
+  }
   return {
     ...s,
     transform: hydrateTransform(s.transform),
     controlPoints: hydrateVec2List(s.controlPoints),
-    bezier: s.bezier?.map(hydrateAnchor),
+    bezier,
     masks: s.masks?.map(hydrateMask),
   } as ObjectInstance;
 }
@@ -194,7 +250,7 @@ function hydrateObjectRaw(s: any): ObjectInstance {
 /**
  * Hydrate plain {x,y} vectors into carapace Vector instances — recursively over the layer tree.
  * JSON.parse yields prototype-less objects; the runtime expects real Vector2/Vector3. Shared by
- * .lnb load and session restore; idempotent (reads .x/.y, safe on already-hydrated trees).
+ * .lmb load and session restore; idempotent (reads .x/.y, safe on already-hydrated trees).
  */
 export function normalizeLayers(raw: any[]): LayerNode[] {
   const out: LayerNode[] = [];
@@ -221,15 +277,30 @@ export function normalizeLayers(raw: any[]): LayerNode[] {
 
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-export function parseDoc(json: string): LambertDoc {
-  const raw = docSchema.parse(JSON.parse(json));
-  const layers = raw.layers ?? [];
+/** Hydrate a schema-validated raw doc into a live LambertDoc: plain JSON -> live vectors
+ *  (normalizeLayers, incl. the legacy anchor-radius migration), unknown object types dropped
+ *  (graceful degrade for removed/newer types), canvas defaulted. The ONE hydration path — shared by
+ *  .lmb parse and session-restore so the two can't drift. */
+export function hydrateDoc(raw: {
+  schemaVersion: LambertDoc["schemaVersion"];
+  source: LambertDoc["source"];
+  layers?: unknown;
+  canvas?: CanvasState;
+}): LambertDoc {
   return {
     schemaVersion: raw.schemaVersion,
     source: raw.source,
-    layers: normalizeLayers(layers as unknown[] as any[]),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    layers: dropUnknownLayers(normalizeLayers(((raw.layers ?? []) as unknown[]) as any[])),
     canvas: raw.canvas ?? defaultCanvas(raw.source.width, raw.source.height),
   };
+}
+
+export function parseDoc(json: string): LambertDoc {
+  const parsed = JSON.parse(json);
+  assertSupportedVersion(parsed, "document");
+  const raw = docSchema.parse(parsed);
+  return hydrateDoc(raw as Parameters<typeof hydrateDoc>[0]);
 }
 
 export function serializeDoc(doc: LambertDoc): string {

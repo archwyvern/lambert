@@ -26,8 +26,6 @@ export interface PreviewParams {
   lightEnergy: number;
   /** Project channel signs for the normal-view encode (normalSigns(doc.normalDirs)). */
   normalSigns: { red: number; green: number };
-  /** Raster view: doc-res exported pixels (pixelated). false = crisp display-res vector view. */
-  raster: boolean;
   /** Orbit camera for the attached 3D inspection canvas; null/undefined skips the pass. */
   orbit3d?: Orbit | null;
 }
@@ -327,8 +325,7 @@ export class PreviewRenderer {
     f[10] = p.lightDir[2];
     f[11] = p.normalSigns.red;
     f[12] = p.normalSigns.green;
-    u[13] = p.raster ? 1 : 0;
-    f[14] = p.lightEnergy;
+    f[13] = p.lightEnergy;
     this.device.queue.writeBuffer(this.uniforms, 0, ub);
 
     const bind = this.device.createBindGroup({

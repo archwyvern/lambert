@@ -43,7 +43,7 @@ test("corner crease: base vertex lofts straight to its paired top vertex", () =>
   expect(plateau.eval(v2(29, 0), inst).height).toBeCloseTo(24 * (3 / 12));
 });
 
-test("Plateau (Vector) bakes two closed loops into base+top rings and ramps like Plateau", () => {
+test("Mesa bakes two closed loops into base+top rings and ramps like Plateau", () => {
   const pv = createObjectInstance(ObjectTypeId.PlateauVector, v2(0, 0));
   expect(pv.subpathStarts).toEqual([0, 4]);
   expect(pv.ringSplit).toBeGreaterThan(0);

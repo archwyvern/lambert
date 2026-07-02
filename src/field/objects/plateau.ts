@@ -3,6 +3,7 @@ import { frustumStrip } from "../controlPoints";
 import { applyProfile, PROFILE_KINDS, ProfileKind } from "../profiles";
 import { defineObjectType, enumParam, ObjectTypeId } from "../registry";
 import { sdPolygon } from "../sdf";
+import { triBary } from "../tri";
 import type { FieldSample, ObjectInstance } from "../types";
 import { clamp, v2 } from "../vec";
 
@@ -12,23 +13,19 @@ import { clamp, v2 } from "../vec";
  * the same anchor count), and each side lofts as a flat trapezoid, height ramping 0 (base) -> 1 (top)
  * shaped by `profile`. Seams fall on the natural corner edges, not the polygon's medial axis. A single
  * top vertex fans to an apex (a pyramid); the distance ramp is only the fallback for points no slope
- * triangle covers. (Plateau and Pyramid are palette presets; Plateau (Vector) shares this eval/WGSL,
+ * triangle covers. (Plateau and Pyramid are palette presets; Mesa shares this eval/WGSL,
  * lofting two baked Bézier rings.)
  */
 
-/** Barycentric height inside triangle abc (corner heights ha/hb/hc); null if p is outside it. */
+/** Barycentric height inside triangle abc (corner heights ha/hb/hc); null if p is outside it.
+ *  Same containment (incl. the shared-edge tolerance) as the mesh field — one triBary for both. */
 function triHeight(p: Vector2, a: Vector2, b: Vector2, c: Vector2, ha: number, hb: number, hc: number): number | null {
-  const det = (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
-  if (Math.abs(det) < 1e-9) return null;
-  const u = ((p.x - a.x) * (c.y - a.y) - (c.x - a.x) * (p.y - a.y)) / det;
-  const v = ((b.x - a.x) * (p.y - a.y) - (p.x - a.x) * (b.y - a.y)) / det;
-  const eps = -1e-4; // tolerant on shared edges so adjacent faces always cover the seam
-  if (u < eps || v < eps || u + v > 1 - eps) return null;
-  return ha + u * (hb - ha) + v * (hc - ha);
+  const bc = triBary(p, a, b, c);
+  return bc === null ? null : ha + bc.u * (hb - ha) + bc.v * (hc - ha);
 }
 
 /** Two-ring loft height field (base + top, split at ringSplit). Shared by Plateau (straight rings) and
- *  Plateau (Vector) (rings baked from two closed Bézier loops). */
+ *  Mesa (rings baked from two closed Bézier loops). */
 export function plateauEval(p: Vector2, object: ObjectInstance): FieldSample {
   const h = 24;
   const profile = enumParam(object, "profile") as ProfileKind;
@@ -63,10 +60,10 @@ export function plateauWgsl(fn: string): string {
   return /* wgsl */ `
 fn ${fn}(p: vec2f, base: u32) -> vec2f {
   let h = 24.0;
-  let prof = u32(rec(base, 13u));
-  let cs = u32(rec(base, 11u));
-  let nB = u32(rec(base, 2u));
-  let nT = u32(rec(base, 12u)) - nB;
+  let prof = u32(rec(base, SLOT_PARAM0));
+  let cs = u32(rec(base, SLOT_CP_START));
+  let nB = u32(rec(base, SLOT_RING));
+  let nT = u32(rec(base, SLOT_CP_COUNT)) - nB;
   let sdB = sd_polygon(p, cs, nB);
   let sdT = sd_polygon(p, cs + nB, nT);
   var t = 0.0;
@@ -104,7 +101,7 @@ fn ${fn}(p: vec2f, base: u32) -> vec2f {
 export const Plateau = defineObjectType({
   id: ObjectTypeId.Plateau,
   name: "Plateau",
-  category: "Primitives",
+  category: "Shapes",
   params: {
     profile: { type: "enum", options: PROFILE_KINDS, default: "linear" },
   },

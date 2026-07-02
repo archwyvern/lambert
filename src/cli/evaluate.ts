@@ -3,8 +3,8 @@ import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { decode } from "fast-png";
-import { emptyProjectConfig, parseDoc, parseProjectConfig } from "../document/schema";
-import { PROJECT_FILE } from "../document/workspace";
+import { parseDoc } from "../document/schema";
+import { resolveNormalDirs } from "../document/normalDirs";
 import { resolveDiffuse, type DiffuseHost } from "../document/diffuseSource";
 import { flattenLayers } from "../field/flatten";
 import { renderField } from "../field/render";
@@ -12,18 +12,6 @@ import { encodeHeightmapPng } from "../exporters/heightmap";
 import { encodeNormalPng } from "../exporters/normalmap";
 import { diffuseOpacity, encodeNxPng } from "../exporters/nx";
 import "../field/objects";
-
-/** Walk up from a doc's directory to find the project's normal-channel convention. */
-function resolveNormalDirs(docDir: string): ReturnType<typeof emptyProjectConfig>["normalDirs"] {
-  let dir = docDir;
-  for (;;) {
-    const candidate = path.join(dir, PROJECT_FILE);
-    if (existsSync(candidate)) return parseProjectConfig(readFileSync(candidate, "utf8")).normalDirs;
-    const parent = path.dirname(dir);
-    if (parent === dir) return emptyProjectConfig().normalDirs;
-    dir = parent;
-  }
-}
 
 // Headless diffuse resolver: file:// reads the local FS; http(s):// fetches + caches under a CLI-local
 // dir (its own, not the app's userData — the CLI is a dev/CI tool; sharing isn't worth the platform glue).
@@ -33,9 +21,12 @@ const cliHost: DiffuseHost = {
   fetchUrl: async (url, opts) => {
     const cacheFile = path.join(CLI_CACHE, createHash("sha256").update(url).digest("hex"));
     if (!opts?.refresh && existsSync(cacheFile)) return new Uint8Array(readFileSync(cacheFile));
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(15000) }); // don't hang CI on a dead host
     if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${url}`);
     const bytes = new Uint8Array(await res.arrayBuffer());
+    // reject a non-PNG body (error page / truncated) before caching it — else it's served forever
+    const png = bytes.length >= 8 && [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((b, i) => bytes[i] === b);
+    if (!png) throw new Error(`fetched ${url} but it isn't a PNG image (wrong URL or an error page?)`);
     mkdirSync(CLI_CACHE, { recursive: true });
     writeFileSync(cacheFile, bytes);
     return bytes;
@@ -43,9 +34,13 @@ const cliHost: DiffuseHost = {
 };
 
 async function main(): Promise<void> {
-  const [docPath, outDirArg] = process.argv.slice(2);
+  const args = process.argv.slice(2);
+  // The height/normal PNGs are debug aids that DON'T match the shipped NX (8-bit half-range blue,
+  // alpha=255 vs the NX's 16-bit gated alpha), so they're off by default to avoid clutter + confusion.
+  const debug = args.includes("--debug");
+  const [docPath, outDirArg] = args.filter((a) => !a.startsWith("--"));
   if (!docPath) {
-    console.error("usage: pnpm eval <file.lmb> [outDir]");
+    console.error("usage: pnpm eval <file.lmb> [outDir] [--debug]");
     process.exit(2);
   }
 
@@ -68,9 +63,13 @@ async function main(): Promise<void> {
   const stem = path.basename(docPath).replace(/\.lmb$/i, "");
   const nxPath = path.join(outDir, `${stem}.nx.png`);
   writeFileSync(nxPath, encodeNxPng(r.normals, r.mask, r.width, r.height, normalDirs, diffuseOpacity(source)));
-  writeFileSync(path.join(outDir, `${stem}.height.png`), encodeHeightmapPng(r));
-  writeFileSync(path.join(outDir, `${stem}.normal.png`), encodeNormalPng(r.normals, r.width, r.height, normalDirs));
-  console.log(`wrote ${nxPath} (+ height/normal debug maps)`);
+  if (debug) {
+    writeFileSync(path.join(outDir, `${stem}.height.png`), encodeHeightmapPng(r));
+    writeFileSync(path.join(outDir, `${stem}.normal.png`), encodeNormalPng(r.normals, r.width, r.height, normalDirs));
+    console.log(`wrote ${nxPath} (+ --debug height/normal maps; these are NOT the shipped NX)`);
+  } else {
+    console.log(`wrote ${nxPath}`);
+  }
 }
 
 void main();

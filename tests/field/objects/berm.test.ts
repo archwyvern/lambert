@@ -1,9 +1,10 @@
 import { expect, test } from "vitest";
 import "../../../src/field/objects";
+import { bezierAnchor } from "../../../src/field/bezier";
 import { createObjectInstance, getObjectType, ObjectTypeId } from "../../../src/field/registry";
 import { v2 } from "../../../src/field/vec";
 
-// Berm (Vector): width 16, slope 6, height 12, straight path (-40,0)..(40,0). Flat top spans |d| < 10.
+// Ridge: width 16, slope 6, height 12, straight path (-40,0)..(40,0). Flat top spans |d| < 10.
 const berm = getObjectType(ObjectTypeId.BermVector);
 const inst = createObjectInstance(ObjectTypeId.BermVector, v2(0, 0));
 
@@ -30,4 +31,20 @@ test("berm (primitive): flat top + linear sides about the centreline, cut at the
   expect(prim.eval(v2(0, 13), p).height).toBeCloseTo(6); // inside 3 of slope 6 -> half
   expect(prim.eval(v2(0, 16), p).height).toBeCloseTo(0); // at the width edge
   expect(prim.eval(v2(50, 0), p).height).toBeCloseTo(0); // past the flat cap (half-length 40)
+});
+
+test("per-anchor SCALE tapers the whole berm cross-section (width+slope+height as a unit)", () => {
+  const inst = createObjectInstance(ObjectTypeId.BermVector, v2(0, 0));
+  inst.params.width = 10;
+  inst.params.slope = 4;
+  inst.params.height = 12;
+  const sc = (x: number, s?: number) => (s === undefined ? bezierAnchor(v2(x, 0), v2(0, 0), v2(0, 0), "manual") : { ...bezierAnchor(v2(x, 0), v2(0, 0), v2(0, 0), "manual"), scale: s });
+  const taper = { ...inst, bezier: [sc(-40, 2), sc(40, 0.5)] };
+  const t = getObjectType(ObjectTypeId.BermVector);
+  // on the spine the flat-top height equals height·scale: 24 at the wide end, 6 at the narrow, 15 mid
+  expect(t.eval(v2(-40, 0), taper).height).toBeCloseTo(24, 0);
+  expect(t.eval(v2(40, 0), taper).height).toBeCloseTo(6, 0);
+  expect(t.eval(v2(0, 0), taper).height).toBeCloseTo(15, 0);
+  // the footprint edge follows width·scale: |y| = 20 is sd 0 at the wide end
+  expect(t.eval(v2(-40, 20), taper).sd).toBeCloseTo(0, 0);
 });

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import "../../src/field/objects"; // register object types (parseDoc drops unknown typeIds)
 import { emptyDoc, parseDoc, serializeDoc } from "../../src/document/schema";
 
 describe("doc.canvas", () => {

@@ -1,13 +1,32 @@
 import { clamp } from "./vec";
 
-export type CombineOp = "max" | "carve";
+export type CombineOp = "max" | "carve" | "replace";
+
+/** Fold-op index packed into the GPU record (must match `combine_height` in gpu/wgsl.ts). */
+export const COMBINE_OP_INDEX: Record<CombineOp, number> = { max: 0, carve: 1, replace: 2 };
 
 /**
- * Fold step. max = objects clip into each other like solids; carve subtracts.
- * The op is a property of the object TYPE, not a per-object setting.
+ * Fold step. max = objects clip into each other like solids; carve subtracts; replace overwrites the
+ * accumulated height with this object's (a stencil — the object's surface wins outright inside its
+ * footprint, ignoring what's beneath). Usually a property of the object TYPE (defaultCombine), overridable
+ * per-instance by types with an `invert` param — see objectCombineOp.
  */
 export function combineHeight(op: CombineOp, H: number, h: number): number {
-  return op === "carve" ? Math.min(H, H - h) : Math.max(H, h);
+  if (op === "carve") return Math.min(H, H - h);
+  if (op === "replace") return h;
+  return Math.max(H, h);
+}
+
+/** Resolve an object's fold op: an `invert` enum param ("raise"|"carve"|"replace") drives it
+ *  per-instance (Pipe/Berm); otherwise the type's defaultCombine (or max). The single source of truth
+ *  for both the CPU fold (evalCpu) and the GPU pack (pack.ts), so they never diverge. */
+export function objectCombineOp(params: Record<string, unknown>, defaultCombine: CombineOp | undefined): CombineOp {
+  if ("invert" in params) {
+    if (params.invert === "carve") return "carve";
+    if (params.invert === "replace") return "replace";
+    return "max"; // "raise"
+  }
+  return defaultCombine ?? "max";
 }
 
 /**

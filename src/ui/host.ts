@@ -1,4 +1,5 @@
 import { createIpcFs } from "@carapace/shell";
+import { createIpcOs, type OsBridge } from "@carapace/shell/ipc";
 import type { CarapaceHost, FsBridge } from "@carapace/shell";
 
 export interface FileFilter {
@@ -26,6 +27,15 @@ export interface Host {
   fetchUrl(url: string, opts?: { refresh?: boolean }): Promise<Uint8Array>;
   /** Whether a path exists (project-marker / file checks). */
   pathExists(path: string): Promise<boolean>;
+  /** Raw `git status --porcelain=v1 -z` stdout for a dir ("" when not a repo / git absent). */
+  gitStatus(dir: string): Promise<string>;
+  /** Create a directory (recursive; no error if it already exists). */
+  mkdir(path: string): Promise<void>;
+  /** Frameless-window controls (the carapace TopBar renders the buttons). */
+  windowMinimize(): Promise<void>;
+  windowToggleMaximize(): Promise<void>;
+  windowClose(): Promise<void>;
+  windowIsMaximized(): Promise<boolean>;
   /** Session memory in Electron userData; null when no prior session exists. */
   loadSession(): Promise<string | null>;
   saveSession(json: string): Promise<void>;
@@ -51,6 +61,7 @@ export interface Host {
 interface HostWindow {
   lambertHost: Host & { sendSelftestResult(report: unknown): void };
   carapaceFs: FsBridge;
+  carapaceOs: OsBridge;
 }
 
 export function getHost(): Host {
@@ -58,19 +69,21 @@ export function getHost(): Host {
 }
 
 /**
- * The carapace host seam, consumed by the shared <FileExplorer> via <HostProvider>. Only the
- * `fs` adapter is real (the project file tree); window/dialog/clipboard are stubs Lambert
- * doesn't use through carapace (it has its own menu, dialogs, and IO via lambertHost).
+ * The carapace host seam, consumed by the shared <FileExplorer> and TopBar WindowControls via
+ * <HostProvider>. `fs` (the project file tree) and `window` (frameless-window controls) are real;
+ * dialog/clipboard stay stubs Lambert doesn't use through carapace (it has its own dialogs + IO
+ * via lambertHost).
  */
 export const carapaceHost: CarapaceHost = {
   window: {
-    minimize: () => {},
-    toggleMaximize: () => Promise.resolve(),
-    close: () => {},
-    isMaximized: () => Promise.resolve(false),
+    minimize: () => void getHost().windowMinimize(),
+    toggleMaximize: () => getHost().windowToggleMaximize(),
+    close: () => void getHost().windowClose(),
+    isMaximized: () => getHost().windowIsMaximized(),
     onMaximizeChanged: () => () => {},
   },
   fs: createIpcFs((window as unknown as HostWindow).carapaceFs),
+  os: createIpcOs((window as unknown as HostWindow).carapaceOs),
   dialog: {
     openFile: () => Promise.resolve(null),
     saveFile: () => Promise.resolve(null),

@@ -1,23 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import type { DocumentStore, EditorState } from "../document/store";
-import { addInstance, cloneObject, duplicateObject, moveObjectTo, removeObject, updateObject } from "../document/docOps";
-import { createFromPreset } from "../field/presets";
-import { addGuide, clearGuides, moveGuide, removeGuide } from "../document/canvasOps";
+import { addInstance, duplicateObject, moveObjectTo, removeObject, updateObject } from "../document/docOps";
+import { clearGuides, removeGuide } from "../document/canvasOps";
 import { bezierAnchor } from "../field/bezier";
 import { createMask } from "../field/maskOps";
 import { flattenLayers } from "../field/flatten";
-import { findNode, findParentId, nodeWorldAffine, updateNode } from "../document/layerOps";
-import { affineApply, affineIdentity, affineInvert } from "../field/affine";
+import { duplicateNode, findNode, nodeFrames, nodeWorldAffine, updateNode } from "../document/layerOps";
+import { affineApply, affineInvert } from "../field/affine";
 import { isGroup, isObject } from "../field/types";
 import { insertVertex } from "../field/controlPoints";
 import { getObjectType, ObjectTypeId } from "../field/registry";
-import { snapHalf } from "../field/snap";
 import { editSnap } from "./snapPoint";
 import { fromLocal, toLocal } from "../field/transform";
 import type { ObjectInstance } from "../field/types";
 import { normalSigns, type NormalDirs } from "../document/schema";
 import { Vector2, Vector3 } from "@carapace/primitives";
-import { EmptyState } from "@carapace/shell";
+import { EmptyState, ShortcutGuide, SpinSlider } from "@carapace/shell";
 import { v2 } from "../field/vec";
 import { ContextMenu, type MenuEntry } from "./kit";
 import { Gizmos } from "./Gizmos";
@@ -26,38 +24,60 @@ import { axisScaleFromDrag, constrainAxis, pickObject, pointsInBox, rotationFrom
 import { PreviewRenderer } from "./preview";
 import { RULER, Rulers } from "./Rulers";
 import { guide2D, type GuideContext } from "./keymap";
-import { ShortcutGuide } from "./ShortcutGuide";
 import type { Orbit } from "../field/gpu/preview3d";
-import { canvasToScreen, fitViewport, screenToCanvas, Viewport, zoomAt } from "./viewport";
+import { canvasToScreen, screenToCanvas, Viewport, zoomAt } from "./viewport";
+import { useCanvasViewport } from "./useCanvasViewport";
+import { useGuideDrag } from "./useGuideDrag";
+import { PEN_CLOSE_PX, usePenDraft } from "./usePenDraft";
+import { localBounds } from "./objectBounds";
+import { CANCEL_DRAG_EVENT } from "./usePointerDrag";
 import type { Placing, ToolMode } from "./tools";
 import type { ViewState } from "./App";
 
 type Drag =
   | { kind: "pan"; lastX: number; lastY: number }
+  | { kind: "measure" } // endpoints live in the `measure` state (they render after release too)
   // moved: crossed the click-vs-drag threshold (until then the drag writes nothing). dupOnMove: this
   // is an Alt-drag, so the first real move clones the object and the copy is what gets dragged.
-  // group: present for a multi-selection drag — each selected node's start pos + its parent's inverse
-  // linear (world delta -> that node's local delta), so they all move together by the same world delta.
+  // group: EVERY dragged node's start pos + its parent's inverse linear (world delta -> that node's
+  // local delta) — a single-object drag is a one-entry group, so nested objects under rotated/scaled
+  // parent groups move correctly too (QC-INT-1).
   | {
       kind: "move";
       id: string;
       startCanvas: Vector2;
-      startPos: Vector2;
+      /** The grabbed node's WORLD position at drag start — what grid/guide snapping targets. */
+      startWorld: Vector2;
       moved?: boolean;
       dupOnMove?: boolean;
-      group?: { id: string; startX: number; startY: number; il: { a: number; b: number; c: number; d: number } }[];
+      group: { id: string; startX: number; startY: number; il: { a: number; b: number; c: number; d: number } }[];
     }
-  | { kind: "rotate"; id: string; startCanvas: Vector2; startRotation: number; pivot: Vector2; moved?: boolean }
+  // pivot is the node's WORLD position; detSign flips the spin under a mirrored parent (negative det)
+  | { kind: "rotate"; id: string; startCanvas: Vector2; startRotation: number; pivot: Vector2; detSign: number; moved?: boolean }
   | {
       kind: "scale";
       id: string;
       startCanvas: Vector2;
       startScale: Vector3;
+      /** WORLD position of the node (the scale pivot). */
       pivot: Vector2;
+      /** WORLD-frame angle of the node's local x-axis (composes the parent's rotation). */
       rotation: number;
       moved?: boolean;
     }
-  | { kind: "marquee"; startCanvas: Vector2; current: Vector2; additive: boolean; base: number[]; moved: boolean };
+  | {
+      kind: "marquee";
+      startCanvas: Vector2;
+      current: Vector2;
+      additive: boolean;
+      // objects: box-select object footprints -> setSelection (select tool, empty-canvas drag). else: a
+      // vertex marquee over the selected control-point object (vertex tool). base/baseIds are the additive
+      // start set for each mode.
+      objects: boolean;
+      base: number[];
+      baseIds: string[];
+      moved: boolean;
+    };
 
 export function CanvasView(props: {
   store: DocumentStore;
@@ -65,8 +85,12 @@ export function CanvasView(props: {
   view: ViewState;
   tool: ToolMode;
   diffuseBytes: Uint8Array | null;
+  /** Palette id -> fresh instance (built-in identity tiles + user-saved presets) — see App. */
+  resolvePaletteObject: (presetId: string, pos: Vector2) => ObjectInstance;
   selVerts: number[];
   setSelVerts: (v: number[] | ((p: number[]) => number[])) => void;
+  /** Inspector "select this mask": routed through to MaskGizmo, which selects all its anchors. */
+  maskFocus: { nodeId: string; maskId: string; seq: number } | null;
   onLightChange: (dir: [number, number, number]) => void;
   onEnergyChange: (energy: number) => void;
   canvas3dRef: React.RefObject<HTMLCanvasElement | null>;
@@ -89,59 +113,74 @@ export function CanvasView(props: {
 }): React.JSX.Element {
   const { store, state, view, tool, diffuseBytes, selVerts, setSelVerts, onLightChange, onEnergyChange, canvas3dRef, orbit3d, normalDirs, swapped } =
     props;
-  const { tabId, savedViewport, onViewportChange, setTool, snap, rulers } = props;
+  const { tabId, savedViewport, onViewportChange, setTool, snap, rulers, resolvePaletteObject, maskFocus } = props;
   const inset = rulers ? RULER : 0;
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<PreviewRenderer | null>(null);
-  const [viewport, setViewport] = useState<Viewport>({ zoom: 1, panX: 0, panY: 0 });
   const [hostSize, setHostSize] = useState({ w: 0, h: 0 }); // inset canvas-area size, for the rulers
   const [gpuError, setGpuError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [cursor, setCursor] = useState<Vector2 | null>(null);
   const cursorRef = useRef(cursor);
   cursorRef.current = cursor;
+  const stateRef = useRef(state); // current selection/layers for window-level handlers (zoom-to-selection)
+  stateRef.current = state;
+  // pan/zoom + everything that drives it from outside a drag (seed/persist, menu zoom, wheel) — QC-CARRY-1
+  const { viewport, setViewport } = useCanvasViewport({
+    hostRef,
+    tabId,
+    docW: state.doc.source.width,
+    docH: state.doc.source.height,
+    savedViewport,
+    onViewportChange,
+    stateRef,
+  });
   const viewportRef = useRef(viewport); // for window-level drag closures (guide drag)
   viewportRef.current = viewport;
   const dragRef = useRef<Drag | null>(null);
+  // the object a press would grab right now (select tool, idle) — drives the grab cursor + a faint
+  // footprint outline so stacked scenes show the pick target before you commit to the click (QC-INT-14)
+  const [hoverId, setHoverId] = useState<string | null>(null);
+  // the measure tool's two endpoints (canvas space, snapped) — persists after release so the readout can
+  // be studied; cleared on the next press, tool switch, or Esc
+  const [measure, setMeasure] = useState<{ a: Vector2; b: Vector2 } | null>(null);
+  // hold-Space = temporary pan (any tool): left-drag pans while held (Photoshop/Figma). App swallows the
+  // keydown (no page scroll); we track held-state here. Cleared on keyup AND window blur (a missed keyup
+  // — e.g. Alt-Tab while held — must not leave pan stuck on).
+  const [spacePan, setSpacePan] = useState(false);
+  useEffect(() => {
+    const down = (e: KeyboardEvent): void => {
+      const tgt = e.target;
+      if (tgt instanceof HTMLInputElement || tgt instanceof HTMLTextAreaElement || tgt instanceof HTMLSelectElement) return;
+      if (e.code === "Space" && !e.repeat) setSpacePan(true);
+    };
+    const up = (e: KeyboardEvent): void => {
+      if (e.code === "Space") setSpacePan(false);
+    };
+    const blur = (): void => setSpacePan(false);
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    window.addEventListener("blur", blur);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", blur);
+    };
+  }, []);
   // a guide being dragged out of a ruler (not yet committed); `over` = cursor is over the canvas area
-  const [guideDraft, setGuideDraft] = useState<{ orient: "v" | "h"; at: number; over: boolean } | null>(null);
-  // an existing guide being dragged — drives the floating position tooltip (the new-guide case uses guideDraft)
-  const [guideDrag, setGuideDrag] = useState<{ orient: "v" | "h"; at: number } | null>(null);
+  // ruler-guide creation/drag (draft line, live move, drop-to-delete) — QC-CARRY-1 extraction
+  const { guideDraft, guideDrag, startGuideCreate, startGuideMove } = useGuideDrag({ hostRef, viewportRef, hostSize, store, snap });
   const [guideMenu, setGuideMenu] = useState<{ x: number; y: number; index: number } | null>(null);
   const [marquee, setMarquee] = useState<{ a: Vector2; b: Vector2 } | null>(null);
-  // click-to-place ("pen") mode: a new point follows the cursor; left-click drops it (chains)
-  const [placing, setPlacing] = useState<Placing | null>(null);
-  const [placeCursor, setPlaceCursor] = useState<Vector2 | null>(null);
   const [bodyMenu, setBodyMenu] = useState<{ x: number; y: number; id: string } | null>(null); // right-click an object
-  // leaving the object ends placing; Esc / Enter end it too
-  useEffect(() => setPlacing(null), [state.selectedId]);
-  // seed the pen ghost at the last cursor so it's visible immediately on entering placing mode
-  useEffect(() => {
-    if (placing) setPlaceCursor((pc) => pc ?? cursorRef.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [placing]);
-  useEffect(() => {
-    if (!placing) return;
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape" || e.key === "Enter") setPlacing(null);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [placing]);
-
-  // mask pen: a draft of placed points (canvas/world space); committed into a Mask on close
-  const [penPts, setPenPts] = useState<Vector2[]>([]);
-  const CLOSE_PX = 10; // screen px: clicking within this of the first point closes the loop
-  useEffect(() => setPenPts([]), [tool, state.selectedId, tabId]); // leaving pen abandons the draft
-  useEffect(() => {
-    if (tool !== "pen") return;
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape" || e.key === "Enter") setPenPts([]);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [tool]);
+  // click-to-place (pen-extend) + mask-pen draft state — QC-CARRY-1 extraction
+  const { placing, setPlacing, placeCursor, setPlaceCursor, penPts, setPenPts } = usePenDraft({
+    tool,
+    selectedId: state.selectedId,
+    tabId,
+    cursorRef,
+  });
 
   const doc = state.doc;
   // find an object leaf by id (groups return undefined — the canvas edits objects; groups via the gizmo)
@@ -154,72 +193,27 @@ export function CanvasView(props: {
   // grid + guide snap for any world point being edited (no-op when both toggles are off)
   const snapPt = editSnap(doc.canvas, snap, viewport.zoom);
 
-  // host-area screen point -> { docX, docY, over } where `over` is "cursor is inside the canvas area"
-  const hostPoint = (e: PointerEvent): { docX: number; docY: number; over: boolean } => {
-    const r = hostRef.current!.getBoundingClientRect();
-    const sx = e.clientX - r.left;
-    const sy = e.clientY - r.top;
-    const p = screenToCanvas(viewportRef.current, v2(sx, sy));
-    return { docX: p.x, docY: p.y, over: sx >= 0 && sy >= 0 && sx <= r.width && sy <= r.height };
-  };
-
-  // pull a new guide out of a ruler: top strip -> horizontal guide (at = doc-y), left -> vertical (at = doc-x).
-  // Live line follows; release over the canvas commits, release over a ruler cancels.
-  const startGuideCreate = (orient: "v" | "h"): void => {
-    const at0 = orient === "h" ? hostSize.h / 2 : hostSize.w / 2;
-    setGuideDraft({ orient, at: at0, over: false });
-    const move = (e: PointerEvent): void => {
-      const { docX, docY, over } = hostPoint(e);
-      const raw = orient === "h" ? docY : docX;
-      setGuideDraft({ orient, at: snap ? snapHalf(raw) : raw, over });
-    };
-    const up = (): void => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      setGuideDraft((d) => {
-        if (d && d.over) {
-          store.update((x) => addGuide(x, { orient: d.orient, at: d.at }));
-          store.endGesture();
-        }
-        return null;
-      });
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-  };
-
-  // drag an existing guide along its cross axis; dropping it back over its ruler deletes it
-  const startGuideMove = (index: number, orient: "v" | "h", e: React.PointerEvent): void => {
-    e.stopPropagation();
-    const move = (ev: PointerEvent): void => {
-      const { docX, docY } = hostPoint(ev);
-      const raw = orient === "h" ? docY : docX;
-      const at = snap ? snapHalf(raw) : raw;
-      setGuideDrag({ orient, at });
-      store.update((x) => moveGuide(x, index, at), { coalesce: `guide:${index}` });
-    };
-    const up = (ev: PointerEvent): void => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      setGuideDrag(null);
-      const r = hostRef.current!.getBoundingClientRect();
-      const offRuler = orient === "h" ? ev.clientY - r.top < 0 : ev.clientX - r.left < 0;
-      if (offRuler) store.update((x) => removeGuide(x, index));
-      store.endGesture();
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-  };
-
   // init renderer + canvas sizing
   useEffect(() => {
     const host = hostRef.current!;
     const canvas = canvasRef.current!;
+    // persists across resize() calls (same closure) so we can shift the viewport by the size delta
+    let prevSize: { w: number; h: number } | null = null;
     const resize = (): void => {
       const r = host.getBoundingClientRect();
       canvas.width = Math.max(1, Math.floor(r.width * devicePixelRatio));
       canvas.height = Math.max(1, Math.floor(r.height * devicePixelRatio));
       setHostSize({ w: r.width, h: r.height });
+      // Keep the view CENTRE pinned to the same world point when the canvas area grows/shrinks (window
+      // maximize/restore/drag): pan is an absolute screen-px offset, so without this the content stays
+      // pinned top-left and slides off-centre. Skip the initial 0->size (the seed/fit effect handles
+      // first layout).
+      if (prevSize && (prevSize.w !== r.width || prevSize.h !== r.height)) {
+        const dw = r.width - prevSize.w;
+        const dh = r.height - prevSize.h;
+        setViewport((vp) => ({ ...vp, panX: vp.panX + dw / 2, panY: vp.panY + dh / 2 }));
+      }
+      prevSize = { w: r.width, h: r.height };
     };
     resize();
     const ro = new ResizeObserver(resize);
@@ -234,25 +228,6 @@ export function CanvasView(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // menu-driven zoom (accelerators are owned by the application menu)
-  useEffect(() => {
-    const onZoom = (e: Event): void => {
-      const action = (e as CustomEvent<string>).detail;
-      const rect = hostRef.current!.getBoundingClientRect();
-      if (action === "zoom-fit") {
-        setViewport(fitViewport(doc.source.width, doc.source.height, rect.width, rect.height, 40));
-      } else if (action === "zoom-100") {
-        setViewport({
-          zoom: 1,
-          panX: (rect.width - doc.source.width) / 2,
-          panY: (rect.height - doc.source.height) / 2,
-        });
-      }
-    };
-    window.addEventListener("lambert-zoom", onZoom);
-    return () => window.removeEventListener("lambert-zoom", onZoom);
-  }, [doc.source.width, doc.source.height]);
-
   // attach the 3D canvas (owned by App's Preview3D) to the renderer; Preview3D sizes its own
   // backing store and the renderer reads canvas.width/height each frame
   useEffect(() => {
@@ -264,27 +239,18 @@ export function CanvasView(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
 
-  // upload diffuse when it changes
+  // upload diffuse when it changes. setDiffuse throws on a dims mismatch (the decoded diffuse ≠ the
+  // doc's source dims — e.g. the .lmb's recorded dims changed on disk since the diffuse was cached).
+  // Catch it: an uncaught throw here would escape the effect and, with no error boundary, unmount the
+  // whole app to a blank screen instead of showing an error.
   useEffect(() => {
     if (!ready || !rendererRef.current || !diffuseBytes) return;
-    rendererRef.current.setDiffuse(diffuseBytes, doc.source.width, doc.source.height);
+    try {
+      rendererRef.current.setDiffuse(diffuseBytes, doc.source.width, doc.source.height);
+    } catch (err) {
+      setGpuError(err instanceof Error ? err.message : String(err));
+    }
   }, [ready, diffuseBytes, doc.source.width, doc.source.height]);
-
-  // viewport persistence: when the active image changes, seed the view from its saved pan/zoom (or
-  // fit on first open); report every change up so App stashes it per-image. Refs keep the seed effect
-  // from re-firing on the reporter's identity or on the saved value echoing back.
-  const savedViewportRef = useRef(savedViewport);
-  savedViewportRef.current = savedViewport;
-  const onViewportChangeRef = useRef(onViewportChange);
-  onViewportChangeRef.current = onViewportChange;
-  useEffect(() => {
-    const rect = hostRef.current!.getBoundingClientRect();
-    setViewport(savedViewportRef.current ?? fitViewport(doc.source.width, doc.source.height, rect.width, rect.height, 40));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tabId]);
-  useEffect(() => {
-    onViewportChangeRef.current(viewport);
-  }, [viewport]);
 
   // render on any relevant change (rAF-coalesced inside the renderer)
   useEffect(() => {
@@ -298,7 +264,6 @@ export function CanvasView(props: {
       lightDir: view.lightDir,
       lightEnergy: view.lightEnergy,
       normalSigns: normalSigns(normalDirs),
-      raster: view.raster,
       orbit3d,
     });
   });
@@ -361,7 +326,7 @@ export function CanvasView(props: {
           const first = canvasToScreen(viewport, penPts[0]!);
           const sx = e.clientX - rect.left;
           const sy = e.clientY - rect.top;
-          if (Math.hypot(sx - first.x, sy - first.y) <= CLOSE_PX) return commitMask(penPts);
+          if (Math.hypot(sx - first.x, sy - first.y) <= PEN_CLOSE_PX) return commitMask(penPts);
         }
         // snap the placed point immediately when global snap is on, so the ghost + close hotspot match
         // exactly where the committed mask lands (no jump on close).
@@ -388,51 +353,64 @@ export function CanvasView(props: {
     // menu instead of the vertex/anchor menu the gizmo handle under the cursor wants to open.
     if (e.button !== 0 && e.button !== 1) return;
     // capture on the host (which owns move/up), not e.target — so a drag keeps tracking and still
-    // ends when the cursor leaves the canvas or releases off-window.
-    e.currentTarget.setPointerCapture(e.pointerId);
-    if (e.button === 1) {
+    // ends when the cursor leaves the canvas or releases off-window. Capture is an enhancement:
+    // it can throw for exotic/synthetic pointers (NotFoundError), and the drag still works without it.
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      /* no active pointer (synthetic events / pen edge cases) */
+    }
+    if (e.button === 1 || spacePan) {
+      // middle-drag or hold-Space + left-drag both pan (Space is the trackpad/pen-tablet path)
       dragRef.current = { kind: "pan", lastX: e.clientX, lastY: e.clientY };
       return;
     }
     const p = toCanvasPoint(e);
 
-    const beginMarquee = (): void => {
+    const beginMarquee = (objects: boolean): void => {
       dragRef.current = {
         kind: "marquee",
         startCanvas: p,
         current: p,
         additive: e.shiftKey,
-        base: e.shiftKey ? selVerts : [],
+        objects,
+        base: !objects && e.shiftKey ? selVerts : [],
+        baseIds: objects && e.shiftKey ? state.selectedIds : [],
         moved: false,
       };
     };
 
-    // start a body move-drag. With >1 selected, capture every selected node's start pos + its parent's
-    // inverse linear so the whole selection moves by one shared world delta. dup = Alt-drag a single copy.
+    // start a body move-drag. Every dragged node gets its start pos + its parent's inverse linear, so
+    // the shared WORLD delta converts into each node's own local frame (correct under nested groups).
+    // A grab on a multi-selection member drags the whole selection; dup = Alt-drag a single copy. The
+    // includes() guard also covers the caller re-selecting a non-member hit (this closure's selection
+    // array is the pre-select snapshot).
     const beginMove = (hit: ObjectInstance, dup: boolean): void => {
-      const sel = state.selectedIds;
-      const group =
-        sel.length > 1
-          ? sel
-              .map((sid) => {
-                const node = findNode(doc.layers, sid);
-                if (!node) return null;
-                const parentId = findParentId(doc.layers, sid);
-                const pAff = parentId ? nodeWorldAffine(doc.layers, parentId) : null;
-                const inv = pAff ? affineInvert(pAff) : affineIdentity();
-                return { id: sid, startX: node.transform.pos.x, startY: node.transform.pos.y, il: { a: inv.a, b: inv.b, c: inv.c, d: inv.d } };
-              })
-              .filter((g): g is NonNullable<typeof g> => g !== null)
-          : undefined;
+      const ids = !dup && state.selectedIds.length > 1 && state.selectedIds.includes(hit.id) ? state.selectedIds : [hit.id];
+      const group = ids
+        .map((sid) => {
+          const node = findNode(doc.layers, sid);
+          if (!node) return null;
+          const inv = nodeFrames(doc.layers, sid).invParent;
+          return { id: sid, startX: node.transform.pos.x, startY: node.transform.pos.y, il: { a: inv.a, b: inv.b, c: inv.c, d: inv.d } };
+        })
+        .filter((g): g is NonNullable<typeof g> => g !== null);
       dragRef.current = {
         kind: "move",
         id: hit.id,
         startCanvas: p,
-        startPos: v2(hit.transform.pos.x, hit.transform.pos.y),
+        startWorld: affineApply(nodeFrames(doc.layers, hit.id).parentAffine, v2(hit.transform.pos.x, hit.transform.pos.y)),
         dupOnMove: dup || undefined,
-        group: dup ? undefined : group, // Alt-dup is single-object only
+        group,
       };
     };
+
+    if (tool === "measure") {
+      const a = snapPt(p);
+      setMeasure({ a, b: a });
+      dragRef.current = { kind: "measure" };
+      return;
+    }
 
     if (tool === "vertex") {
       // vertex tool: the body never grabs drags. Clicking a different object picks it for
@@ -443,7 +421,7 @@ export function CanvasView(props: {
         store.select(hit.id);
         return;
       }
-      beginMarquee();
+      beginMarquee(false); // vertex marquee over the selected control-point object
       return;
     }
 
@@ -471,10 +449,10 @@ export function CanvasView(props: {
         beginMove(hit, false);
         return;
       }
-      // empty space: begin a vertex marquee (a plain click with no drag still deselects on
-      // up). Dragging from here box-selects the selected object's vertices — never conflicts
-      // with object-move (that starts on the body) or vertex drag (that starts on a dot).
-      beginMarquee();
+      // empty space in the select tool: drag box-selects OBJECTS (footprint AABB intersects the box;
+      // Shift adds to the current selection). A plain click with no drag keeps the selection — clearing
+      // it is ESC's job (App keymap), not an empty click.
+      beginMarquee(true);
       return;
     }
 
@@ -483,25 +461,71 @@ export function CanvasView(props: {
     const target = findObject(state.selectedId) ?? null;
     if (!target || target.locked) return;
     if (tool === "move") {
-      dragRef.current = { kind: "move", id: target.id, startCanvas: p, startPos: v2(target.transform.pos.x, target.transform.pos.y) };
+      beginMove(target, false); // same world-delta machinery as a body drag (multi-selection included)
     } else if (tool === "rotate") {
+      const fr = nodeFrames(doc.layers, target.id);
+      const det = fr.parentAffine.a * fr.parentAffine.d - fr.parentAffine.b * fr.parentAffine.c;
       dragRef.current = {
         kind: "rotate",
         id: target.id,
         startCanvas: p,
         startRotation: target.transform.rotation,
-        pivot: v2(target.transform.pos.x, target.transform.pos.y),
+        // pivot in WORLD space (the pos is parent-local — for a nested object the two differ)
+        pivot: affineApply(fr.parentAffine, v2(target.transform.pos.x, target.transform.pos.y)),
+        detSign: det < 0 ? -1 : 1,
       };
     } else {
+      const fr = nodeFrames(doc.layers, target.id);
+      const cr = Math.cos(target.transform.rotation);
+      const sr = Math.sin(target.transform.rotation);
+      const P = fr.parentAffine;
       dragRef.current = {
         kind: "scale",
         id: target.id,
         startCanvas: p,
         startScale: target.transform.scale,
-        pivot: v2(target.transform.pos.x, target.transform.pos.y),
-        rotation: target.transform.rotation,
+        pivot: affineApply(P, v2(target.transform.pos.x, target.transform.pos.y)),
+        // world-frame angle of the local x-axis (exact under uniform parent scale)
+        rotation: Math.atan2(P.c * cr + P.d * sr, P.a * cr + P.b * sr),
       };
     }
+  };
+
+  // every unlocked object whose WORLD footprint AABB intersects the marquee box (a..b, canvas space).
+  // localBounds is transform-independent (params/points), so nodeWorldAffine gives the correct world box
+  // even for nested objects.
+  const objectsInBox = (a: Vector2, b: Vector2): string[] => {
+    const lo = v2(Math.min(a.x, b.x), Math.min(a.y, b.y));
+    const hi = v2(Math.max(a.x, b.x), Math.max(a.y, b.y));
+    const out: string[] = [];
+    for (const r of flattenLayers(doc.layers)) {
+      const obj = r.object;
+      if (obj.locked) continue;
+      const aff = nodeWorldAffine(doc.layers, obj.id);
+      if (!aff) continue;
+      const lb = localBounds(obj);
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const c of [v2(lb.min.x, lb.min.y), v2(lb.max.x, lb.min.y), v2(lb.max.x, lb.max.y), v2(lb.min.x, lb.max.y)]) {
+        const w = affineApply(aff, c);
+        minX = Math.min(minX, w.x); minY = Math.min(minY, w.y);
+        maxX = Math.max(maxX, w.x); maxY = Math.max(maxY, w.y);
+      }
+      if (maxX >= lo.x && minX <= hi.x && maxY >= lo.y && minY <= hi.y) out.push(obj.id);
+    }
+    return out;
+  };
+
+  /** Box-hit the selected object's editable points — Bézier ANCHORS take priority (they're the edit
+   *  surface for path objects; baked ring points would be the wrong index space). Null = the object
+   *  has no editable points. */
+  const vertsInBox = (sel: ObjectInstance, a: Vector2, b: Vector2): number[] | null => {
+    if (sel.bezier && sel.bezier.length > 0) {
+      return pointsInBox(sel.bezier.map((an) => fromLocal(sel.transform, an.p)), a, b);
+    }
+    if (getObjectType(sel.typeId).controlPoints.kind !== "none") {
+      return pointsInBox(sel.controlPoints.map((q) => fromLocal(sel.transform, q)), a, b);
+    }
+    return null;
   };
 
   const onPointerMove = (e: React.PointerEvent): void => {
@@ -509,22 +533,50 @@ export function CanvasView(props: {
     setCursor(v2(Math.floor(cp.x), Math.floor(cp.y)));
     if (placing) setPlaceCursor(cp);
     const drag = dragRef.current;
+    // hover-pick feedback: only while idle in the select tool (setState with an unchanged id is a
+    // React bail-out, so this doesn't add re-renders on top of the cursor readout above)
+    if (!drag && tool === "select" && !placing) {
+      setHoverId(pickObject(flattenLayers(doc.layers), cp)?.id ?? null);
+    } else if (hoverId !== null) {
+      setHoverId(null);
+    }
     if (!drag) return;
     if (drag.kind === "pan") {
       setViewport((vp) => ({ ...vp, panX: vp.panX + e.clientX - drag.lastX, panY: vp.panY + e.clientY - drag.lastY }));
       dragRef.current = { ...drag, lastX: e.clientX, lastY: e.clientY };
       return;
     }
+    if (drag.kind === "measure") {
+      const b = snapPt(cp);
+      setMeasure((m) => (m ? { a: m.a, b } : m));
+      return;
+    }
     if (drag.kind === "marquee") {
-      // only a control-point object can be box-selected; otherwise the empty drag is inert
-      const sel = findObject(state.selectedId);
-      if (!sel || getObjectType(sel.typeId).controlPoints.kind === "none") return;
       const moved = drag.moved || Math.hypot(cp.x - drag.startCanvas.x, cp.y - drag.startCanvas.y) * viewport.zoom > 3;
       dragRef.current = { ...drag, current: cp, moved };
       if (!moved) return;
       setMarquee({ a: drag.startCanvas, b: cp });
-      const canvasPts = sel.controlPoints.map((q) => fromLocal(sel.transform, q));
-      const inBox = pointsInBox(canvasPts, drag.startCanvas, cp);
+      if (drag.objects) {
+        // MIXED marquee (select tool): if the box catches anchors/vertices of the SELECTED object,
+        // select those (the object stays selected); otherwise box-select objects. Object selection
+        // only applies live while NON-empty — the first 3px of a drag contains nothing, and clearing
+        // there made the selection (gizmo + Layers highlight) blink off/on at drag start. The final
+        // result, including "nothing -> deselect", applies on release (endDrag).
+        const sel = findObject(state.selectedId);
+        const vertHits = sel ? vertsInBox(sel, drag.startCanvas, cp) : null;
+        if (vertHits && vertHits.length > 0) {
+          setSelVerts(drag.additive ? Array.from(new Set([...drag.base, ...vertHits])) : vertHits);
+          return;
+        }
+        if (selVerts.length > 0) setSelVerts([]); // box left the vertices: back to object mode
+        const ids = objectsInBox(drag.startCanvas, cp);
+        if (ids.length > 0) store.setSelection(drag.additive ? Array.from(new Set([...drag.baseIds, ...ids])) : ids);
+        return;
+      }
+      // vertex box-select (vertex tool): pure vertex mode
+      const sel = findObject(state.selectedId);
+      const inBox = sel ? vertsInBox(sel, drag.startCanvas, cp) : null;
+      if (inBox === null) return; // no editable vertices
       setSelVerts(drag.additive ? Array.from(new Set([...drag.base, ...inBox])) : inBox);
       return;
     }
@@ -536,12 +588,20 @@ export function CanvasView(props: {
         if (Math.hypot(cp.x - drag.startCanvas.x, cp.y - drag.startCanvas.y) * viewport.zoom <= 3) return;
         drag.moved = true;
         if (drag.kind === "move" && drag.dupOnMove) {
-          const orig = findObject(drag.id);
-          if (orig) {
-            const copy = cloneObject(orig, 0, 0);
-            store.update((d) => ({ ...d, layers: [...d.layers, copy] }));
-            store.select(copy.id);
-            drag.id = copy.id;
+          // duplicate IN PLACE (sibling at index+1, same group + z-neighbourhood) and hand the drag to
+          // the copy. The old top-level `[...d.layers, copy]` append escaped the object's group and
+          // forced it to the very top of the z-order — inconsistent with the context-menu Duplicate.
+          let newId = drag.id;
+          store.update((d) => {
+            const r = duplicateNode(d.layers, drag.id);
+            newId = r.newId;
+            return { ...d, layers: r.layers };
+          });
+          if (newId !== drag.id) {
+            store.select(newId);
+            drag.id = newId;
+            // the copy is in-place identical (same parent, same start pos) — retarget the group entry
+            drag.group = [{ ...drag.group[0]!, id: newId }];
           }
           drag.dupOnMove = false;
         }
@@ -552,41 +612,33 @@ export function CanvasView(props: {
       let dx = cp.x - drag.startCanvas.x;
       let dy = cp.y - drag.startCanvas.y;
       if (e.shiftKey) ({ dx, dy } = constrainAxis(dx, dy)); // godot move-mode axis lock
-      if (drag.group) {
-        // multi-move: one shared WORLD delta (grid-snapped) applied to every selected node, each
-        // converted into its own parent's local frame so groups/nesting move correctly together.
-        const wdx = snap ? snapHalf(dx) : dx;
-        const wdy = snap ? snapHalf(dy) : dy;
-        store.update(
-          (d) => {
-            let layers = d.layers;
-            for (const g of drag.group!) {
-              const ldx = g.il.a * wdx + g.il.b * wdy;
-              const ldy = g.il.c * wdx + g.il.d * wdy;
-              layers = updateNode(layers, g.id, (n) => ({
-                ...n,
-                transform: { ...n.transform, pos: n.transform.pos.withX(g.startX + ldx).withY(g.startY + ldy) },
-              }));
-            }
-            return { ...d, layers };
-          },
-          { coalesce: "multimove" },
-        );
-        return;
-      }
+      // snap the grabbed node's resulting WORLD position (grid + guides — so multi-move honors both,
+      // QC-INT-4), then apply the ONE adjusted world delta to every dragged node through its parent's
+      // inverse linear, so nesting under rotated/scaled groups stays correct (QC-INT-1).
+      const target = snapPt(v2(drag.startWorld.x + dx, drag.startWorld.y + dy));
+      const wdx = target.x - drag.startWorld.x;
+      const wdy = target.y - drag.startWorld.y;
       store.update(
-        (d) =>
-          updateObject(d, drag.id, (s) => {
-            const sp = snapPt(v2(drag.startPos.x + dx, drag.startPos.y + dy));
-            const pos = s.transform.pos.withX(sp.x).withY(sp.y);
-            return { ...s, transform: { ...s.transform, pos } };
-          }),
+        (d) => {
+          let layers = d.layers;
+          for (const g of drag.group) {
+            const ldx = g.il.a * wdx + g.il.b * wdy;
+            const ldy = g.il.c * wdx + g.il.d * wdy;
+            layers = updateNode(layers, g.id, (n) => ({
+              ...n,
+              transform: { ...n.transform, pos: n.transform.pos.withX(g.startX + ldx).withY(g.startY + ldy) },
+            }));
+          }
+          return { ...d, layers };
+        },
         { coalesce: `move:${drag.id}` },
       );
       return;
     }
     if (drag.kind === "rotate") {
-      let rot = rotationFromDrag(drag.pivot, drag.startCanvas, cp, drag.startRotation);
+      // world angle delta mapped into the local frame — a mirrored parent (negative det) flips the spin
+      const delta = rotationFromDrag(drag.pivot, drag.startCanvas, cp, 0);
+      let rot = drag.startRotation + delta * drag.detSign;
       if (e.shiftKey) rot = snapAngle(rot, ROTATE_SNAP); // godot snaps via ctrl; ctrl is our override key
       store.update((d) => updateObject(d, drag.id, (s) => ({ ...s, transform: { ...s.transform, rotation: rot } })), {
         coalesce: `rot:${drag.id}`,
@@ -603,20 +655,42 @@ export function CanvasView(props: {
   const endDrag = (): void => {
     const drag = dragRef.current;
     if (drag?.kind === "marquee" && !drag.moved && !drag.additive) {
-      // plain empty-canvas click clears the vertex selection but KEEPS the object selected;
-      // deselecting the whole object is ESC's job (App keymap), not an empty click
       setSelVerts([]);
+      // select tool: a plain empty-canvas click deselects the object too (like Esc). The vertex tool
+      // keeps the object selected — you're editing it; the click only clears the vertex selection.
+      if (drag.objects) store.select(null);
+    } else if (drag?.kind === "marquee" && drag.objects && drag.moved && !drag.additive) {
+      // live updates skip the empty state (anti-blink), so a box released over NOTHING applies its
+      // "deselect everything" result here instead
+      const sel = findObject(state.selectedId);
+      const vertHits = sel ? vertsInBox(sel, drag.startCanvas, drag.current) : null;
+      if ((!vertHits || vertHits.length === 0) && objectsInBox(drag.startCanvas, drag.current).length === 0) {
+        setSelVerts([]);
+        store.select(null);
+      }
     }
     setMarquee(null);
     dragRef.current = null;
     store.endGesture();
   };
 
-  const onWheel = (e: React.WheelEvent): void => {
-    e.stopPropagation(); // don't let zoom-scroll leak to the surrounding layout (matches the 3D view)
-    const rect = hostRef.current!.getBoundingClientRect();
-    setViewport((vp) => zoomAt(vp, v2(e.clientX - rect.left, e.clientY - rect.top), e.deltaY < 0 ? 1.2 : 1 / 1.2));
-  };
+  // Esc mid-drag: drop the in-flight canvas drag (move/rotate/scale/marquee/pan) so no further move
+  // commits. The store reverts the partial edit (App's Esc calls store.cancelGesture); a later pointer-up
+  // finds a null dragRef and no-ops.
+  useEffect(() => {
+    const cancel = (): void => {
+      dragRef.current = null;
+      setMarquee(null);
+      setMeasure(null);
+    };
+    window.addEventListener(CANCEL_DRAG_EVENT, cancel);
+    return () => window.removeEventListener(CANCEL_DRAG_EVENT, cancel);
+  }, []);
+
+  // a lingering measurement only makes sense inside the measure tool
+  useEffect(() => {
+    if (tool !== "measure") setMeasure(null);
+  }, [tool]);
 
   const pointAt = (e: React.MouseEvent): Vector2 => {
     const rect = hostRef.current!.getBoundingClientRect();
@@ -631,9 +705,11 @@ export function CanvasView(props: {
       setPlacing(null);
       return;
     }
-    const hit = pickObject(flattenLayers(doc.layers), pointAt(e));
+    const hit = pickObject(flattenLayers(doc.layers), pointAt(e), true); // include locked: reach their Unlock item
     if (hit) {
-      store.select(hit.id);
+      // keep an existing multi-selection when right-clicking one of its members (so the body menu can
+      // multi-target Duplicate/Delete/reorder); otherwise select just this object
+      if (!state.selectedIds.includes(hit.id)) store.select(hit.id);
       setBodyMenu({ x: e.clientX, y: e.clientY, id: hit.id });
     } else {
       setBodyMenu(null);
@@ -651,17 +727,22 @@ export function CanvasView(props: {
 
   const bodyMenuItems = (s: ObjectInstance): MenuEntry[] => {
     const items: MenuEntry[] = [];
-    if (getObjectType(s.typeId).controlPoints.kind !== "none") {
+    // act on the whole selection when the right-clicked object is part of a multi-selection (kept by
+    // onContextMenu); otherwise just this one
+    const targets = state.selectedIds.includes(s.id) && state.selectedIds.length > 1 ? state.selectedIds : [s.id];
+    const many = targets.length > 1;
+    if (!many && getObjectType(s.typeId).controlPoints.kind !== "none") {
       items.push({ label: "Edit Vertices", onClick: () => { store.select(s.id); setTool("vertex"); } });
       items.push("separator");
     }
-    const op = (fn: (d: typeof state.doc) => typeof state.doc): void => { store.update(fn); store.endGesture(); };
-    items.push({ label: "Duplicate", hotkey: "Ctrl+D", onClick: () => op((d) => duplicateObject(d, s.id)) });
-    items.push({ label: "Bring to Front", onClick: () => op((d) => moveObjectTo(d, s.id, Number.MAX_SAFE_INTEGER)) });
-    items.push({ label: "Send to Back", onClick: () => op((d) => moveObjectTo(d, s.id, 0)) });
-    items.push({ label: s.locked ? "Unlock" : "Lock", onClick: () => op((d) => updateObject(d, s.id, (sh) => ({ ...sh, locked: !sh.locked }))) });
+    const each = (f: (d: typeof state.doc, id: string) => typeof state.doc): void =>
+      store.commit((d) => targets.reduce((acc, id) => f(acc, id), d));
+    items.push({ label: many ? `Duplicate ${targets.length}` : "Duplicate", hotkey: "Ctrl+D", onClick: () => each((d, id) => duplicateObject(d, id)) });
+    items.push({ label: "Bring to Front", onClick: () => each((d, id) => moveObjectTo(d, id, Number.MAX_SAFE_INTEGER)) });
+    items.push({ label: "Send to Back", onClick: () => each((d, id) => moveObjectTo(d, id, 0)) });
+    items.push({ label: s.locked ? "Unlock" : "Lock", onClick: () => each((d, id) => updateObject(d, id, (sh) => ({ ...sh, locked: !s.locked }))) });
     items.push("separator");
-    items.push({ label: "Delete", danger: true, hotkey: "⌫", onClick: () => op((d) => removeObject(d, s.id)) });
+    items.push({ label: many ? `Delete ${targets.length}` : "Delete", danger: true, hotkey: "⌫", onClick: () => each((d, id) => removeObject(d, id)) });
     return items;
   };
 
@@ -672,11 +753,13 @@ export function CanvasView(props: {
     if (!presetId) return;
     const rect = hostRef.current!.getBoundingClientRect();
     const p = screenToCanvas(viewport, v2(e.clientX - rect.left, e.clientY - rect.top));
-    store.update((d) => addInstance(d, createFromPreset(presetId, p)));
+    store.update((d) => addInstance(d, resolvePaletteObject(presetId, p)));
     store.endGesture();
   };
 
-  const toolCursor = placing || tool === "pen"
+  const toolCursor = spacePan
+    ? "cursor-grab"
+    : placing || tool === "pen" || tool === "measure"
     ? "cursor-crosshair"
     : tool === "move"
       ? "cursor-move"
@@ -703,7 +786,7 @@ export function CanvasView(props: {
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
-        onWheel={onWheel}
+        onPointerLeave={() => setHoverId(null)}
         onContextMenu={onContextMenu}
         onDoubleClick={onDoubleClick}
         onDragOver={(e) => e.preventDefault()}
@@ -712,7 +795,7 @@ export function CanvasView(props: {
         <canvas ref={canvasRef} className="h-full w-full" />
       {gpuError ? (
         <div className="absolute inset-0 bg-bg">
-          <EmptyState status="error" title="GPU unavailable" message={gpuError} />
+          <EmptyState status="error" title="Preview unavailable" message={gpuError} />
         </div>
       ) : !ready ? (
         <div className="absolute inset-0 bg-bg">
@@ -738,7 +821,7 @@ export function CanvasView(props: {
               : { x1: s.x, y1: 0, x2: s.x, y2: "100%" as const };
             return (
               <g key={i}>
-                <line {...line} stroke="#46b8c0" strokeWidth={1} />
+                <line {...line} stroke="var(--color-guide)" strokeWidth={1} />
                 {!doc.canvas.guidesLocked ? (
                   <line
                     {...line}
@@ -746,7 +829,10 @@ export function CanvasView(props: {
                     strokeWidth={9}
                     className="pointer-events-auto"
                     style={{ cursor: horiz ? "row-resize" : "col-resize" }}
-                    onPointerDown={(e) => startGuideMove(i, g.orient, e)}
+                    onPointerDown={(e) => {
+                      if (e.button !== 0) return; // left only — middle-drag stays a pan
+                      startGuideMove(i, g.orient, e);
+                    }}
                     onContextMenu={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
@@ -764,7 +850,7 @@ export function CanvasView(props: {
                 const line = horiz
                   ? { x1: 0, y1: s.y, x2: "100%" as const, y2: s.y }
                   : { x1: s.x, y1: 0, x2: s.x, y2: "100%" as const };
-                return <line {...line} stroke="#46b8c0" strokeWidth={1} strokeDasharray="4 3" opacity={guideDraft.over ? 1 : 0.4} />;
+                return <line {...line} stroke="var(--color-guide)" strokeWidth={1} strokeDasharray="4 3" opacity={guideDraft.over ? 1 : 0.4} />;
               })()
             : null}
         </svg>
@@ -815,7 +901,7 @@ export function CanvasView(props: {
                   y1={o.y - uy}
                   x2={o.x + ux}
                   y2={o.y + uy}
-                  stroke="#c061cb"
+                  stroke="var(--color-mirror)"
                   strokeWidth={1}
                   strokeDasharray="6 4"
                   opacity={0.7}
@@ -835,6 +921,7 @@ export function CanvasView(props: {
         setSelVerts={setSelVerts}
         setPlacing={setPlacing}
         snap={snap}
+        maskFocus={maskFocus}
       />
       {/* click-to-place ghost: dashed tether from the anchor to the cursor + a hollow dot */}
       {(() => {
@@ -851,7 +938,7 @@ export function CanvasView(props: {
         return (
           <svg className="pointer-events-none absolute inset-0 h-full w-full">
             <line x1={o.x} y1={o.y} x2={c.x} y2={c.y} stroke="var(--color-accent)" strokeWidth={1.5} strokeDasharray="4 3" />
-            <circle cx={c.x} cy={c.y} r={5} fill="var(--color-accent)" stroke="#191a1b" strokeWidth={1.5} />
+            <circle cx={c.x} cy={c.y} r={5} fill="var(--color-accent)" stroke="var(--color-bg)" strokeWidth={1.5} />
           </svg>
         );
       })()}
@@ -878,12 +965,62 @@ export function CanvasView(props: {
                     cx={s.x}
                     cy={s.y}
                     r={i === 0 ? 6 : 4}
-                    fill={i === 0 ? "var(--color-accent)" : "#191a1b"}
+                    fill={i === 0 ? "var(--color-accent)" : "var(--color-bg)"}
                     stroke="var(--color-accent)"
                     strokeWidth={1.5}
                   />
                 ))}
               </svg>
+            );
+          })()
+        : null}
+      {/* hover-pick outline: the footprint quad of the object a click would grab (skipped once it's
+          already selected — the gizmo frame takes over there) */}
+      {hoverId && !state.selectedIds.includes(hoverId)
+        ? (() => {
+            const node = findNode(doc.layers, hoverId);
+            if (!node || !isObject(node)) return null;
+            const aff = nodeWorldAffine(doc.layers, hoverId);
+            if (!aff) return null;
+            const lb = localBounds(node);
+            const pts = [v2(lb.min.x, lb.min.y), v2(lb.max.x, lb.min.y), v2(lb.max.x, lb.max.y), v2(lb.min.x, lb.max.y)]
+              .map((c) => canvasToScreen(viewport, affineApply(aff, c)))
+              .map((s) => `${s.x},${s.y}`)
+              .join(" ");
+            return (
+              <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible">
+                <polygon points={pts} fill="none" stroke="var(--color-accent)" strokeOpacity={0.5} strokeDasharray="3 3" />
+              </svg>
+            );
+          })()
+        : null}
+      {/* measure-tool overlay: the snapped segment + a floating length/Δ/angle readout */}
+      {measure
+        ? (() => {
+            const a = canvasToScreen(viewport, measure.a);
+            const b = canvasToScreen(viewport, measure.b);
+            const dx = measure.b.x - measure.a.x;
+            const dy = measure.b.y - measure.a.y;
+            const len = Math.hypot(dx, dy);
+            const deg = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
+            const fmt = (n: number): string => (Number.isInteger(n) ? String(n) : n.toFixed(1));
+            return (
+              <>
+                <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible">
+                  <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="var(--color-guide)" strokeWidth={1.5} />
+                  <circle cx={a.x} cy={a.y} r={3} fill="var(--color-guide)" />
+                  <circle cx={b.x} cy={b.y} r={3} fill="var(--color-guide)" />
+                </svg>
+                <div
+                  className="pointer-events-none absolute border border-border bg-surface2/95 px-2 py-1 font-mono text-base text-fg"
+                  style={{ left: (a.x + b.x) / 2 + 10, top: (a.y + b.y) / 2 + 10 }}
+                >
+                  {fmt(len)} px
+                  <span className="ml-2 text-fg-mid">
+                    Δ {fmt(dx)}, {fmt(dy)} · {fmt(deg)}°
+                  </span>
+                </div>
+              </>
             );
           })()
         : null}
@@ -910,21 +1047,10 @@ export function CanvasView(props: {
           onPointerDown={(e) => e.stopPropagation()}
         >
           <LightPad lightDir={view.lightDir} onChange={onLightChange} radius={34} />
-          <span className="text-sm uppercase tracking-[var(--tracking-tight)] text-fg-mid">light</span>
-          <input
-            type="range"
-            min={0}
-            max={2}
-            step={0.05}
-            value={view.lightEnergy}
-            title={`energy ${view.lightEnergy.toFixed(2)}`}
-            onChange={(e) => onEnergyChange(Number(e.target.value))}
-            className="mt-1 h-[3px] w-[72px] cursor-pointer appearance-none"
-            style={{
-              background: `linear-gradient(to right, var(--color-accent) ${(view.lightEnergy / 2) * 100}%, var(--color-border) ${(view.lightEnergy / 2) * 100}%)`,
-            }}
-          />
-          <span className="text-sm tabular-nums text-fg-mid">energy {view.lightEnergy.toFixed(2)}</span>
+          <span className="text-sm uppercase tracking-wide text-fg-mid">energy</span>
+          <div className="mt-0.5 w-[84px]">
+            <SpinSlider value={view.lightEnergy} min={0} max={2} onChange={onEnergyChange} />
+          </div>
         </div>
       ) : null}
       {diffuseBytes && !swapped
@@ -937,6 +1063,7 @@ export function CanvasView(props: {
                 : (getObjectType(sel.typeId).controlPoints.kind as GuideContext["objectKind"]);
             return (
               <ShortcutGuide
+                position="absolute"
                 storageKey="lambert.guide2d.open"
                 sections={guide2D({ tool, objectKind, placing: !!placing })}
               />
@@ -969,8 +1096,8 @@ export function CanvasView(props: {
           y={guideMenu.y}
           onClose={() => setGuideMenu(null)}
           items={[
-            { label: "Delete Guide", danger: true, onClick: () => { store.update((x) => removeGuide(x, guideMenu.index)); store.endGesture(); } },
-            { label: "Clear All Guides", onClick: () => { store.update(clearGuides); store.endGesture(); } },
+            { label: "Delete Guide", danger: true, onClick: () => store.commit((x) => removeGuide(x, guideMenu.index)) },
+            { label: "Clear All Guides", onClick: () => store.commit(clearGuides) },
           ]}
         />
       ) : null}

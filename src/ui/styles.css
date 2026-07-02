@@ -30,9 +30,13 @@
   --color-error: #f48771;
   --color-warning: #e5ba7d;
   --color-link: #48a0c7;
+  /* canvas overlay signal colours (were hardcoded hex at the gizmo/guide callsites) */
+  --color-guide: #46b8c0; /* teal ruler guides */
+  --color-mirror: #c061cb; /* magenta group-mirror axis */
+  --color-cut: #e06c6c; /* mask "cut" region outline (a distinct red from --color-error) */
   --color-selection: rgba(200, 168, 78, 0.3);
   --color-hover: #262728;
-  --color-list-active: rgba(200, 168, 78, 0.15);
+  --color-list-active: var(--color-accent-dim); /* selection highlight = the same accent tint as accent-dim */
   --color-viewport-bg: #121314;
   /* --- @carapace/shell token aliases: map carapace's vocabulary onto this
      grey+gold palette. Shared names (surface, border, fg, fg-mid, accent,
@@ -57,6 +61,11 @@
   --text-md: 0.875rem;
   --text-lg: 1rem;
   --spacing-control: 34px;
+  /* control-height scale (QC-UI-5) — replaces scattered magic h-[Npx]; feeds the height + width utilities. */
+  --spacing-control-xs: 18px; /* icon buttons, inline controls */
+  --spacing-control-sm: 24px; /* list rows */
+  --spacing-control-md: 26px; /* standard buttons / toolbar (the default) */
+  --spacing-control-lg: 30px; /* tool-palette tiles */
   --shadow-popover: 0 4px 16px rgba(0, 0, 0, 0.5);
   /* Inter (UI) + JetBrains Mono (numeric scrubbers, hotkeys, rulers) — matches carapace's stack.
      Loaded as variable fonts in the renderer entry (main.tsx). Both names were previously undefined,
@@ -100,16 +109,30 @@ input[type="number"]::-webkit-inner-spin-button {
   margin: 0;
 }
 
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
+/* Ease custom hover/active colour flips on Lambert's bare interactive chrome (toolbar toggles, layer
+   rows) — most use bare `hover:` utilities with no transition, so state changes were instant. Element
+   selector = lowest specificity, so carapace components' own class-based transitions still win; this
+   only fills in the untransitioned bare elements. */
+button,
+[role="button"],
+[role="checkbox"] {
+  transition:
+    background-color 0.1s ease,
+    color 0.1s ease,
+    border-color 0.1s ease,
+    opacity 0.1s ease;
 }
-.animate-fade-in {
-  animation: fadeIn 0.12s ease-out;
+
+/* Respect the OS "reduce motion" preference: strip animations + transitions for users who ask for it. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* rotate cursor for the gizmo rotation handles (CSS has no native rotate cursor). A curved arrow

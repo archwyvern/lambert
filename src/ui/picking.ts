@@ -2,19 +2,37 @@ import { affineApply } from "../field/affine";
 import type { ResolvedObject } from "../field/flatten";
 import { getObjectType } from "../field/registry";
 import type { ObjectInstance } from "../field/types";
+import { bakeMasks, maskCoverage } from "../field/maskOps";
 import { Vector2, Vector3 } from "@carapace/primitives";
 import { v2 } from "../field/vec";
 
 const PICK_SLOP_PX = 1;
+// Below this mask coverage the object contributes nothing visible at the point, so it isn't pickable
+// there. Near-zero (not 0.5) so any visible sliver stays selectable; only fully-cut regions are skipped.
+const MASK_PICK_EPS = 1e-3;
 
 /** Topmost (last-in-fold) resolved object whose world footprint (± slop, canvas px) contains the
- *  point. Hidden subtrees are already dropped by flatten; locked objects are skipped here. */
-export function pickObject(resolved: ResolvedObject[], canvasPoint: Vector2): ObjectInstance | null {
+ *  point AND isn't masked away there. Hidden subtrees are already dropped by flatten; locked objects
+ *  are skipped UNLESS `includeLocked` (the right-click menu passes it so a locked object stays
+ *  reachable — otherwise you couldn't even open its Unlock item; drag-pick keeps skipping them). */
+export function pickObject(
+  resolved: ResolvedObject[],
+  canvasPoint: Vector2,
+  includeLocked = false,
+): ObjectInstance | null {
   for (let i = resolved.length - 1; i >= 0; i--) {
     const rs = resolved[i]!;
-    if (rs.object.locked) continue;
+    if (rs.object.locked && !includeLocked) continue;
     const sample = getObjectType(rs.object.typeId).eval(affineApply(rs.invAffine, canvasPoint), rs.object);
-    if (sample.sd * rs.scaleHint <= PICK_SLOP_PX) return rs.object;
+    if (sample.sd * rs.scaleHint > PICK_SLOP_PX) continue; // outside the footprint
+    // Mirror the fold's mask gate (evalCpu applies maskCoverage): a region a mask cuts away is invisible,
+    // so clicking it must NOT select the shape underneath its own cut-out. Bake only this candidate's
+    // masks for a single-point test — cheap, and only when the footprint already matched.
+    if (rs.masks.length > 0) {
+      const cov = maskCoverage(rs.masks, bakeMasks(rs.masks), rs.invAffine, rs.scaleHint, canvasPoint);
+      if (cov <= MASK_PICK_EPS) continue;
+    }
+    return rs.object;
   }
   return null;
 }

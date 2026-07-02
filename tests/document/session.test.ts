@@ -12,7 +12,6 @@ const view = {
   mode: "lit" as const,
   opacity: 1,
   lightDir: [-0.5, -0.5, 0.7] as [number, number, number],
-  raster: false,
 };
 
 function tab(id: string, docPath: string | null, dirty: boolean, selectedId: string | null = null): TabSession {
@@ -50,15 +49,15 @@ test("session with no open project round-trips (empty tabs, no active)", () => {
   expect(s.tabs).toEqual([]);
 });
 
-test("migrates a legacy per-tab view: removed 'height' mode -> lit, missing raster -> false", () => {
+test("migrates a legacy per-tab view: removed 'height' mode -> lit, stray 'raster' field ignored", () => {
   const legacy = JSON.parse(
     buildSessionJson({ projectPath: "/p", activeIndex: 0, tabs: [tab("/p/a.png", null, false)] }),
   );
   legacy.tabs[0].view.mode = "height"; // a mode that no longer exists
-  delete legacy.tabs[0].view.raster; // saved before the raster toggle existed
+  legacy.tabs[0].view.raster = true; // saved before the vector/raster toggle was removed — must not break parse
   const s = parseSessionJson(JSON.stringify(legacy));
   expect(s.tabs[0]!.view.mode).toBe("lit");
-  expect(s.tabs[0]!.view.raster).toBe(false);
+  expect("raster" in s.tabs[0]!.view).toBe(false); // the removed field is stripped, not carried forward
 });
 
 test("persists per-tab selection + viewport, and defaults them for legacy sessions", () => {
@@ -73,6 +72,16 @@ test("persists per-tab selection + viewport, and defaults them for legacy sessio
   const s2 = parseSessionJson(JSON.stringify(legacy));
   expect(s2.tabs[0]!.selectedId).toBe(null);
   expect(s2.tabs[0]!.viewport).toBeUndefined();
+});
+
+test("one corrupt tab is dropped + counted, the rest of the session survives", () => {
+  const good = JSON.parse(
+    buildSessionJson({ projectPath: "/p", activeIndex: 0, tabs: [tab("a", "/p/a.lmb", false), tab("b", "/p/b.lmb", false)] }),
+  );
+  good.tabs[0].doc.source.width = "not-a-number"; // corrupt just the first tab's doc
+  const s = parseSessionJson(JSON.stringify(good));
+  expect(s.droppedTabs).toBe(1);
+  expect(s.tabs.map((t) => t.id)).toEqual(["b"]); // the healthy tab is kept
 });
 
 test("rejects garbage and wrong versions", () => {

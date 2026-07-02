@@ -4,7 +4,7 @@ import { bezierAnchor } from "../../../src/field/bezier";
 import { createObjectInstance, getObjectType, ObjectTypeId } from "../../../src/field/registry";
 import { v2 } from "../../../src/field/vec";
 
-// Pipe (Vector): analytic Bézier sweep. Default radius 8, round profile, straight path (-40,0)..(40,0).
+// Cable: analytic Bézier sweep. Default radius 8, round profile, straight path (-40,0)..(40,0).
 const pipe = getObjectType(ObjectTypeId.PipeVector);
 const inst = createObjectInstance(ObjectTypeId.PipeVector, v2(0, 0));
 
@@ -22,9 +22,10 @@ test("pipe exposes invert (raise/carve) + cap — invert drives the fold op, not
   expect(Object.keys(pipe.params)).toContain("cap");
 });
 
-test("per-anchor radius tapers the tube (a Frustum as a vector)", () => {
-  const taperAnchor = (x: number, y: number, r: number) => ({ ...bezierAnchor(v2(x, y), v2(0, 0), v2(0, 0), "manual"), radius: r });
-  const taper = { ...inst, bezier: [taperAnchor(-40, 0, 16), taperAnchor(40, 0, 4)] };
+test("per-anchor SCALE tapers the tube (a Frustum as a vector): local radius = radius·scale", () => {
+  const taperAnchor = (x: number, y: number, sc: number) => ({ ...bezierAnchor(v2(x, y), v2(0, 0), v2(0, 0), "manual"), scale: sc });
+  // params.radius 8 with end scales 2 / 0.5 -> local radii 16 / 4 (10 at the midpoint)
+  const taper = { ...inst, bezier: [taperAnchor(-40, 0, 2), taperAnchor(40, 0, 0.5)] };
   // on the spine the round-tube height equals the LOCAL radius: 16 at the wide end, 4 at the narrow, 10 mid
   expect(pipe.eval(v2(-40, 0), taper).height).toBeCloseTo(16, 0);
   expect(pipe.eval(v2(40, 0), taper).height).toBeCloseTo(4, 0);

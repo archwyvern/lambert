@@ -39,6 +39,16 @@ export function dropUnknownLayers(layers: LayerNode[]): LayerNode[] {
   return out;
 }
 
+/** How many object layers {@link dropUnknownLayers} would delete (unregistered typeId), recursing groups. */
+export function countUnknownLayers(layers: LayerNode[]): number {
+  let n = 0;
+  for (const node of layers) {
+    if (isGroup(node)) n += countUnknownLayers(node.children);
+    else if (!hasObjectType(node.typeId)) n += 1;
+  }
+  return n;
+}
+
 export function allObjectTypes(): ObjectType[] {
   return [...types.values()];
 }

@@ -2,6 +2,10 @@ import { clamp } from "./vec";
 
 export type ProfileKind = "round" | "linear" | "cove" | "smooth";
 
+// ORDER IS A GPU CONTRACT. pack.ts converts a profile enum to its index here (`PROFILE_KINDS.indexOf`),
+// and `apply_profile` in gpu/wgsl.ts hardcodes those indices (case 0=round, 1=linear, 2=cove,
+// default=smooth) — plus some objects pack a literal `1u` for "linear". Reordering this array silently
+// re-indexes every profile on the GPU. Append new kinds at the END and add a matching `case` in the WGSL.
 export const PROFILE_KINDS: ProfileKind[] = ["round", "linear", "cove", "smooth"];
 
 /**

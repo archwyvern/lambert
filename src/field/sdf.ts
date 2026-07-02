@@ -1,5 +1,5 @@
 import { Vector2 } from "@carapace/primitives";
-import { clamp, v2 } from "./vec";
+import { clamp } from "./vec";
 
 /** Unsigned distance from p to segment ab. */
 export function sdSegment(p: Vector2, a: Vector2, b: Vector2): number {
@@ -30,16 +30,4 @@ export function sdPolygon(p: Vector2, v: Vector2[]): number {
     if ((c0 && c1 && c2) || (!c0 && !c1 && !c2)) s = -s;
   }
   return s * Math.sqrt(d);
-}
-
-/**
- * Approximate signed distance to an axis-aligned ellipse centered at origin (negative inside).
- * Exact for circles and on the axes; degrades (toward 0) deep inside — fine for AA/mask use,
- * which only needs accuracy near the rim and a correct sign.
- */
-export function sdEllipse(p: Vector2, r: Vector2): number {
-  if (r.x === r.y) return p.length() - r.x;
-  const k1 = v2(p.x / r.x, p.y / r.y).length();
-  const k2 = v2(p.x / (r.x * r.x), p.y / (r.y * r.y)).length();
-  return (k1 * (k1 - 1.0)) / Math.max(k2, 1e-12);
 }

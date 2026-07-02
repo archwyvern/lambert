@@ -9,13 +9,13 @@ import { v2 } from "../vec";
  * field. `tilt` X/Y ramps the height linearly across the footprint, biased so the lowest point sits
  * on the ground and rises from there (so the slope is non-negative regardless of tilt direction);
  * tilt 0 = a flat region at the object's elevation (pos.z). The footprint is the polygon in
- * controlPoints. The Bézier twin (a curved outline) is Surface (Vector), which bakes its closed path
+ * controlPoints. The Bézier twin (a curved outline) is Contour, which bakes its closed path
  * into the same controlPoints polygon and shares the eval/WGSL below.
  */
 
 /** Polygon-fill height field: tilt ramp biased so the lowest vertex sits on the ground, polygon SDF
- *  footprint. Shared by Surface (straight) and Surface (Vector). `contourCounts` ([outer, hole1, ...],
- *  Surface (Vector)) CSG-subtracts each hole ring from the outer fill (sd = max(sdOuter, -sdHole_i)). */
+ *  footprint. Shared by Surface (straight) and Contour. `contourCounts` ([outer, hole1, ...],
+ *  Contour) CSG-subtracts each hole ring from the outer fill (sd = max(sdOuter, -sdHole_i)). */
 export function surfaceEval(p: Vector2, object: ObjectInstance): FieldSample {
   const cps = object.controlPoints;
   const counts = object.contourCounts;
@@ -29,7 +29,9 @@ export function surfaceEval(p: Vector2, object: ObjectInstance): FieldSample {
   let sd = sdPolygon(p, outer);
   if (counts && counts.length > 1) {
     let off = counts[0]!;
-    for (let h = 1; h < counts.length; h++) {
+    // Cap at 6 holes to match the GPU/export path (wgsl loops hi<6u; pack writes only 6 slots). The
+    // add-hole UI already caps at 6, so >6 only happens via a hand-edited .lmb — this keeps CPU==GPU there.
+    for (let h = 1; h < counts.length && h <= 6; h++) {
       const hc = counts[h]!;
       if (hc >= 3) sd = Math.max(sd, -sdPolygon(p, cps.slice(off, off + hc))); // punch each hole out
       off += hc;
@@ -39,27 +41,29 @@ export function surfaceEval(p: Vector2, object: ObjectInstance): FieldSample {
 }
 
 /** The shared WGSL body under `fn`. record slots: 13 = tiltX, 14 = tiltY; cpStart=11, cpCount=12.
- *  `holeAware` (Surface (Vector)) reads the outer-ring count from ringSplit (slot 2) and each hole
+ *  `holeAware` (Contour) reads the outer-ring count from ringSplit (slot 2) and each hole
  *  ring's baked vertex count from slots 15.. (packed right after this type's 2 params), CSG-subtracting
  *  up to 6 holes. The straight primitive ignores all that (single contour over cpCount). */
 export function surfaceWgsl(fn: string, holeAware = false): string {
-  const outerCount = holeAware ? "u32(rec(base, 2u))" : "cc";
+  const outerCount = holeAware ? "u32(rec(base, SLOT_RING))" : "cc";
   const holes = holeAware
     ? `  var off = cs + nB;
   for (var hi = 0u; hi < 6u; hi = hi + 1u) {
-    let hc = u32(rec(base, 15u + hi));
-    if (hc < 3u) { break; }
-    sd = max(sd, -sd_polygon(p, off, hc));
+    let hc = u32(rec(base, SLOT_PARAM2 + hi));
+    // Skip a degenerate ring (hc<3) but STILL advance off, matching the CPU (surface.ts): a valid hole
+    // after a degenerate one must still punch through. Unused slots are 0 (zeroed record) -> off += 0,
+    // harmless. (Old code broke the whole loop on the first <3, diverging from the CPU.)
+    if (hc >= 3u) { sd = max(sd, -sd_polygon(p, off, hc)); }
     off = off + hc;
   }`
     : "";
   return /* wgsl */ `
 fn ${fn}(p: vec2f, base: u32) -> vec2f {
-  let cs = u32(rec(base, 11u));
-  let cc = u32(rec(base, 12u));
+  let cs = u32(rec(base, SLOT_CP_START));
+  let cc = u32(rec(base, SLOT_CP_COUNT));
   let nB = ${outerCount};
-  let tx = rec(base, 13u);
-  let ty = rec(base, 14u);
+  let tx = rec(base, SLOT_PARAM0);
+  let ty = rec(base, SLOT_PARAM1);
   var minDot = 1e30;
   for (var i = 0u; i < nB; i = i + 1u) {
     let v = points[cs + i];
@@ -75,11 +79,11 @@ ${holes}
 
 export const Surface = defineObjectType({
   id: ObjectTypeId.Surface,
-  name: "Surface",
-  category: "Primitives",
+  name: "Plate",
+  category: "Shapes",
   params: {
-    tiltX: { type: "px", default: 0, min: -1, max: 1, step: 0.01, float: true },
-    tiltY: { type: "px", default: 0, min: -1, max: 1, step: 0.01, float: true },
+    tiltX: { type: "px", default: 0, min: -1, max: 1, float: true },
+    tiltY: { type: "px", default: 0, min: -1, max: 1, float: true },
   },
   nominalHeight: 32, // hint only (a typical rise); the real peak is tilt-dependent
   controlPoints: {
@@ -87,6 +91,6 @@ export const Surface = defineObjectType({
     min: 3,
     default: [v2(-32, -32), v2(32, -32), v2(32, 32), v2(-32, 32)],
   },
-  wgsl: surfaceWgsl("shape_surface"),
+  wgsl: surfaceWgsl("shape_plate"),
   eval: surfaceEval,
 });

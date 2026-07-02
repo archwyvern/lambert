@@ -13,7 +13,7 @@ const H = 24;
 export const Ramp = defineObjectType({
   id: ObjectTypeId.Ramp,
   name: "Ramp",
-  category: "Primitives",
+  category: "Shapes",
   params: {
     profile: { type: "enum", options: PROFILE_KINDS, default: "linear" },
   },
@@ -22,7 +22,7 @@ export const Ramp = defineObjectType({
   // params: 13 = profile. Square footprint; height = 24 * profile(inside = p.x + 48 over the 96 span).
   wgsl: /* wgsl */ `
 fn shape_ramp(p: vec2f, base: u32) -> vec2f {
-  let prof = u32(rec(base, 13u));
+  let prof = u32(rec(base, SLOT_PARAM0));
   let sd = max(abs(p.x) - 48.0, abs(p.y) - 48.0);
   var height = 0.0;
   if (sd <= 0.0) { height = 24.0 * apply_profile(prof, p.x + 48.0, 96.0); }
