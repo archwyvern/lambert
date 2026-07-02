@@ -151,6 +151,10 @@ jobs:
   # release. Creates it as a draft; publishes only when the dispatch asked for it.
   release:
     needs: build
+    # Same transitive-skip override as `build`: on a pushed tag the `tag` job is skipped, and GitHub
+    # skips default-if jobs whose needs-CHAIN contains a skip — without this the release assembly
+    # silently never ran on tag pushes (only dispatch runs worked).
+    if: ${{ always() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Download all installers
