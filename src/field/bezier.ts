@@ -17,9 +17,10 @@ export interface BezierAnchor {
    *  false = the two handles move independently. Alt held during a drag inverts this. UI-only
    *  (the fold uses the resolved tangents regardless). */
   sym?: boolean;
-  /** Per-anchor tube radius for a Pipe (Vector) taper (interpolated along each segment). Absent =
-   *  the type's uniform `radius` param. A Frustum converts to a vector by setting the two end radii. */
-  radius?: number;
+  /** Per-anchor CROSS-SECTION multiplier (default 1), interpolated along each segment — tapers the
+   *  swept stroke as a unit (Pipe: radius·scale; Berm: width+slope+height·scale). Distinct from the
+   *  object's transform.scale. A Frustum converts to a vector by setting the two end scales. */
+  scale?: number;
 }
 
 export const bezierAnchor = (
@@ -217,7 +218,7 @@ export function splitSubpaths(anchors: BezierAnchor[], subpathStarts?: number[])
 }
 
 /** Bake each closed Bézier subpath to a dense polygon and concatenate them into one ring list (the
- *  first loop is the base ring); `ringSplit` is the baked base-ring vertex count. For Plateau (Vector):
+ *  first loop is the base ring); `ringSplit` is the baked base-ring vertex count. For Mesa:
  *  two loops -> base + top rings consumed by the shared Plateau eval/WGSL. */
 export function bakeRings(anchors: BezierAnchor[], subpathStarts?: number[]): { controlPoints: Vector2[]; ringSplit: number; contourCounts: number[] } {
   const baked = splitSubpaths(anchors, subpathStarts).map((l) => bakeMaskLoop(l));
@@ -225,7 +226,7 @@ export function bakeRings(anchors: BezierAnchor[], subpathStarts?: number[]): { 
 }
 
 /** Bake a closed loop to a UNIFORM perSeg-samples-per-segment polygon (no straight-segment skip). Two
- *  loops with the same anchor count bake to the SAME point count — required for the Plateau (Vector)
+ *  loops with the same anchor count bake to the SAME point count — required for the Mesa
  *  paired loft (base[k] <-> top[k]) so it doesn't fan a dense curved ring across a sparse straight one. */
 export function bakeLoopUniform(anchors: BezierAnchor[], perSeg = 8): Vector2[] {
   if (anchors.length < 3) return anchors.map((a) => v2(a.p.x, a.p.y));
@@ -245,66 +246,98 @@ export function bakeLoopUniform(anchors: BezierAnchor[], perSeg = 8): Vector2[] 
 }
 
 /** bakeRings with uniform per-segment sampling — base + top bake to equal counts (for equal anchor
- *  counts), giving the Plateau (Vector) loft clean 1:1 pairing instead of a fan. */
+ *  counts), giving the Mesa loft clean 1:1 pairing instead of a fan. */
 export function bakeRingsUniform(anchors: BezierAnchor[], subpathStarts?: number[], perSeg = 8): { controlPoints: Vector2[]; ringSplit: number; contourCounts: number[] } {
   const baked = splitSubpaths(anchors, subpathStarts).map((l) => bakeLoopUniform(l, perSeg));
   return { controlPoints: baked.flat(), ringSplit: baked[0]?.length ?? 0, contourCounts: baked.map((b) => b.length) };
 }
 
+/** Per-loop closed-aware handle resolution across all subpaths, reassembled into one global array
+ *  (indices match `anchors`). THE resolution for edit operations on multi-loop paths — plain
+ *  resolveHandles on the concatenated array gets both the loop seams and the wrap tangents wrong. */
+export function resolvePath(anchors: BezierAnchor[], subpathStarts: number[] | undefined, closed: boolean): BezierAnchor[] {
+  return splitSubpaths(anchors, subpathStarts).flatMap((loop) =>
+    closed && loop.length >= 3 ? resolveHandlesClosed(loop) : resolveHandles(loop),
+  );
+}
+
+export interface PathHit {
+  /** Global index of the hit loop's first anchor. */
+  loopStart: number;
+  loopLen: number;
+  /** Loop-LOCAL segment: runs loop[seg] -> loop[(seg+1) % loopLen] (so a closed loop's wrap
+   *  segment is seg = loopLen-1). */
+  seg: number;
+  t: number;
+  dist: number;
+  point: Vector2;
+}
+
 /**
- * de Casteljau split: insert a new anchor on segment `seg` at parameter `t`, preserving the
- * exact curve. Returns a new anchors array — the split's two neighbours get adjusted handles and
- * the new anchor sits between them with matching tangents.
+ * Nearest point on a multi-loop path to p — per subpath loop, closed-aware. Unlike a naive search
+ * over the concatenated anchors this includes each closed loop's WRAP segment (last -> first) and
+ * never fabricates a segment bridging one loop's end to the next loop's start.
  */
-export function splitSegment(anchors: BezierAnchor[], seg: number, t: number): BezierAnchor[] {
-  const a0 = anchors[seg]!;
-  const a1 = anchors[seg + 1]!;
+export function nearestOnPath(anchors: BezierAnchor[], subpathStarts: number[] | undefined, closed: boolean, p: Vector2): PathHit | null {
+  const SUB = 24;
+  let best: PathHit | null = null;
+  let bestD = Infinity;
+  let start = 0;
+  for (const loop of splitSubpaths(anchors, subpathStarts)) {
+    if (loop.length >= 2) {
+      const r = closed && loop.length >= 3 ? resolveHandlesClosed(loop) : resolveHandles(loop);
+      const segs = closed && loop.length >= 3 ? loop.length : loop.length - 1;
+      for (let i = 0; i < segs; i++) {
+        const a = r[i]!;
+        const b = r[(i + 1) % r.length]!;
+        for (let sub = 0; sub <= SUB; sub++) {
+          const t = sub / SUB;
+          const q = cubic(a.p, ctrlOut(a), ctrlIn(b), b.p, t);
+          const d = (q.x - p.x) ** 2 + (q.y - p.y) ** 2;
+          if (d < bestD) {
+            bestD = d;
+            best = { loopStart: start, loopLen: loop.length, seg: i, t, dist: 0, point: q };
+          }
+        }
+      }
+    }
+    start += loop.length;
+  }
+  if (best) best.dist = Math.sqrt(bestD);
+  return best;
+}
+
+/**
+ * de Casteljau insert at a PathHit, preserving the exact curve: the split's two neighbours are
+ * pinned manual with the split tangents (their far-side tangents baked from the closed-aware
+ * resolution) and the new anchor sits between them. Handles wrap segments (the new anchor lands at
+ * the END of its loop) and bumps subpathStarts after the insertion point so later loops stay intact.
+ */
+export function insertOnPath(
+  anchors: BezierAnchor[],
+  subpathStarts: number[] | undefined,
+  closed: boolean,
+  hit: PathHit,
+): { anchors: BezierAnchor[]; subpathStarts: number[] | undefined; index: number } {
+  const r = resolvePath(anchors, subpathStarts, closed);
+  const ga = hit.loopStart + hit.seg;
+  const gb = hit.loopStart + ((hit.seg + 1) % hit.loopLen);
+  const a0 = r[ga]!;
+  const a1 = r[gb]!;
   const P0 = a0.p;
   const P1 = a1.p;
-  const C0 = ctrlOut(a0);
-  const C1 = ctrlIn(a1);
-  const A = lerp(P0, C0, t);
-  const B = lerp(C0, C1, t);
-  const C = lerp(C1, P1, t);
+  const t = hit.t;
+  const A = lerp(P0, ctrlOut(a0), t);
+  const B = lerp(ctrlOut(a0), ctrlIn(a1), t);
+  const C = lerp(ctrlIn(a1), P1, t);
   const D = lerp(A, B, t);
   const E = lerp(B, C, t);
   const F = lerp(D, E, t); // the new anchor point
   const next = anchors.slice();
-  next[seg] = { ...a0, hOut: v2(A.x - P0.x, A.y - P0.y) };
-  next[seg + 1] = { ...a1, hIn: v2(C.x - P1.x, C.y - P1.y) };
-  next.splice(seg + 1, 0, { p: F, hIn: v2(D.x - F.x, D.y - F.y), hOut: v2(E.x - F.x, E.y - F.y) });
-  return next;
+  next[ga] = { ...a0, hOut: v2(A.x - P0.x, A.y - P0.y), mode: "manual" };
+  next[gb] = { ...a1, hIn: v2(C.x - P1.x, C.y - P1.y), mode: "manual" };
+  const index = hit.loopStart + hit.seg + 1; // wrap segment -> loopStart + loopLen = the loop's end
+  next.splice(index, 0, { p: F, hIn: v2(D.x - F.x, D.y - F.y), hOut: v2(E.x - F.x, E.y - F.y), mode: "manual" });
+  return { anchors: next, subpathStarts: subpathStarts?.map((st) => (st >= index ? st + 1 : st)), index };
 }
 
-/** Nearest point on the (resolved) curve to p: the segment index, parameter t, distance, and the
- *  point itself — the point is what an insert drops a new anchor onto. */
-export function nearestOnSpine(
-  anchors: BezierAnchor[],
-  p: Vector2,
-): { seg: number; t: number; dist: number; point: Vector2 } | null {
-  if (anchors.length < 2) return null;
-  const r = resolveHandles(anchors);
-  const SUB = 24;
-  let best = Infinity;
-  let bestSeg = 0;
-  let bestT = 0;
-  let bestPt = r[0]!.p;
-  for (let i = 0; i < r.length - 1; i++) {
-    const p0 = r[i]!.p;
-    const c0 = ctrlOut(r[i]!);
-    const c1 = ctrlIn(r[i + 1]!);
-    const p1 = r[i + 1]!.p;
-    for (let s = 0; s <= SUB; s++) {
-      const t = s / SUB;
-      const q = cubic(p0, c0, c1, p1, t);
-      const d = (q.x - p.x) ** 2 + (q.y - p.y) ** 2;
-      if (d < best) {
-        best = d;
-        bestSeg = i;
-        bestT = t;
-        bestPt = q;
-      }
-    }
-  }
-  return { seg: bestSeg, t: bestT, dist: Math.sqrt(best), point: bestPt };
-}

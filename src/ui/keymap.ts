@@ -1,14 +1,9 @@
 import type { ToolMode } from "./tools";
 
-/** One line in the on-screen shortcut guide: a key/gesture chip + what it does. */
-export interface GuideRow {
-  keys: string;
-  desc: string;
-}
-export interface GuideSection {
-  title: string;
-  rows: GuideRow[];
-}
+import type { ShortcutSection } from "@carapace/shell";
+
+/** Guide sections now use carapace's ShortcutGuide shape (QC-UI-14: the bespoke panel is gone). */
+export type GuideSection = ShortcutSection;
 
 /** What the editor is currently doing — drives which shortcut sections are shown. */
 export interface GuideContext {
@@ -31,36 +26,47 @@ export function guide2D(ctx: GuideContext): GuideSection[] {
     return [
       {
         title: "Placing",
-        rows: [
-          { keys: "Click", desc: "Drop point (keeps going)" },
-          { keys: "Esc / Enter", desc: "Finish" },
-          { keys: "Right-click", desc: "Cancel" },
-          { keys: "MMB drag", desc: "Pan" },
+        items: [
+          { keys: "Click", label: "Drop point (keeps going)" },
+          { keys: "Esc / Enter", label: "Finish" },
+          { keys: "Right-click", label: "Cancel" },
+          { keys: "MMB drag", label: "Pan" },
         ],
       },
     ];
   }
 
   const out: GuideSection[] = [
-    { title: "Tools", rows: [{ keys: "Q W E R T", desc: "Select · Move · Rotate · Scale · Vertex" }] },
+    { title: "Tools", items: [{ keys: "Q W E R T M", label: "Select · Move · Rotate · Scale · Vertex · Measure" }] },
   ];
+
+  if (ctx.tool === "measure") {
+    out.push({
+      title: "Measure",
+      items: [
+        { keys: "Drag", label: "Measure between two points" },
+        { keys: "Esc", label: "Clear the measurement" },
+      ],
+    });
+  }
 
   if (ctx.tool === "select") {
     out.push({
       title: "Select",
-      rows: [
-        { keys: "Click", desc: "Pick / drag to move" },
-        { keys: "Alt-drag", desc: "Duplicate" },
-        { keys: "Drag box handles", desc: "Scale (Shift uniform · Ctrl centre)" },
-        { keys: "Drag rotate arm", desc: "Rotate (Shift 15°)" },
+      items: [
+        { keys: "Click", label: "Pick / drag to move" },
+        { keys: "Click curve", label: "Insert anchor" },
+        { keys: "Alt-drag", label: "Duplicate" },
+        { keys: "Drag box handles", label: "Scale (Shift uniform · Ctrl centre)" },
+        { keys: "Drag rotate arm", label: "Rotate (Shift 15°)" },
       ],
     });
   } else if (ctx.tool === "move" || ctx.tool === "rotate" || ctx.tool === "scale") {
     out.push({
       title: cap(ctx.tool),
-      rows: [
-        { keys: "Drag", desc: `${cap(ctx.tool)} selection` },
-        { keys: "Shift", desc: ctx.tool === "rotate" ? "Snap 15°" : ctx.tool === "scale" ? "Uniform" : "Axis lock" },
+      items: [
+        { keys: "Drag", label: `${cap(ctx.tool)} selection` },
+        { keys: "Shift", label: ctx.tool === "rotate" ? "Snap 15°" : ctx.tool === "scale" ? "Uniform" : "Axis lock" },
       ],
     });
   }
@@ -68,15 +74,15 @@ export function guide2D(ctx: GuideContext): GuideSection[] {
   if (ctx.objectKind === "cable") {
     out.push({
       title: "Cable",
-      rows: [
-        { keys: "Drag anchor", desc: "Move (stays smooth)" },
-        { keys: "Drag handle", desc: "Tangent (mirrored)" },
-        { keys: "Alt-drag handle", desc: "Asymmetric tangent" },
-        { keys: "Double-click", desc: "Smooth ↔ corner" },
-        { keys: "Click curve", desc: "Insert anchor" },
-        { keys: "Right-click end", desc: "Extend, then click to draw" },
-        { keys: "Right-click", desc: "Anchor menu" },
-        { keys: "⌫", desc: "Delete anchor" },
+      items: [
+        { keys: "Drag anchor", label: "Move (stays smooth)" },
+        { keys: "Drag handle", label: "Tangent (mirrored)" },
+        { keys: "Alt-drag handle", label: "Asymmetric tangent" },
+        { keys: "Double-click", label: "Smooth ↔ corner" },
+        { keys: "Click curve", label: "Insert anchor" },
+        { keys: "Right-click end", label: "Extend, then click to draw" },
+        { keys: "Right-click", label: "Anchor menu" },
+        { keys: "⌫", label: "Delete anchor" },
       ],
     });
   } else if (
@@ -85,28 +91,28 @@ export function guide2D(ctx: GuideContext): GuideSection[] {
     ctx.objectKind === "rings" ||
     ctx.objectKind === "mesh"
   ) {
-    const rows: GuideRow[] = [
-      { keys: "Click vertex", desc: "Select" },
-      { keys: "Shift-click", desc: "Add to selection" },
-      { keys: "Drag", desc: "Box-select / move" },
-      { keys: "Alt-click edge", desc: "Insert vertex" },
-      { keys: "Right-click", desc: "Vertex / edge menu" },
-      { keys: "⌫", desc: "Delete selected" },
+    const items: GuideSection["items"] = [
+      { keys: "Click vertex", label: "Select" },
+      { keys: "Shift-click", label: "Add to selection" },
+      { keys: "Drag", label: "Box-select / move" },
+      { keys: "Alt-click edge", label: "Insert vertex" },
+      { keys: "Right-click", label: "Vertex / edge menu" },
+      { keys: "⌫", label: "Delete selected" },
     ];
-    if (ctx.objectKind === "mesh") rows.push({ keys: "Right-click", desc: "Connect · Merge · Z-align" });
-    out.push({ title: "Vertices", rows });
+    if (ctx.objectKind === "mesh") items.push({ keys: "Right-click", label: "Connect · Merge · Z-align" });
+    out.push({ title: "Vertices", items });
   }
 
   out.push({
     title: "View & Edit",
-    rows: [
-      { keys: "Wheel", desc: "Zoom" },
-      { keys: "MMB drag", desc: "Pan" },
-      { keys: "Space", desc: "Swap 3D view" },
-      { keys: "V", desc: "Cycle view mode" },
-      { keys: "Arrows", desc: "Nudge (Shift ×10)" },
-      { keys: "Ctrl+Z / Y", desc: "Undo / Redo" },
-      { keys: "Ctrl+D", desc: "Duplicate" },
+    items: [
+      { keys: "Wheel", label: "Zoom" },
+      { keys: "MMB / Space-drag", label: "Pan" },
+      { keys: "X", label: "Swap 3D view" },
+      { keys: "V", label: "Cycle view mode" },
+      { keys: "Arrows", label: "Nudge (Shift ×10)" },
+      { keys: "Ctrl+Z / Y", label: "Undo / Redo" },
+      { keys: "Ctrl+D", label: "Duplicate" },
     ],
   });
   return out;
@@ -116,12 +122,12 @@ export function guide2D(ctx: GuideContext): GuideSection[] {
 export const GUIDE_3D: GuideSection[] = [
   {
     title: "3D View",
-    rows: [
-      { keys: "Right-drag", desc: "Orbit" },
-      { keys: "Left / MMB drag", desc: "Pan" },
-      { keys: "Left+Right drag", desc: "Raise / lower" },
-      { keys: "Wheel", desc: "Zoom" },
-      { keys: "Space", desc: "Swap with 2D" },
+    items: [
+      { keys: "Right-drag", label: "Orbit" },
+      { keys: "Left / MMB drag", label: "Pan" },
+      { keys: "Left+Right drag", label: "Raise / lower" },
+      { keys: "Wheel", label: "Zoom" },
+      { keys: "X", label: "Swap with 2D" },
     ],
   },
 ];

@@ -1,7 +1,7 @@
 import { decode } from "fast-png";
 import type { Host } from "../ui/host";
 import { DocumentStore } from "./store";
-import {
+import { type LambertDoc,
   emptyProjectConfig,
   parseDoc,
   parseProjectConfig,
@@ -11,7 +11,7 @@ import {
 } from "./schema";
 import { basename, dirname, joinPath } from "./paths";
 import { PROJECT_FILE, Tab } from "./workspace";
-import { dropUnknownLayers } from "../field/registry";
+import { countUnknownLayers } from "../field/registry";
 import { buildNxExport } from "./exports";
 import { diffuseOpacity } from "../exporters/nx";
 import { defaultDocName, resolveDiffuse } from "./diffuseSource";
@@ -69,8 +69,10 @@ export async function newProjectFlow(host: Host, defaultPath?: string): Promise<
 /**
  * Open a saved `.lmb` as a tab: parse the doc, resolve + decode its diffuse (file or remote), and
  * enforce the NX dims contract. The diffuse is carried as resolved bytes; the docPath is the `.lmb`.
+ * `droppedUnknown` is how many legacy/removed-type object layers were dropped on load (the drop is
+ * intended graceful-degrade; the count lets the caller tell the user it happened).
  */
-export async function openDocTab(host: Host, docPath: string): Promise<Tab> {
+export async function openDocTab(host: Host, docPath: string): Promise<{ tab: Tab; droppedUnknown: number }> {
   const doc = parseDoc(new TextDecoder().decode(await host.readFile(docPath)));
   const bytes = await resolveDiffuse(host, doc.source.uri);
   const decoded = decode(bytes);
@@ -80,8 +82,9 @@ export async function openDocTab(host: Host, docPath: string): Promise<Tab> {
         `${doc.source.width}x${doc.source.height} — the NX contract requires an exact match`,
     );
   }
-  doc.layers = dropUnknownLayers(doc.layers); // graceful degrade: delete legacy/removed object types on load
-  return { id: crypto.randomUUID(), docPath, store: new DocumentStore(doc, docPath), diffuse: { bytes } };
+  const droppedUnknown = countUnknownLayers(doc.layers);
+  const tab: Tab = { id: crypto.randomUUID(), docPath, store: new DocumentStore(doc, docPath), diffuse: { bytes } };
+  return { tab, droppedUnknown };
 }
 
 /**
@@ -106,17 +109,30 @@ export async function saveTab(host: Host, tab: Tab, projectPath: string): Promis
 }
 
 /**
- * Export the tab's NX next to its `.lmb`, named from the doc stem (the diffuse may be remote, so
- * "next to the image" is impossible). Requires a saved doc. Uses the project's normal-channel convention.
+ * Export ONE document's NX to `outPath` (project normal-channel convention). Doc-based, not
+ * tab-based, so the project-wide sweep can export `.lmb` files that aren't open; `label` names the
+ * doc in errors (a path or filename).
  */
-export async function exportTabNx(host: Host, tab: Tab, config: ProjectConfig): Promise<string> {
-  if (!tab.docPath) throw new Error("Save the document before exporting its NX");
+export async function exportDocNx(host: Host, doc: LambertDoc, label: string, config: ProjectConfig, outPath: string): Promise<string> {
   const { gpuExportRender } = await import("../ui/exportRender");
-  const doc = tab.store.state.doc;
   const render = await gpuExportRender(doc);
   const diffuse = decode(await resolveDiffuse(host, doc.source.uri));
-  const nxOutPath = joinPath(dirname(tab.docPath), basename(tab.docPath).replace(/\.lmb$/i, "") + ".nx.png");
-  const file = buildNxExport(doc, render, nxOutPath, config.normalDirs, diffuseOpacity(diffuse));
+  // Re-validate dims before the alpha gate: if the diffuse changed size since the doc was opened, its
+  // opacity[] would be the wrong length and encodeNxPng would index out of range → corrupt NX alpha.
+  // openDocTab checks on open, but the file can change underneath us before an export.
+  if (diffuse.width !== doc.source.width || diffuse.height !== doc.source.height) {
+    throw new Error(
+      `${basename(label)} diffuse is ${diffuse.width}x${diffuse.height} but the document expects ` +
+        `${doc.source.width}x${doc.source.height} — the NX contract requires an exact match`,
+    );
+  }
+  const file = buildNxExport(doc, render, outPath, config.normalDirs, diffuseOpacity(diffuse));
   await host.writeFile(file.path, file.bytes);
   return file.warning ? `${file.path} written — WARNING: ${file.warning}` : `wrote ${file.path}`;
+}
+
+/** Export the active tab's LIVE document (unsaved edits included). Requires a saved doc for naming. */
+export async function exportTabNx(host: Host, tab: Tab, config: ProjectConfig, outPath: string): Promise<string> {
+  if (!tab.docPath) throw new Error("Save the document before exporting its NX");
+  return exportDocNx(host, tab.store.state.doc, tab.docPath, config, outPath);
 }

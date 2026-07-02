@@ -10,7 +10,7 @@ const MINOR = 16;
 export const Torus = defineObjectType({
   id: ObjectTypeId.Torus,
   name: "Torus",
-  category: "Primitives",
+  category: "Shapes",
   params: {
     profile: { type: "enum", options: PROFILE_KINDS, default: "round" },
   },
@@ -19,7 +19,7 @@ export const Torus = defineObjectType({
   // params: 13 = profile (tube cross-section over the minor radius).
   wgsl: /* wgsl */ `
 fn shape_torus(p: vec2f, base: u32) -> vec2f {
-  let prof = u32(rec(base, 13u));
+  let prof = u32(rec(base, SLOT_PARAM0));
   let dRing = abs(length(p) - 48.0);
   var height = 0.0;
   if (dRing < 16.0) { height = 16.0 * apply_profile(prof, 16.0 - dRing, 16.0); }

@@ -1,10 +1,12 @@
 import { Vector2 } from "@carapace/primitives";
+import { bezierSpine } from "../field/bezier";
 import { ObjectTypeId } from "../field/objectTypeIds";
 import type { ObjectInstance } from "../field/types";
 import { v2 } from "../field/vec";
 
-/** Object-local footprint bounds: control-point extents, or parametric extents from the object's
- *  params (pipe = length/radius/cap, sphere = radius, torus = fixed). Shared by the object + group gizmo. */
+/** Object-local footprint bounds: control-point extents, analytic-stroke bezier extents, or parametric
+ *  extents from the object's params (pipe = length/radius/cap, sphere = radius, torus = fixed). Shared by
+ *  the object + group gizmo. */
 export function localBounds(s: ObjectInstance): { min: Vector2; max: Vector2 } {
   if (s.controlPoints.length > 0) {
     let minX = Infinity;
@@ -18,6 +20,24 @@ export function localBounds(s: ObjectInstance): { min: Vector2; max: Vector2 } {
       maxY = Math.max(maxY, p.y);
     }
     return { min: v2(minX, minY), max: v2(maxX, maxY) };
+  }
+  if (s.bezier && s.bezier.length > 0) {
+    // analytic stroke vectors (Cable/Ridge) carry their path in `bezier` with NO baked
+    // controlPoints. Bound the SAMPLED curve (not the control-point hull — tangent handles sit off the
+    // curve and would balloon the box), padded by the cross-section, so the gizmo box hugs the swept
+    // stroke instead of the fixed default box (which scaled but never wrapped the anchors).
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const p of bezierSpine(s.bezier, 24, s.closed)) {
+      minX = Math.min(minX, p.x);
+      minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x);
+      maxY = Math.max(maxY, p.y);
+    }
+    const pad = Number(s.params.radius ?? s.params.width ?? 8); // cross-section half-extent (pipe radius / berm width)
+    return { min: v2(minX - pad, minY - pad), max: v2(maxX + pad, maxY + pad) };
   }
   if (s.typeId === ObjectTypeId.Pipe) {
     const r = Math.max(Number(s.params.radius ?? 16), Number(s.params.radius2 ?? 16));

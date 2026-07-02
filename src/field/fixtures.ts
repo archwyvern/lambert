@@ -54,6 +54,7 @@ export function stressObjects(): ObjectInstance[] {
   capsule.id = "stress-capsule";
   capsule.transform.rotation = -0.4;
   capsule.transform.scale = capsule.transform.scale.withZ(0.8);
+  capsule.opacity = 0.5; // exercise the per-object opacity slot (GPU parity for the fold lerp)
   const groove = createObjectInstance(ObjectTypeId.PipeVector, v2(48, 40));
   groove.id = "stress-groove";
   groove.params.invert = "carve";
@@ -71,7 +72,14 @@ export function surfaceObjects(): ObjectInstance[] {
   plane.transform.pos = plane.transform.pos.withZ(8); // elevation (the low edge floats 8px) + tilt
   plane.params.tiltX = 0.6;
   plane.params.tiltY = -0.45;
-  return [plane];
+  // an angled Gradient effect region over the corner — parity for the region-normalised ramp
+  const grad = createObjectInstance(ObjectTypeId.Gradient, v2(70, 70));
+  grad.id = "fx-gradient";
+  grad.params.angle = 35;
+  grad.params.depth = 10;
+  grad.transform.rotation = 0.25;
+  grad.transform.scale = new Vector3(0.5, 0.4, 1);
+  return [plane, grad];
 }
 
 /** One of each parametric primitive (cone/pyramid/torus/wedge/fillet) with scale + rotation,
@@ -122,12 +130,12 @@ export function primitivesObjects(): ObjectInstance[] {
 export function pipeObjects(): ObjectInstance[] {
   const round = createObjectInstance(ObjectTypeId.PipeVector, v2(30, 42));
   round.id = "p-round";
-  // smooth (Catmull-Rom) closed loop with varying per-anchor radius: exercises resolveHandlesClosed,
-  // the wrap segment, and cubic_dist_t radius interpolation GPU==CPU.
+  // smooth (Catmull-Rom) closed loop with varying per-anchor scale: exercises resolveHandlesClosed,
+  // the wrap segment, and cubic_dist_t taper interpolation GPU==CPU (radius 8 · scale).
   round.bezier = [
-    { ...bezierAnchor(v2(-26, -16)), radius: 10 },
-    { ...bezierAnchor(v2(2, 8)), radius: 5 },
-    { ...bezierAnchor(v2(30, 16)), radius: 8 },
+    { ...bezierAnchor(v2(-26, -16)), scale: 1.25 },
+    { ...bezierAnchor(v2(2, 8)), scale: 0.625 },
+    { ...bezierAnchor(v2(30, 16)), scale: 1 },
   ];
   round.closed = true;
   round.transform.scale = new Vector3(0.7, 0.7, 1);
@@ -145,8 +153,56 @@ export function pipeObjects(): ObjectInstance[] {
   return [round, flat];
 }
 
-/** The baked multi-contour Bézier vectors for the GPU-vs-CPU drift selftest: a Surface (Vector) with a
- *  HOLE (outer ring + inner hole, CSG-subtracted) and a Plateau (Vector) (base + top Bézier rings),
+/** Berm + Ridge: flat-cap, round-cap, slope=0 (vertical sides), and a CLOSED BermVector loop.
+ *  Both berm WGSL paths had zero drift coverage — including the load-bearing hardcoded apply_profile(1u)
+ *  linear index (the class of bug that shipped before). Wired into runSelftest. */
+export function bermObjects(): ObjectInstance[] {
+  const flat = createObjectInstance(ObjectTypeId.Berm, v2(28, 24));
+  flat.id = "berm-flat";
+  flat.params.length = 44;
+  flat.params.width = 12;
+  flat.params.slope = 5;
+  flat.params.height = 14;
+  flat.params.cap = "flat";
+  flat.transform.rotation = 0.4;
+  flat.transform.scale = new Vector3(0.9, 1.1, 1);
+
+  const round = createObjectInstance(ObjectTypeId.Berm, v2(66, 30));
+  round.id = "berm-round";
+  round.params.length = 36;
+  round.params.width = 10;
+  round.params.slope = 6;
+  round.params.height = 10;
+  round.params.cap = "round";
+  round.transform.rotation = -0.25;
+
+  const vertical = createObjectInstance(ObjectTypeId.Berm, v2(30, 68));
+  vertical.id = "berm-vertical";
+  vertical.params.length = 40;
+  vertical.params.width = 9;
+  vertical.params.slope = 0; // vertical sides: apply_profile clamps hard (width<=0 branch) — GPU==CPU
+  vertical.params.height = 12;
+  vertical.params.cap = "flat";
+
+  const loop = createObjectInstance(ObjectTypeId.BermVector, v2(66, 66));
+  loop.id = "berm-loop";
+  loop.params.width = 8;
+  loop.params.slope = 4;
+  loop.params.height = 11;
+  // per-anchor SCALE taper (width+slope+height as a unit) — covers the stroke-taper path GPU==CPU
+  loop.bezier = [
+    { ...bezierAnchor(v2(-16, -14)), scale: 1.4 },
+    { ...bezierAnchor(v2(18, -8)), scale: 0.7 },
+    bezierAnchor(v2(4, 18)),
+  ];
+  loop.closed = true;
+  loop.transform.scale = new Vector3(0.8, 0.8, 1);
+
+  return [flat, round, vertical, loop];
+}
+
+/** The baked multi-contour Bézier vectors for the GPU-vs-CPU drift selftest: a Contour with a
+ *  HOLE (outer ring + inner hole, CSG-subtracted) and a Mesa (base + top Bézier rings),
  *  both under a rotation + scale — proves the ringSplit hole/ramp paths match GPU==CPU. */
 export function vectorFillObjects(): ObjectInstance[] {
   const frame = createObjectInstance(ObjectTypeId.SurfaceVector, v2(34, 40));
@@ -164,7 +220,19 @@ export function vectorFillObjects(): ObjectInstance[] {
   mesa.id = "v-mesa";
   mesa.transform.rotation = -0.4;
   mesa.transform.scale = new Vector3(0.6, 0.6, 1);
-  return [frame, mesa];
+  // a HOLED pillow under rotation + non-uniform scale: exercises the soft-distance boundary integral
+  // (pillow_ring_inv over outer + hole rings) GPU==CPU, incl. the zero-param hole-slot packing
+  const cushion = createObjectInstance(ObjectTypeId.Pillow, v2(30, 74));
+  cushion.id = "v-cushion";
+  cushion.transform.rotation = 0.5;
+  cushion.transform.scale = new Vector3(0.55, 0.4, 1);
+  cushion.bezier = [...cushion.bezier!, corner(-14, -10), corner(14, -10), corner(14, 10), corner(-14, 10)]; // + a hole
+  cushion.subpathStarts = [0, 4];
+  const cb = bakeRings(cushion.bezier, cushion.subpathStarts);
+  cushion.controlPoints = cb.controlPoints;
+  cushion.ringSplit = cb.ringSplit;
+  cushion.contourCounts = cb.contourCounts;
+  return [frame, mesa, cushion];
 }
 
 /** A rotated, non-uniformly scaled plateau with a local KEEP mask (one smooth anchor) and a world

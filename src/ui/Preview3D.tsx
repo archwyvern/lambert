@@ -1,9 +1,10 @@
 import { AddRegular, ArrowResetRegular, ArrowSwapRegular, SubtractRegular } from "@fluentui/react-icons";
 import { useEffect, useRef, useState } from "react";
+import { ShortcutGuide } from "@carapace/shell";
 import { DEFAULT_ORBIT } from "../field/gpu/preview3d";
 import { GUIDE_3D } from "./keymap";
 import { LightPad } from "./LightPad";
-import { ShortcutGuide } from "./ShortcutGuide";
+import { ICON } from "./kit";
 import type { use3DCamera } from "./use3DCamera";
 
 /**
@@ -62,13 +63,13 @@ export function Preview3D(props: {
   const showAid = enabled && cam.translating;
   const proj = showAid ? cam.project(docW, docH, size.w, size.h) : null;
   const ground = proj ? proj([t.x, 0, t.z]) : null;
-  const iconBtn = "flex h-[18px] w-[18px] items-center justify-center text-fg-mid hover:text-fg";
+  const iconBtn = "flex h-control-xs w-control-xs items-center justify-center text-fg-mid hover:text-fg";
 
   return (
     <div ref={hostRef} className="absolute inset-0 overflow-hidden">
       <canvas
         ref={canvasRef}
-        className="absolute inset-0 h-full w-full cursor-grab active:cursor-grabbing"
+        className="absolute inset-0 h-full w-full"
         onPointerDown={cam.onCanvasDown(docW, docH, size.h)}
         onWheel={(e) => {
           e.stopPropagation();
@@ -81,17 +82,17 @@ export function Preview3D(props: {
       </div>
       <div className="pointer-events-none absolute top-2 right-3 flex items-start gap-2">
         <div className="pointer-events-auto flex items-center gap-0.5">
-          <button title={big ? "Swap to corner" : "Swap to big view"} className={iconBtn} onClick={onSwap}>
-            <ArrowSwapRegular style={{ fontSize: 12 }} />
+          <button aria-label={big ? "Swap to corner" : "Swap to big view"} title={big ? "Swap to corner" : "Swap to big view"} className={iconBtn} onClick={onSwap}>
+            <ArrowSwapRegular style={{ fontSize: ICON.xs }} />
           </button>
-          <button title="Reset view" className={iconBtn} onClick={() => cam.setOrbit({ ...DEFAULT_ORBIT })}>
-            <ArrowResetRegular style={{ fontSize: 12 }} />
+          <button aria-label="Reset view" title="Reset view" className={iconBtn} onClick={() => cam.setOrbit({ ...DEFAULT_ORBIT })}>
+            <ArrowResetRegular style={{ fontSize: ICON.xs }} />
           </button>
-          <button title="Zoom out" className={iconBtn} onClick={() => cam.zoomBy(1.25)}>
-            <SubtractRegular style={{ fontSize: 12 }} />
+          <button aria-label="Zoom out" title="Zoom out" className={iconBtn} onClick={() => cam.zoomBy(1.25)}>
+            <SubtractRegular style={{ fontSize: ICON.xs }} />
           </button>
-          <button title="Zoom in" className={iconBtn} onClick={() => cam.zoomBy(0.8)}>
-            <AddRegular style={{ fontSize: 12 }} />
+          <button aria-label="Zoom in" title="Zoom in" className={iconBtn} onClick={() => cam.zoomBy(0.8)}>
+            <AddRegular style={{ fontSize: ICON.xs }} />
           </button>
         </div>
         {enabled && big ? (
@@ -100,7 +101,7 @@ export function Preview3D(props: {
             onPointerDown={(e) => e.stopPropagation()}
           >
             <LightPad lightDir={lightDir} onChange={onLightChange} radius={34} />
-            <span className="text-sm uppercase tracking-[var(--tracking-tight)] text-fg-mid">light</span>
+            <span className="text-sm uppercase tracking-wide text-fg-mid">light</span>
           </div>
         ) : null}
       </div>
@@ -154,7 +155,7 @@ export function Preview3D(props: {
       {!enabled ? (
         <div className="absolute inset-0 grid place-items-center text-sm text-fg-mid">3D preview</div>
       ) : null}
-      {enabled && big ? <ShortcutGuide storageKey="lambert.guide3d.open" sections={GUIDE_3D} /> : null}
+      {enabled && big ? <ShortcutGuide position="absolute" storageKey="lambert.guide3d.open" sections={GUIDE_3D} /> : null}
     </div>
   );
 }

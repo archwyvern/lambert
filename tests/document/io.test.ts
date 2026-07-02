@@ -58,6 +58,12 @@ function fakeHost(files: Record<string, Uint8Array>): Host {
       return f ? Promise.resolve(f) : Promise.reject(new Error(`offline ${url}`));
     },
     pathExists: (p) => Promise.resolve(p in files),
+    gitStatus: () => Promise.resolve(""),
+    mkdir: () => Promise.resolve(),
+    windowMinimize: () => Promise.resolve(),
+    windowToggleMaximize: () => Promise.resolve(),
+    windowClose: () => Promise.resolve(),
+    windowIsMaximized: () => Promise.resolve(false),
     loadSession: () => Promise.resolve(null),
     saveSession: () => Promise.resolve(),
     notifyProjectOpened: () => {},
@@ -80,11 +86,12 @@ test("openDocTab resolves a file:// diffuse and builds a tab", async () => {
     "/p/ship.lmb": new TextEncoder().encode(serializeDoc(doc)),
     "/art/ship.df.png": gray(32, 16),
   };
-  const tab = await openDocTab(fakeHost(files), "/p/ship.lmb");
+  const { tab, droppedUnknown } = await openDocTab(fakeHost(files), "/p/ship.lmb");
   expect(tab.docPath).toBe("/p/ship.lmb");
   expect(tab.id).toBeTruthy();
   expect(tab.diffuse.bytes.length).toBeGreaterThan(0);
   expect(tab.store.state.doc.source.width).toBe(32);
+  expect(droppedUnknown).toBe(0);
 });
 
 test("openDocTab rejects on dimension mismatch (NX contract)", async () => {
@@ -100,7 +107,7 @@ test("saveTab writes the tab's docPath when it has one", async () => {
   const doc = emptyDoc("file:///art/ship.df.png", 8, 8);
   const files = { "/p/ship.lmb": new TextEncoder().encode(serializeDoc(doc)), "/art/ship.df.png": gray(8, 8) };
   const host = fakeHost(files);
-  const tab = await openDocTab(host, "/p/ship.lmb");
+  const { tab } = await openDocTab(host, "/p/ship.lmb");
   expect(await saveTab(host, tab, "/p")).toBe("/p/ship.lmb");
 });
 
@@ -134,7 +141,7 @@ test("saveTab returns null when the save dialog is cancelled", async () => {
 
 test("exportTabNx refuses an untitled doc (must be saved first)", async () => {
   const tab = untitledTab("file:///art/x.df.png", 8, 8, gray(8, 8));
-  await expect(exportTabNx(fakeHost({}), tab, emptyProjectConfig())).rejects.toThrow(/Save the document/);
+  await expect(exportTabNx(fakeHost({}), tab, emptyProjectConfig(), "/out/x.nx.png")).rejects.toThrow(/Save the document/);
 });
 
 test("openProjectByPath reads the marker from a known folder, no dialog", async () => {
@@ -190,4 +197,10 @@ test("buildNxExport: nx bytes at the given out path + empty-mask warning", () =>
   const real = buildNxExport(doc, renderField(flattenLayers(doc.layers), 32, 32, { supersample: 1 }), "/p/hull.nx.png", DEFAULT_NORMAL_DIRS);
   expect(real.warning).toBe(null);
   expect(real.bytes.length).toBeGreaterThan(0);
+});
+
+test("buildNxExport throws when the render dims don't match the doc (NX contract)", () => {
+  const doc = emptyDoc("file:///art/hull.df.png", 32, 32);
+  const wrongSize = renderField(flattenLayers(doc.layers), 16, 16, { supersample: 1 }); // 16x16 != doc 32x32
+  expect(() => buildNxExport(doc, wrongSize, "/p/hull.nx.png", DEFAULT_NORMAL_DIRS)).toThrow(/16x16.*32x32/);
 });

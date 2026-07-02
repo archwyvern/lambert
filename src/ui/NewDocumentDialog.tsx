@@ -40,7 +40,7 @@ export function NewDocumentDialog({
       {/* content fills the panel — the panel's p-5 is the only horizontal padding (no fixed width,
           which previously exceeded the modal's max-width and spilled the fields out the right) */}
       <div className="flex flex-col gap-4">
-        <p className="text-sm text-fg-mid">
+        <p className="text-base text-fg-mid">
           A document references its diffuse image externally — pick a local file, or paste a URL to keep
           the project folder git-portable (text only, no binaries).
         </p>

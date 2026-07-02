@@ -14,10 +14,9 @@ import type { DocumentStore, EditorState } from "../document/store";
 import { duplicateObject, moveObjectTo, removeObject, updateObject } from "../document/docOps";
 import { addGroup, emptyGroup, findNode, findParentId, moveNode, siblingsOf, ungroup, updateNode, wrapInGroup } from "../document/layerOps";
 import { getObjectType, ObjectTypeId } from "../field/registry";
-import { bakeToMesh, convertToVector, VECTOR_CONVERTIBLE } from "../field/convert";
+import { bakeToMesh, canBakeToMesh, convertToVector, VECTOR_CONVERTIBLE } from "../field/convert";
 import { isGroup, isObject, type GroupLayer, type LayerNode } from "../field/types";
-import { Button, ContextMenu, cx, SectionLabel } from "./kit";
-import { localBounds } from "./objectBounds";
+import { Button, ContextMenu, cx, ICON, SectionLabel } from "./kit";
 import { OBJECT_ICONS } from "./objectIcons";
 
 const DRAG_MIME = "application/x-lambert-layer";
@@ -84,10 +83,7 @@ export function Layers(props: { store: DocumentStore; state: EditorState }): Rea
     setRenaming(null);
   };
 
-  const doOp = (fn: (d: typeof state.doc) => typeof state.doc): void => {
-    store.update(fn);
-    store.endGesture();
-  };
+  const doOp = (fn: (d: typeof state.doc) => typeof state.doc): void => store.commit(fn);
 
   // drop `dragged` onto `target`: into a group, else reorder just before the target in its parent
   const onDropOn = (targetId: string, draggedId: string): void => {
@@ -115,7 +111,7 @@ export function Layers(props: { store: DocumentStore; state: EditorState }): Rea
       : [menuNode.id];
 
   // click selection with modifiers: plain = one, Ctrl/Cmd = toggle, Shift = range over visible order
-  const onRowClick = (e: React.MouseEvent, id: string): void => {
+  const onRowClick = (e: React.MouseEvent | React.KeyboardEvent, id: string): void => {
     if (e.metaKey || e.ctrlKey) {
       store.toggleSelect(id);
     } else if (e.shiftKey && state.selectedId) {
@@ -147,8 +143,25 @@ export function Layers(props: { store: DocumentStore; state: EditorState }): Rea
           key={n.id}
           role="button"
           tabIndex={0}
+          data-layer-row={n.id}
           draggable={renaming !== n.id}
           onClick={(e) => onRowClick(e, n.id)}
+          // keyboard operability: the row is focusable (tabIndex 0) but was mouse-only. Enter/Space
+          // selects (honouring Ctrl/Shift modifiers, same as a click); Up/Down move focus between rows.
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onRowClick(e, n.id);
+            } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+              e.preventDefault();
+              const target = order[order.indexOf(n.id) + (e.key === "ArrowDown" ? 1 : -1)];
+              if (target) {
+                e.currentTarget.parentElement
+                  ?.querySelector<HTMLElement>(`[data-layer-row="${CSS.escape(target)}"]`)
+                  ?.focus();
+              }
+            }
+          }}
           onDoubleClick={() => {
             setRenaming(n.id);
             setRenameText(nodeLabel(n));
@@ -178,7 +191,7 @@ export function Layers(props: { store: DocumentStore; state: EditorState }): Rea
             onDropOn(n.id, id);
           }}
           className={cx(
-            "group flex h-[24px] cursor-pointer items-center gap-1 px-1.5 text-base",
+            "group flex h-control-sm cursor-pointer items-center gap-1 px-1.5 text-base",
             selected ? "bg-list-active text-fg" : "text-fg-mid hover:bg-hover hover:text-fg",
             !n.visible && "opacity-50",
             dropId === n.id && "outline outline-1 outline-accent",
@@ -189,12 +202,13 @@ export function Layers(props: { store: DocumentStore; state: EditorState }): Rea
             <button
               className="flex h-3.5 w-3.5 shrink-0 items-center justify-center text-fg-mid hover:text-fg"
               title={n.collapsed ? "Expand" : "Collapse"}
+              aria-label={n.collapsed ? "Expand group" : "Collapse group"}
               onClick={(e) => {
                 e.stopPropagation();
                 patchNode(n.id, (g) => ({ ...g, collapsed: !(g as { collapsed?: boolean }).collapsed }) as LayerNode);
               }}
             >
-              {n.collapsed ? <ChevronRightRegular style={{ fontSize: 12 }} /> : <ChevronDownRegular style={{ fontSize: 12 }} />}
+              {n.collapsed ? <ChevronRightRegular style={{ fontSize: ICON.sm }} /> : <ChevronDownRegular style={{ fontSize: ICON.sm }} />}
             </button>
           ) : (
             <span className="w-3.5 shrink-0" />
@@ -219,7 +233,7 @@ export function Layers(props: { store: DocumentStore; state: EditorState }): Rea
                 if (e.key === "Escape") setRenaming(null);
               }}
               onClick={(e) => e.stopPropagation()}
-              className="h-[18px] min-w-0 flex-1 border border-accent bg-surface2 px-1 text-base text-fg outline-none"
+              className="h-control-xs min-w-0 flex-1 border border-accent bg-surface2 px-1 text-base text-fg outline-none"
             />
           ) : (
             <span className="min-w-0 flex-1 truncate">{nodeLabel(n)}</span>
@@ -227,8 +241,9 @@ export function Layers(props: { store: DocumentStore; state: EditorState }): Rea
           {isGroup(n) && n.mirror && n.mirror !== "none" ? (
             <button
               title={n.mirrorEnabled === false ? "Show mirror" : "Hide mirror"}
+              aria-label={n.mirrorEnabled === false ? "Show mirror" : "Hide mirror"}
               className={cx(
-                "flex h-[18px] w-[18px] shrink-0 items-center justify-center hover:text-fg",
+                "flex h-control-xs w-control-xs shrink-0 items-center justify-center hover:text-fg",
                 n.mirrorEnabled === false ? "text-fg-mid" : "text-accent",
               )}
               onClick={(e) => {
@@ -236,13 +251,14 @@ export function Layers(props: { store: DocumentStore; state: EditorState }): Rea
                 patchNode(n.id, (x) => ({ ...x, mirrorEnabled: (x as GroupLayer).mirrorEnabled === false }) as LayerNode);
               }}
             >
-              <FlipHorizontalRegular style={{ fontSize: 13 }} />
+              <FlipHorizontalRegular style={{ fontSize: ICON.sm }} />
             </button>
           ) : null}
           <button
             title={n.locked ? "Unlock" : "Lock (inert on canvas)"}
+            aria-label={n.locked ? "Unlock layer" : "Lock layer"}
             className={cx(
-              "flex h-[18px] w-[18px] shrink-0 items-center justify-center hover:text-fg",
+              "flex h-control-xs w-control-xs shrink-0 items-center justify-center hover:text-fg",
               n.locked ? "text-accent" : "text-fg-mid",
             )}
             onClick={(e) => {
@@ -250,17 +266,18 @@ export function Layers(props: { store: DocumentStore; state: EditorState }): Rea
               patchNode(n.id, (x) => ({ ...x, locked: !x.locked }) as LayerNode);
             }}
           >
-            {n.locked ? <LockClosedRegular style={{ fontSize: 13 }} /> : <LockOpenRegular style={{ fontSize: 13 }} />}
+            {n.locked ? <LockClosedRegular style={{ fontSize: ICON.sm }} /> : <LockOpenRegular style={{ fontSize: ICON.sm }} />}
           </button>
           <button
             title={n.visible ? "Hide" : "Show"}
-            className="flex h-[18px] w-[18px] shrink-0 items-center justify-center text-fg-mid hover:text-fg"
+            aria-label={n.visible ? "Hide layer" : "Show layer"}
+            className="flex h-control-xs w-control-xs shrink-0 items-center justify-center text-fg-mid hover:text-fg"
             onClick={(e) => {
               e.stopPropagation();
               patchNode(n.id, (x) => ({ ...x, visible: !x.visible }) as LayerNode);
             }}
           >
-            {n.visible ? <EyeRegular style={{ fontSize: 13 }} /> : <EyeOffRegular style={{ fontSize: 13 }} />}
+            {n.visible ? <EyeRegular style={{ fontSize: ICON.sm }} /> : <EyeOffRegular style={{ fontSize: ICON.sm }} />}
           </button>
         </div>,
       );
@@ -349,8 +366,8 @@ export function Layers(props: { store: DocumentStore; state: EditorState }): Rea
             ...(!isGroup(menuNode) && VECTOR_CONVERTIBLE.has(menuNode.typeId)
               ? [
                   {
-                    // swap a primitive for its path-editable Bézier "(Vector)" twin
-                    label: "Convert to Vector",
+                    // swap a shape for its pen-editable Path twin (Pipe->Cable, Berm->Ridge, Plate->Contour, Plateau->Mesa)
+                    label: "Convert to Path",
                     onClick: () =>
                       doOp((d) =>
                         menuTargets.reduce((acc, tid) => updateObject(acc, tid, (s) => (isObject(s) ? (convertToVector(s) ?? s) : s)), d),
@@ -358,16 +375,17 @@ export function Layers(props: { store: DocumentStore; state: EditorState }): Rea
                   },
                 ]
               : []),
-            ...(!isGroup(menuNode) && menuNode.typeId !== ObjectTypeId.Mesh
+            ...(!isGroup(menuNode) && canBakeToMesh(menuNode)
               ? [
                   {
-                    // bake the parametric/Bézier field to an editable triangle mesh (one-way)
+                    // bake a FLAT/faceted shape to a minimal, exact triangle mesh (one-way). Curved
+                    // primitives don't offer this — triangulated curves band under lighting; they
+                    // convert to Vectors instead.
                     label: "Convert to Mesh",
                     onClick: () =>
                       doOp((d) =>
                         menuTargets.reduce(
-                          (acc, tid) =>
-                            updateObject(acc, tid, (s) => (isObject(s) && s.typeId !== ObjectTypeId.Mesh ? bakeToMesh(s, localBounds(s)) : s)),
+                          (acc, tid) => updateObject(acc, tid, (s) => (isObject(s) && canBakeToMesh(s) ? bakeToMesh(s) : s)),
                           d,
                         ),
                       ),

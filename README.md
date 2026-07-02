@@ -2,60 +2,47 @@
 
 Shape-based height field authoring for normal maps. 3D but not 3D, done the hard way.
 
-Place parametric shapes (domes, plateaus, ridges, grooves) over a reference image; Lambert
+Place parametric shapes (domes, plateaus, pipes, embankments) over a reference image; Lambert
 composites them into a height field and derives a normal map from it. You never paint a
 normal color: heights are easy to author and the derived normals are correct by construction.
 
-Status: pre-alpha. The CPU evaluation core and exporters work headlessly; the editor UI
-(Electron + WebGPU) is being built on top — see `docs/specs/` and `docs/plans/`.
+**New here? Read the [artist guide](docs/guide.md)** for the workflow, and the
+[shape reference](docs/shapes.md) for every object type and conversion.
 
-## Try it
+## Run it
 
 ```bash
 pnpm install
-pnpm test
-pnpm eval path/to/file.lambert   # writes {stem}.nx.png + debug height/normal maps
+pnpm dev        # the editor: open/create a project, place shapes, export NX
 ```
 
-A `.lambert` document is JSON: a source image reference plus an ordered list of shape
-instances (type, transform, params, control points, combine op). See
-`tests/golden/fixture.ts` for a worked example.
+A project is a folder with a `project.lambert` config; each image gets a `.lmb` document
+(JSON: a source-image reference plus an ordered object list). Export produces the
+Skyrat-convention `.nx.png` (tangent-space normals, authored-mask alpha) next to the document.
+
+```bash
+pnpm eval path/to/file.lmb   # headless export: writes {stem}.nx.png + debug height/normal maps
+```
 
 ## Development
 
 ```bash
-pnpm dev        # the editor (open an image, place shapes, export NX)
-pnpm selftest   # GPU drift test vs the CPU reference (exit 0 = pass)
-pnpm test       # node suite (math, packing, codegen, store, exporters, golden)
+pnpm dev        # editor with hot reload
+pnpm test       # node suite (field math, packing, codegen, store, exporters, CPU goldens)
+pnpm selftest   # GPU drift test vs the CPU reference (exit 0 = pass; needs a Vulkan device)
+pnpm typecheck
 ```
 
 The GPU fold is drift-tested against the CPU reference implementation in
 `src/field/evalCpu.ts` — see `src/renderer/selftest.ts`. Tolerances live in
-`src/field/compare.ts`.
+`src/field/compare.ts`. CI runs typecheck + tests on every push; the GPU selftest runs as a
+best-effort software-Vulkan job.
 
 Harness routes (after `electron-vite build`):
 `electron . --query harness=1` (fixture normal+lit views),
 `electron . --query "demo=1&mode=lit&select=ridge"` (editor with the golden fixture),
-`--capture out.png` screenshots any route for automated visual checks.
-
-Editor basics (godot-style tools): Q select, W move, E rotate, R scale. Select mode has
-the full gizmo (corner rotate/scale handles, vertex dots) plus godot's drag overrides
-(Alt = move, Ctrl = rotate, Ctrl+Alt = scale); explicit modes drag anywhere on the
-selection. Shift = axis-lock while moving, 15-degree snap while rotating, uniform while
-scaling. Wheel zooms, middle-drag or Space-drag pans, V cycles view modes, arrows nudge,
-Delete removes. File/Edit/View live in the application menu (Ctrl+O/S/E, Ctrl+Z/Y/D,
-Ctrl+0 fit, Ctrl+1 100%). The light pad sits in the viewport corner in lit view.
-
-3D preview: the cube button (bottom-right of the viewport) opens an orbitable displaced
-view of the height field — drag orbits, wheel dollies. It shares the lit view's exact
-lighting; use it to judge height relationships, not final looks (the game only ever
-sees the normal map, so the lit view stays the ground truth).
-
-Layers panel: click selects (the only selection surface for W/E/R), drag reorders,
-double-click or F2 renames, right-click for rename/duplicate/front/back/delete; the
-eye toggles visibility and the lock makes a layer inert on canvas (the inspector can
-still edit it). The +/- marker flags add/carve compositing. Both sidebars resize by
-dragging their edge; widths persist across launches.
+`--capture out.png` screenshots any route for automated visual checks (each run gets a fresh
+profile; pass `--profile <dir>` to use a seeded one).
 
 ## Shape icons
 

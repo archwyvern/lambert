@@ -14,8 +14,21 @@ import { editSnap } from "./snapPoint";
 import { grabGroup, ROTATE_SNAP, toggleIndex } from "./picking";
 import { canvasToScreen, Viewport } from "./viewport";
 import { eventToCanvas } from "./canvasCoords";
-import { usePointerDrag } from "./usePointerDrag";
+import { HANDLE_DRAG_PX, usePointerDrag } from "./usePointerDrag";
 import { AnchorHandles, GizmoHalo } from "./gizmoChrome";
+
+/** One in-flight mask-anchor drag. `sel`/`startPos` let a multi-anchor selection — or a whole-mask
+ *  body drag (every anchor selected) — translate by one shared snapped delta; tangent drags use `i`. */
+interface MaskDragState {
+  mi: number;
+  kind: "point" | "in" | "out";
+  i: number;
+  moved: boolean;
+  sel: number[];
+  startCursor: Vector2;
+  startPos: Map<number, Vector2>;
+  collapseOnUp: boolean;
+}
 
 /**
  * On-canvas editor for a node's trim masks (an object OR a group). Renders each mask's outline + Bézier
@@ -31,21 +44,22 @@ export function MaskGizmo(props: {
   viewport: Viewport;
   snap: boolean;
   store: DocumentStore;
+  /** Inspector "select this mask": seq bumps per click so re-selecting the same mask re-applies. */
+  focus: { maskId: string; seq: number } | null;
 }): React.JSX.Element {
-  const { nodeId, masks, doc, viewport, snap, store } = props;
+  const { nodeId, masks, doc, viewport, snap, store, focus } = props;
   const [maskSel, setMaskSel] = useState<{ mi: number; anchors: number[] } | null>(null);
+  // apply an inspector mask-selection: pick the mask and select ALL its anchors
+  useEffect(() => {
+    if (!focus) return;
+    const mi = masks.findIndex((m) => m.id === focus.maskId);
+    if (mi >= 0) setMaskSel({ mi, anchors: masks[mi]!.anchors.map((_, ai) => ai) });
+    // masks identity churns every doc edit; only a CLICK (seq bump) should re-apply
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus?.seq]);
   // a point drag carries the selection it moves + each member's start position (mask-space) so the
   // whole set translates by one shared, snapped delta; tangent drags only use `i`.
-  const maskDrag = usePointerDrag<{
-    mi: number;
-    kind: "point" | "in" | "out";
-    i: number;
-    moved: boolean;
-    sel: number[];
-    startCursor: Vector2;
-    startPos: Map<number, Vector2>;
-    collapseOnUp: boolean;
-  }>();
+  const maskDrag = usePointerDrag<MaskDragState>();
   const [maskMenu, setMaskMenu] = useState<{ x: number; y: number; mi: number; i: number } | null>(null);
   const [maskLineMenu, setMaskLineMenu] = useState<{ x: number; y: number; mi: number; pt: Vector2 } | null>(null);
 
@@ -102,7 +116,7 @@ export function MaskGizmo(props: {
         </defs>
         <g filter="url(#maskgizmo-halo)">
           {masks.map((m, mi) => {
-            const stroke = m.mode === "cut" ? "#e06c6c" : "var(--color-accent)";
+            const stroke = m.mode === "cut" ? "var(--color-cut)" : "var(--color-accent)";
             // follow masks store anchors in the node's LOCAL space; pinned masks in WORLD space
             const toScreen = (p: Vector2): Vector2 =>
               m.follow ? canvasToScreen(viewport, affineApply(worldAffine, p)) : canvasToScreen(viewport, p);
@@ -110,6 +124,42 @@ export function MaskGizmo(props: {
             const loop = bakeMaskLoop(m.anchors).map((p) => toScreen(p));
             const ring = loop.map((s) => `${s.x},${s.y}`).join(" ");
             const resolved = resolveHandlesClosed(m.anchors);
+            // shared by the anchor handles AND the whole-mask body drag: a "point" drag snaps the primary
+            // (grabbed) anchor then translates the whole selected set by that delta; a tangent drag edits
+            // one handle. Extracted so the body drag can reuse the exact same translate + undo grouping.
+            const sharedMove = (e: React.PointerEvent, dg: MaskDragState): void => {
+              if (dg.mi !== mi) return;
+              dg.moved = true;
+              if (dg.kind === "point") {
+                const primStart = dg.startPos.get(dg.i)!;
+                const primStartCanvas = m.follow ? affineApply(worldAffine, primStart) : primStart;
+                const cur = eventCanvasPoint(e);
+                const rawCanvas = v2(primStartCanvas.x + (cur.x - dg.startCursor.x), primStartCanvas.y + (cur.y - dg.startCursor.y));
+                const primNew = m.follow ? w2l(snapPt(rawCanvas)) : snapPt(rawCanvas);
+                if (dg.sel.length <= 1) {
+                  setAnchors(mi, movePoint(m.anchors, dg.i, primNew, e.altKey), `mask:${nodeId}:${mi}`);
+                  return;
+                }
+                const dx = primNew.x - primStart.x;
+                const dy = primNew.y - primStart.y;
+                const next = m.anchors.map((a, idx) => {
+                  const s = dg.startPos.get(idx);
+                  return s ? { ...a, p: v2(s.x + dx, s.y + dy) } : a;
+                });
+                setAnchors(mi, next, `mask:${nodeId}:${mi}`);
+                return;
+              }
+              // bake the dragged anchor's resolved tangents first so an independent drag keeps the
+              // other tangent at its auto value (smooth anchors store zero, which would otherwise vanish)
+              const rc = resolveHandlesClosed(m.anchors)[dg.i]!;
+              const based = m.anchors.map((a, idx) => (idx === dg.i ? { ...a, hIn: rc.hIn, hOut: rc.hOut, mode: "manual" as const } : a));
+              const sym = m.anchors[dg.i]!.sym !== false;
+              setAnchors(mi, dragHandle(based, dg.i, dg.kind, toSpace(e), sym !== e.altKey, e.shiftKey ? ROTATE_SNAP : undefined), `mask:${nodeId}:${mi}`);
+            };
+            const sharedEnd = (_e: React.PointerEvent, dg: MaskDragState): void => {
+              if (dg.collapseOnUp && !dg.moved) setMaskSel({ mi: dg.mi, anchors: [dg.i] });
+              store.endGesture();
+            };
             const handle = (kind: "point" | "in" | "out", i: number) =>
               maskDrag({
                 onStart: (e) => {
@@ -140,43 +190,46 @@ export function MaskGizmo(props: {
                     collapseOnUp: sel.length > 1, // a click-without-drag inside a multi-sel narrows to this anchor
                   };
                 },
-                onMove: (e, dg) => {
-                  if (dg.mi !== mi) return;
-                  dg.moved = true;
-                  if (dg.kind === "point") {
-                    // snap the PRIMARY (grabbed) anchor, then translate every selected anchor by that delta
-                    const primStart = dg.startPos.get(dg.i)!;
-                    const primStartCanvas = m.follow ? affineApply(worldAffine, primStart) : primStart;
-                    const cur = eventCanvasPoint(e);
-                    const rawCanvas = v2(primStartCanvas.x + (cur.x - dg.startCursor.x), primStartCanvas.y + (cur.y - dg.startCursor.y));
-                    const primNew = m.follow ? w2l(snapPt(rawCanvas)) : snapPt(rawCanvas);
-                    if (dg.sel.length <= 1) {
-                      setAnchors(mi, movePoint(m.anchors, dg.i, primNew, e.altKey), `mask:${nodeId}:${mi}`);
-                      return;
-                    }
-                    const dx = primNew.x - primStart.x;
-                    const dy = primNew.y - primStart.y;
-                    const next = m.anchors.map((a, idx) => {
-                      const s = dg.startPos.get(idx);
-                      return s ? { ...a, p: v2(s.x + dx, s.y + dy) } : a;
-                    });
-                    setAnchors(mi, next, `mask:${nodeId}:${mi}`);
-                    return;
-                  }
-                  // bake the dragged anchor's resolved tangents first so an independent drag keeps the
-                  // other tangent at its auto value (smooth anchors store zero, which would otherwise vanish)
-                  const rc = resolveHandlesClosed(m.anchors)[dg.i]!;
-                  const based = m.anchors.map((a, idx) => (idx === dg.i ? { ...a, hIn: rc.hIn, hOut: rc.hOut, mode: "manual" as const } : a));
-                  const sym = m.anchors[dg.i]!.sym !== false;
-                  setAnchors(mi, dragHandle(based, dg.i, dg.kind, toSpace(e), sym !== e.altKey, e.shiftKey ? ROTATE_SNAP : undefined), `mask:${nodeId}:${mi}`);
-                },
-                onEnd: (_e, dg) => {
-                  if (dg.collapseOnUp && !dg.moved) setMaskSel({ mi: dg.mi, anchors: [dg.i] });
-                  store.endGesture();
-                },
+                onMove: sharedMove,
+                onEnd: sharedEnd,
+                threshold: HANDLE_DRAG_PX,
               });
+            // whole-mask body drag: press INSIDE the loop -> translate every anchor by one shared, snapped
+            // delta. Reuses the multi-anchor group-translate with the ENTIRE ring selected, so it commits
+            // as one undo step — no more selecting every anchor first just to move a mask as a unit.
+            const bodyDrag = maskDrag({
+              onStart: (e) => {
+                if (e.button !== 0) return null;
+                const sel = m.anchors.map((_, idx) => idx);
+                setMaskSel({ mi, anchors: sel });
+                return {
+                  mi,
+                  kind: "point" as const,
+                  i: 0,
+                  moved: false,
+                  sel,
+                  startCursor: eventCanvasPoint(e),
+                  startPos: new Map(sel.map((idx) => [idx, m.anchors[idx]!.p])),
+                  collapseOnUp: false,
+                };
+              },
+              onMove: sharedMove,
+              onEnd: sharedEnd,
+              threshold: HANDLE_DRAG_PX,
+            });
+            const active = maskSel?.mi === mi; // this mask is the one being edited (an anchor was picked)
             return (
               <g key={`mask-${m.id}`} opacity={m.visible === false ? 0.4 : 1}>
+                {/* interior fill = grab to move the whole mask as a unit, but ONLY once this mask is active
+                    (you've clicked one of its anchors). Otherwise it's pointer-transparent so a press inside
+                    falls through to the object gizmo underneath — i.e. dragging the SHAPE stays the default.
+                    First child (lowest z) so the outline hit-strip and anchor handles below still win. */}
+                <polygon
+                  points={ring}
+                  fill="transparent"
+                  style={{ pointerEvents: active ? "fill" : "none", cursor: "move" }}
+                  {...bodyDrag}
+                />
                 <polygon
                   points={ring}
                   fill="none"

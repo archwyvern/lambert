@@ -1,6 +1,7 @@
 import { compareRenders, DriftReport } from "../field/compare";
 import { flattenLayers, resolveObjects, type ResolvedObject } from "../field/flatten";
 import {
+  bermObjects,
   pipeObjects,
   GOLDEN_H,
   GOLDEN_W,
@@ -66,6 +67,8 @@ export async function runSelftest(): Promise<void> {
     report.cases.push(await runCase(gpu, "surface ss2 tiled-48", resolveObjects(surfaceObjects()), 2, 48));
     report.cases.push(await runCase(gpu, "pipe ss1", resolveObjects(pipeObjects()), 1));
     report.cases.push(await runCase(gpu, "pipe ss2 tiled-48", resolveObjects(pipeObjects()), 2, 48));
+    report.cases.push(await runCase(gpu, "berm ss1", resolveObjects(bermObjects()), 1));
+    report.cases.push(await runCase(gpu, "berm ss2 tiled-48", resolveObjects(bermObjects()), 2, 48));
     report.cases.push(await runCase(gpu, "vector-fill ss1", resolveObjects(vectorFillObjects()), 1));
     report.cases.push(await runCase(gpu, "vector-fill ss2 tiled-48", resolveObjects(vectorFillObjects()), 2, 48));
     report.cases.push(await runCase(gpu, "masked ss1", resolveObjects(maskedObjects()), 1));

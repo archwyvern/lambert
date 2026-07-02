@@ -1,24 +1,21 @@
 import type { DocumentStore, EditorState } from "../document/store";
 import type { NormalDirs } from "../document/schema";
-import { removeObject, reorderObject, updateObject } from "../document/docOps";
+import { updateObject } from "../document/docOps";
 import { findNode, findParentId, nodeFrames, updateNode } from "../document/layerOps";
 import { isGroup, isObject } from "../field/types";
 import { polygonStats, regularPolygon, regularPolygonAligned, resamplePolyline, ringPhase } from "../field/controlPoints";
-import { setMaskFollow } from "../field/maskOps";
 import { getObjectType, ObjectTypeId } from "../field/registry";
 import { snapObjectToGrid } from "../field/snap";
-import type { ObjectInstance } from "../field/types";
+import type { GroupLayer, ObjectInstance } from "../field/types";
 import { v2 } from "../field/vec";
 import { Inspector as PropertyInspector } from "@carapace/shell";
 import type { InspectorField, InspectorSectionInfo } from "@carapace/shell";
 import { Vector3 } from "@carapace/primitives";
-import { Button, humanizeLabel } from "./kit";
-import { MaskList } from "./MaskList";
+import { humanizeLabel } from "@carapace/shell";
+import { NodeMaskList, transformFields } from "./inspectorParts";
+import { Button } from "./kit";
 import type { ToolMode } from "./tools";
 
-const toDeg = (rad: number): number => Number(((rad * 180) / Math.PI).toFixed(1));
-const toRad = (deg: number): number => (deg * Math.PI) / 180;
-const wrapDeg = (deg: number): number => ((((deg + 180) % 360) + 360) % 360) - 180; // -> (-180, 180]
 const SCALE_MIN = 0; // 0 and negative are both valid — scrub continuously through zero to flip/mirror an axis
 
 /** Clamp a scale component to >= SCALE_MIN in magnitude, KEEPING its sign so a flip (negative scale)
@@ -45,16 +42,18 @@ export function Inspector(props: {
   onNormalDirs: (dirs: NormalDirs) => void;
   /** Switch the active canvas tool (the Masks "+ Add" button enters the pen tool). */
   setTool: (t: ToolMode) => void;
+  /** Clicking a mask row selects that mask (all anchors) in the editor. */
+  onSelectMask: (nodeId: string, maskId: string) => void;
   /** Global ½px grid snap (drives ring-regen snap + spinbox step granularity). */
   snap: boolean;
 }): React.JSX.Element {
-  const { store, state, selVerts, normalDirs, onNormalDirs, setTool, snap } = props;
+  const { store, state, selVerts, normalDirs, onNormalDirs, setTool, snap, onSelectMask } = props;
   const selNode = state.selectedId ? findNode(state.doc.layers, state.selectedId) : null;
   const object = selNode && isObject(selNode) ? selNode : undefined;
   // when several layers are selected we edit the PRIMARY (last picked) and show a count banner
   const multiBanner =
     state.selectedIds.length > 1 ? (
-      <p className="mb-2 bg-list-active px-2 py-1 text-sm text-fg">
+      <p className="mb-2 bg-list-active px-2 py-1 text-base text-fg">
         {state.selectedIds.length} layers selected · editing the last; canvas drag moves all
       </p>
     ) : null;
@@ -71,36 +70,14 @@ export function Inspector(props: {
     const gdx = gtop ? go.x : 0;
     const gdy = gtop ? go.y : 0;
     const gfields: InspectorField[] = [
-      vec({
-        key: "gpos",
-        label: "position",
-        group: "Transform",
-        value: [g.transform.pos.x - gdx, g.transform.pos.y - gdy, g.transform.pos.z],
-        size: 3,
-        onChange: (a) => liveG((n) => ({ ...n, transform: { ...n.transform, pos: new Vector3(a[0]! + gdx, a[1]! + gdy, a[2]!) } }), "gpos"),
-        onCommit: commitG,
-      }),
-      num({
-        key: "grot",
-        label: "rotation",
-        group: "Transform",
-        value: toDeg(g.transform.rotation),
-        onChange: (v) => liveG((n) => ({ ...n, transform: { ...n.transform, rotation: toRad(wrapDeg(v)) } }), "grot"),
-        onCommit: commitG,
-      }),
-      vec({
-        key: `gscale:${gid}`, // per-object key so the ephemeral link state resets on reselect
-        label: "scale",
-        group: "Transform",
-        value: [g.transform.scale.x, g.transform.scale.y, g.transform.scale.z],
-        size: 3,
-        link: true,
-        onChange: (a) =>
-          liveG(
-            (n) => ({ ...n, transform: { ...n.transform, scale: new Vector3(clampScale(a[0]!), clampScale(a[1]!), clampScale(a[2]!)) } }),
-            "gscale",
-          ),
-        onCommit: commitG,
+      ...transformFields({
+        keyPrefix: "g",
+        nodeId: gid,
+        transform: g.transform,
+        dx: gdx,
+        dy: gdy,
+        live: (patch, key) => liveG((n) => ({ ...n, transform: patch(n.transform) }), key),
+        commit: commitG,
       }),
       {
         kind: "enum",
@@ -115,61 +92,22 @@ export function Inspector(props: {
         },
       },
     ];
-    // mutate the group's masks (group-scope trims) via updateNode + endGesture
-    const patchGMasks = (fn: (n: typeof g) => typeof g): void => {
-      store.update((d) => ({ ...d, layers: updateNode(d.layers, gid, (n) => (isGroup(n) ? fn(n) : n)) }));
-      commitG();
-    };
     return (
       <div>
         {multiBanner}
         <div className="mb-2 border-b border-border pb-1.5 text-md font-semibold text-fg">{g.name ?? "Group"}</div>
         <p className="mb-2 px-2 text-sm text-fg-mid">{g.children.length} layer{g.children.length === 1 ? "" : "s"}</p>
         <PropertyInspector fields={gfields} sections={[{ name: "Transform" }, { name: "Symmetry" }]} />
-        <div className="mt-1 flex gap-1 px-2">
-          <Button className="flex-1" onClick={() => { liveG((n) => ({ ...n, transform: { ...n.transform, scale: n.transform.scale.withX(-n.transform.scale.x) } }), "flip"); commitG(); }}>
-            Flip H
-          </Button>
-          <Button className="flex-1" onClick={() => { liveG((n) => ({ ...n, transform: { ...n.transform, scale: n.transform.scale.withY(-n.transform.scale.y) } }), "flip"); commitG(); }}>
-            Flip V
-          </Button>
-        </div>
         <div className="my-3 border-t border-border" />
-        <MaskList
+        <NodeMaskList<GroupLayer>
+          store={store}
+          nodeId={gid}
           masks={g.masks ?? []}
           emptyHint="No masks. Add one to trim every layer in this group (and define a mirror's visible side)."
-          onAdd={() => {
-            store.select(gid);
-            setTool("pen");
-          }}
-          onMode={(id, mode) => patchGMasks((n) => ({ ...n, masks: n.masks?.map((mm) => (mm.id === id ? { ...mm, mode } : mm)) }))}
-          onFollow={(id, follow) => {
-            store.update((d) => {
-              const { worldAffine, invWorld } = nodeFrames(d.layers, gid);
-              return {
-                ...d,
-                layers: updateNode(d.layers, gid, (n) => (isGroup(n) ? setMaskFollow(n, id, follow, worldAffine, invWorld) : n)),
-              };
-            });
-            commitG();
-          }}
-          onToggleAA={(id, aa) => patchGMasks((n) => ({ ...n, masks: n.masks?.map((mm) => (mm.id === id ? { ...mm, hard: !aa } : mm)) }))}
-          onToggleVisible={(id, visible) => patchGMasks((n) => ({ ...n, masks: n.masks?.map((mm) => (mm.id === id ? { ...mm, visible } : mm)) }))}
-          onRemove={(id) => patchGMasks((n) => ({ ...n, masks: n.masks?.filter((mm) => mm.id !== id) }))}
+          setTool={setTool}
+          onSelect={(maskId) => onSelectMask(gid, maskId)}
+          updateNodeIn={(d, fn) => ({ ...d, layers: updateNode(d.layers, gid, (n) => (isGroup(n) ? fn(n) : n)) })}
         />
-        <div className="my-3 border-t border-border" />
-        <div className="flex gap-1 px-2">
-          <Button
-            variant="danger"
-            className="flex-1"
-            onClick={() => {
-              store.update((d) => removeObject(d, gid));
-              commitG();
-            }}
-          >
-            Delete Group
-          </Button>
-        </div>
       </div>
     );
   }
@@ -191,28 +129,7 @@ export function Inspector(props: {
         onChange: (a) => store.update((d) => ({ ...d, canvas: { ...d.canvas, origin: { x: a[0]!, y: a[1]! } } }), { coalesce: "origin" }),
         onCommit: () => store.endGesture(),
       }),
-      {
-        kind: "bool",
-        key: "guidesLocked",
-        label: "guides locked",
-        group: "Canvas",
-        value: doc.canvas.guidesLocked,
-        onChange: (v) => {
-          store.update((d) => ({ ...d, canvas: { ...d.canvas, guidesLocked: v } }));
-          store.endGesture();
-        },
-      },
-      {
-        kind: "bool",
-        key: "snapToGuides",
-        label: "snap to guides",
-        group: "Canvas",
-        value: doc.canvas.snapToGuides,
-        onChange: (v) => {
-          store.update((d) => ({ ...d, canvas: { ...d.canvas, snapToGuides: v } }));
-          store.endGesture();
-        },
-      },
+      // guides-locked + snap-to-guides live on the toolbar (next to grid-snap), not here — see Toolbar.tsx
       {
         kind: "enum",
         key: "red",
@@ -250,7 +167,7 @@ export function Inspector(props: {
             Top Left
           </Button>
         </div>
-        <p className="mt-2 px-2 text-sm leading-snug text-fg-mid">
+        <p className="mt-2 px-2 text-base leading-snug text-fg-mid">
           Project-wide; applies to exports and the normal view. Select an object to edit its parameters.
         </p>
       </div>
@@ -446,36 +363,26 @@ export function Inspector(props: {
     const dx = topLevel ? o.x : 0;
     const dy = topLevel ? o.y : 0;
     fields.push(
-      vec({
-        key: "tpos",
-        label: "position",
-        group: "Transform",
-        value: [pos.x - dx, pos.y - dy, pos.z],
-        size: 3,
-        onChange: (a) =>
-          live((s) => ({ ...s, transform: { ...s.transform, pos: new Vector3(a[0]! + dx, a[1]! + dy, a[2]!) } }), "tpos"),
-        onCommit: commit,
+      ...transformFields({
+        keyPrefix: "t",
+        nodeId: object.id,
+        transform: object.transform,
+        dx,
+        dy,
+        live: (patch, key) => live((s) => ({ ...s, transform: patch(s.transform) }), key),
+        commit,
       }),
       num({
-        key: "trot",
-        label: "rotation",
+        key: "opacity",
+        label: "opacity",
         group: "Transform",
-        value: toDeg(object.transform.rotation),
-        onChange: (v) => live((s) => ({ ...s, transform: { ...s.transform, rotation: toRad(wrapDeg(v)) } }), "trot"),
-        onCommit: commit,
-      }),
-      vec({
-        key: `tscale:${object.id}`, // per-object key so the ephemeral link state resets on reselect
-        label: "scale",
-        group: "Transform",
-        value: [scale.x, scale.y, scale.z],
-        size: 3,
-        link: true,
-        onChange: (a) =>
-          live(
-            (s) => ({ ...s, transform: { ...s.transform, scale: new Vector3(clampScale(a[0]!), clampScale(a[1]!), clampScale(a[2]!)) } }),
-            "tscale",
-          ),
+        value: Math.round((object.opacity ?? 1) * 100),
+        min: 0,
+        max: 100,
+        integer: true,
+        step: 5,
+        // 100% is stored as ABSENT so untouched documents don't gain a field
+        onChange: (v) => live((s) => ({ ...s, opacity: v >= 100 ? undefined : Math.max(0, v) / 100 }), "opacity"),
         onCommit: commit,
       }),
     );
@@ -484,6 +391,35 @@ export function Inspector(props: {
   // selected control-point vertices get their OWN "Vertex" section. A single MESH vertex is one
   // Vector3 (x, y, height — z is the vertex height); a single non-mesh vertex is x/y; a multi-mesh
   // selection shows just height, applied to every selected vertex so a whole ridge raises at once.
+  // Analytic vector strokes: the selected ANCHOR(s) get a cross-section scale (the stroke taper —
+  // Pipe: radius·scale, Berm: width+slope+height·scale). Applied to every selected anchor at once.
+  const isStroke = object.typeId === ObjectTypeId.PipeVector || object.typeId === ObjectTypeId.BermVector;
+  if (isStroke && selVerts.length > 0 && object.bezier) {
+    const a0 = object.bezier[selVerts[0]!];
+    fields.push(
+      num({
+        key: "anchorScale",
+        label: "anchor scale",
+        group: "Anchor",
+        value: Math.round((a0?.scale ?? 1) * 100),
+        min: 5,
+        max: 1000,
+        integer: true,
+        step: 5,
+        // 100% stored as ABSENT (the default) so untouched paths stay clean
+        onChange: (v) =>
+          live(
+            (s) => ({
+              ...s,
+              bezier: s.bezier?.map((a, i) => (selVerts.includes(i) ? { ...a, scale: v === 100 ? undefined : Math.max(5, v) / 100 } : a)),
+            }),
+            "anchorScale",
+          ),
+        onCommit: commit,
+      }),
+    );
+  }
+
   const editVerts = selVerts.length > 0 && object.controlPoints.length > 0;
   if (editVerts) {
     const i0 = selVerts[0]!;
@@ -550,94 +486,21 @@ export function Inspector(props: {
       {multiBanner}
       <div className="mb-2 border-b border-border pb-1.5 text-md font-semibold text-fg">{type.name}</div>
       <PropertyInspector fields={fields} sections={sections} />
-      <div className="mt-1 flex gap-1 px-2">
-        <Button
-          className="flex-1"
-          onClick={() => {
-            live((s) => ({ ...s, transform: { ...s.transform, scale: s.transform.scale.withX(-s.transform.scale.x) } }), "flip");
-            commit();
-          }}
-        >
-          Flip H
-        </Button>
-        <Button
-          className="flex-1"
-          onClick={() => {
-            live((s) => ({ ...s, transform: { ...s.transform, scale: s.transform.scale.withY(-s.transform.scale.y) } }), "flip");
-            commit();
-          }}
-        >
-          Flip V
-        </Button>
-      </div>
       {editVerts ? (
-        <p className="mt-1 px-2 text-sm leading-snug text-fg-mid">
+        <p className="mt-1 px-2 text-base leading-snug text-fg-mid">
           {selVerts.length === 1 ? "1 vertex" : `${selVerts.length} vertices`} · right-click or Alt-click an edge to insert · ⌫ deletes
         </p>
       ) : null}
       <div className="my-3 border-t border-border" />
-      <MaskList
+      <NodeMaskList<ObjectInstance>
+        store={store}
+        nodeId={object.id}
         masks={object.masks ?? []}
         emptyHint="No masks. Add one to trim this layer."
-        onAdd={() => {
-          store.select(object.id);
-          setTool("pen");
-        }}
-        onMode={(id, mode) => {
-          store.update((d) => updateObject(d, object.id, (s) => ({ ...s, masks: s.masks?.map((mm) => (mm.id === id ? { ...mm, mode } : mm)) })));
-          commit();
-        }}
-        onFollow={(id, follow) => {
-          store.update((d) => {
-            const { worldAffine, invWorld } = nodeFrames(d.layers, object.id);
-            return updateObject(d, object.id, (s) => setMaskFollow(s, id, follow, worldAffine, invWorld));
-          });
-          commit();
-        }}
-        onToggleAA={(id, aa) => {
-          store.update((d) => updateObject(d, object.id, (s) => ({ ...s, masks: s.masks?.map((mm) => (mm.id === id ? { ...mm, hard: !aa } : mm)) })));
-          commit();
-        }}
-        onToggleVisible={(id, visible) => {
-          store.update((d) => updateObject(d, object.id, (s) => ({ ...s, masks: s.masks?.map((mm) => (mm.id === id ? { ...mm, visible } : mm)) })));
-          commit();
-        }}
-        onRemove={(id) => {
-          store.update((d) => updateObject(d, object.id, (s) => ({ ...s, masks: s.masks?.filter((mm) => mm.id !== id) })));
-          commit();
-        }}
+        setTool={setTool}
+        onSelect={(maskId) => onSelectMask(object.id, maskId)}
+        updateNodeIn={(d, fn) => updateObject(d, object.id, fn)}
       />
-      <div className="my-3 border-t border-border" />
-      <div className="flex gap-1 px-2">
-        <Button
-          className="flex-1"
-          onClick={() => {
-            store.update((d) => reorderObject(d, object.id, -1));
-            commit();
-          }}
-        >
-          Back
-        </Button>
-        <Button
-          className="flex-1"
-          onClick={() => {
-            store.update((d) => reorderObject(d, object.id, +1));
-            commit();
-          }}
-        >
-          Front
-        </Button>
-        <Button
-          variant="danger"
-          className="flex-1"
-          onClick={() => {
-            store.update((d) => removeObject(d, object.id));
-            commit();
-          }}
-        >
-          Delete
-        </Button>
-      </div>
     </div>
   );
 }

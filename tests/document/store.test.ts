@@ -124,3 +124,33 @@ test("store: reset can restore a dirty session", () => {
   store.reset(emptyDoc("other.png", 32, 32), null, { dirty: true });
   expect(store.state.dirty).toBe(true);
 });
+
+test("cancelGesture reverts an in-flight drag and leaves history untouched (Esc mid-drag)", () => {
+  const store = mkStore();
+  store.update((d) => addObject(d, ObjectTypeId.Sphere, v2(0, 0))); // committed action A
+  store.endGesture();
+  const afterA = store.state.doc;
+  const id = store.state.doc.layers[0]!.id;
+  // a coalesced gesture (drag): two updates under one key
+  store.update((d) => updateObject(d, id, (s) => ({ ...s, transform: { ...s.transform, pos: s.transform.pos.withX(10) } })), { coalesce: "drag" });
+  store.update((d) => updateObject(d, id, (s) => ({ ...s, transform: { ...s.transform, pos: s.transform.pos.withX(20) } })), { coalesce: "drag" });
+  expect(store.isGesturing).toBe(true);
+  expect(object(store.state.doc, 0).transform.pos.x).toBe(20);
+  store.cancelGesture();
+  expect(store.isGesturing).toBe(false);
+  expect(store.state.doc).toBe(afterA); // reverted to the pre-gesture doc
+  expect(store.canRedo).toBe(false); // a cancelled drag is NOT redoable
+  expect(store.canUndo).toBe(true); // action A is still there
+  store.undo();
+  expect(store.state.doc.layers.length).toBe(0);
+});
+
+test("cancelGesture is a no-op when nothing is in flight", () => {
+  const store = mkStore();
+  store.update((d) => addObject(d, ObjectTypeId.Sphere, v2(0, 0)));
+  store.endGesture();
+  const doc = store.state.doc;
+  store.cancelGesture();
+  expect(store.state.doc).toBe(doc);
+  expect(store.canUndo).toBe(true);
+});

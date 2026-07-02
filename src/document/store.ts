@@ -83,6 +83,30 @@ export class DocumentStore {
     this.gestureKey = null;
   }
 
+  /** One-shot edit: update + endGesture. The standard form for click-driven (non-drag) mutations —
+   *  menu verbs, toggles, inserts. Drags keep using update({coalesce}) + endGesture on release. */
+  commit(mutate: (doc: LambertDoc) => LambertDoc): void {
+    this.update(mutate);
+    this.endGesture();
+  }
+
+  /** True while a coalesced gesture (drag) is in progress — its first update already pushed the
+   *  pre-gesture doc onto the undo stack, but endGesture hasn't run. */
+  get isGesturing(): boolean {
+    return this.gestureKey !== null;
+  }
+
+  /** Abort the in-flight gesture, reverting to the pre-gesture document (Esc mid-drag). Unlike undo(),
+   *  it DISCARDS the gesture: it pops the pre-gesture snapshot the gesture pushed and creates no redo
+   *  entry, so a cancelled drag leaves the history exactly as it was before the drag began. */
+  cancelGesture(): void {
+    if (this.gestureKey === null) return;
+    const prev = this.undoStack.pop(); // the pre-gesture doc pushed by the gesture's first update
+    this.gestureKey = null;
+    if (prev === undefined) return;
+    this.emit({ doc: prev, dirty: prev !== this.savedDoc, ...this.survivingSelection(prev) });
+  }
+
   /** Replace the selection with a single id (or clear it). */
   select(id: string | null): void {
     this.setSelection(id === null ? [] : [id]);

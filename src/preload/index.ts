@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import { exposeFs } from "@carapace/shell/ipc";
+import { exposeFs, exposeOs } from "@carapace/shell/ipc";
 
 contextBridge.exposeInMainWorld("lambertHost", {
   sendSelftestResult: (report: unknown) => ipcRenderer.send("selftest-result", report),
@@ -10,6 +10,12 @@ contextBridge.exposeInMainWorld("lambertHost", {
   fetchUrl: (url: string, opts?: { refresh?: boolean }) => ipcRenderer.invoke("net:fetchUrl", url, opts),
   openFolderDialog: (opts: unknown) => ipcRenderer.invoke("dialog:openFolder", opts),
   pathExists: (path: string) => ipcRenderer.invoke("fs:exists", path),
+  gitStatus: (dir: string) => ipcRenderer.invoke("git:status", dir),
+  mkdir: (path: string) => ipcRenderer.invoke("fs:mkdir", path),
+  windowMinimize: () => ipcRenderer.invoke("window:minimize"),
+  windowToggleMaximize: () => ipcRenderer.invoke("window:toggleMaximize"),
+  windowClose: () => ipcRenderer.invoke("window:close"),
+  windowIsMaximized: () => ipcRenderer.invoke("window:isMaximized"),
   loadSession: () => ipcRenderer.invoke("session:load"),
   saveSession: (json: string) => ipcRenderer.invoke("session:save", json),
   onMenuAction: (cb: (action: string) => void) =>
@@ -28,5 +34,6 @@ contextBridge.exposeInMainWorld("lambertHost", {
     ipcRenderer.on("update:event", (_e, ev: unknown) => cb(ev)),
 });
 
-// carapace fs bridge (window.carapaceFs) for the shared <FileExplorer>
+// carapace fs + os bridges (window.carapaceFs / carapaceOs) for the shared <FileExplorer>
 exposeFs(contextBridge, ipcRenderer);
+exposeOs(contextBridge, ipcRenderer);

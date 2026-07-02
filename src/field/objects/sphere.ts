@@ -10,7 +10,7 @@ import { defineObjectType, enumParam, numParam, ObjectTypeId } from "../registry
 export const Sphere = defineObjectType({
   id: ObjectTypeId.Sphere,
   name: "Sphere",
-  category: "Primitives",
+  category: "Shapes",
   params: {
     radius: { type: "px", default: 48, min: 1, float: true },
     profile: { type: "enum", options: PROFILE_KINDS, default: "round" },
@@ -20,8 +20,8 @@ export const Sphere = defineObjectType({
   // params: 13 = radius, 14 = profile. height = radius * profile(inside = radius - dist).
   wgsl: /* wgsl */ `
 fn shape_sphere(p: vec2f, base: u32) -> vec2f {
-  let r = rec(base, 13u);
-  let prof = u32(rec(base, 14u));
+  let r = rec(base, SLOT_PARAM0);
+  let prof = u32(rec(base, SLOT_PARAM1));
   let dist = length(p);
   return vec2f(r * apply_profile(prof, r - dist, r), dist - r);
 }

@@ -8,12 +8,17 @@ export const PROJECT_FILE = "project.lambert";
  * One open `.lmb` document. `id` is a stable per-tab key (the React/workspace identity) that survives
  * the untitled→saved transition, so view-state keyed by it doesn't reset on first save. `docPath` is
  * the on-disk path (null until first save). `diffuse.bytes` is the resolved diffuse (file or remote).
+ *
+ * `diffuse.unresolved` marks a tab restored without its real diffuse — the source failed to resolve
+ * (remote host down, file:// on an unmounted drive) so `bytes` is a blank placeholder. The doc/edits
+ * are fully intact and preserved in the stash; the user relinks via Reload Diffuse. Export is blocked
+ * until then. This replaces the old behaviour of silently dropping such a tab (losing unsaved work).
  */
 export interface Tab {
   id: string;
   docPath: string | null;
   store: DocumentStore;
-  diffuse: { bytes: Uint8Array };
+  diffuse: { bytes: Uint8Array; unresolved?: boolean };
 }
 
 /**

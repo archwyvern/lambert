@@ -5,10 +5,9 @@ import { cx, Menu } from "@carapace/shell";
 import type { MenuItem } from "@carapace/shell";
 export { cx };
 
-/** camelCase identifier -> spaced label ("slopeWidth" -> "slope width"). */
-export function humanizeLabel(key: string): string {
-  return key.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase();
-}
+/** Inline Fluent-icon pixel sizes (used as the icon's `fontSize`) — one small scale instead of
+ *  scattered magic 12/13/14/20 (the Layers row mixed 12 and 13 on sibling icons). */
+export const ICON = { xs: 12, sm: 13, md: 14, lg: 20 } as const;
 
 export type MenuEntry =
   | { label: string; onClick: () => void; danger?: boolean; disabled?: boolean; hotkey?: string }
@@ -41,7 +40,7 @@ export type ButtonVariant = "primary" | "ghost" | "danger";
 
 const BUTTON_BASE =
   "inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap border cursor-pointer " +
-  "transition disabled:cursor-not-allowed h-[26px] px-2.5 text-base";
+  "transition disabled:cursor-not-allowed h-control-md px-2.5 text-base";
 
 const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
   primary: "bg-accent-dim border-accent/50 text-accent hover:bg-accent/25 disabled:opacity-50",

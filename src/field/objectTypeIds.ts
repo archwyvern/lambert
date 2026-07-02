@@ -15,12 +15,11 @@ export const ObjectTypeId = {
   BermVector: "f6c8ce06-e29e-4cd3-93fb-5ff2e624913e",
   SurfaceVector: "b7072fc5-6f8c-4653-af23-970271261838",
   PlateauVector: "c0bfd408-fdea-425f-ab72-3aa2e87c275d",
+  Pillow: "4357e9ee-cb50-4103-92a5-f915a075b0e7",
   // Meshes
   Mesh: "e0500e2a-31a9-4b38-a899-9b1ff31e8a75",
-  Grid: "83949bc7-1fa4-458f-ac56-0ea66cecbd54",
-  Revolve: "af497d4e-efc0-46d2-9dc2-5cf688ec31ed",
-  Loft: "e6ddff50-6a64-4ebc-9a03-c03f085627e2",
-  Noise: "ce4cfe69-b913-4011-b46e-8a9b4e86df55",
+  // Effects
+  Gradient: "c27799cc-6e25-4b3a-a071-191ca341a5ee",
 } as const;
 
 export type ObjectTypeIdValue = (typeof ObjectTypeId)[keyof typeof ObjectTypeId];

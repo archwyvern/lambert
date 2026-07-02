@@ -1,0 +1,118 @@
+name: ci
+
+# Typecheck + unit tests on every push and PR, so a red tree can't sit unnoticed and — via the same
+# gate reused in release.yml — can't ship. Mirrors release.yml's sibling-carapace setup because the
+# renderer bundles @carapace/shell's source and the main process bundles its compiled dist.
+on:
+  push:
+    branches: ["**"]
+    tags-ignore: ["**"] # tag pushes are handled by release.yml (which runs its own gate)
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout lambert
+        uses: actions/checkout@v4
+        with:
+          path: lambert
+
+      - name: Checkout carapace (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: archwyvern/carapace
+          ref: master
+          path: carapace
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: lambert/pnpm-lock.yaml
+
+      # @carapace/shell's compiled dist is what the main process bundles; the renderer + tests import
+      # its (and @carapace/primitives') source through the pnpm link: overrides.
+      - name: Build carapace shell
+        working-directory: carapace
+        run: |
+          pnpm install
+          pnpm --filter @carapace/shell build
+
+      - name: Install lambert deps
+        working-directory: lambert
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        working-directory: lambert
+        run: pnpm typecheck
+
+      - name: Test
+        working-directory: lambert
+        run: pnpm test
+
+  # GPU<->CPU parity selftest on a software Vulkan device (mesa lavapipe under xvfb). This exercises
+  # the REAL export render path (gpu.evaluate at supersample 2) against the CPU reference — the same
+  # 28-case gate run locally via `pnpm selftest`. EXPERIMENTAL: non-blocking until it has been observed
+  # green on hosted runners (Dawn-on-lavapipe can fail to initialize); flip continue-on-error off then.
+  gpu-selftest:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout lambert
+        uses: actions/checkout@v4
+        with:
+          path: lambert
+
+      - name: Checkout carapace (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: archwyvern/carapace
+          ref: master
+          path: carapace
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: lambert/pnpm-lock.yaml
+
+      - name: Install software Vulkan (lavapipe) + xvfb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers xvfb
+
+      - name: Build carapace shell
+        working-directory: carapace
+        run: |
+          pnpm install
+          pnpm --filter @carapace/shell build
+
+      - name: Install lambert deps
+        working-directory: lambert
+        run: pnpm install --frozen-lockfile
+
+      - name: GPU parity selftest (28 cases, exits nonzero on drift)
+        working-directory: lambert
+        # GH Actions bash defaults to pipefail, so the selftest exit code survives the tee
+        run: xvfb-run -a pnpm selftest | tee selftest-output.log
+
+      - name: Upload selftest report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpu-selftest-report
+          path: lambert/selftest-output.log
+          if-no-files-found: ignore

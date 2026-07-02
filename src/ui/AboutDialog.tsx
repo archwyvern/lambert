@@ -18,7 +18,7 @@ export function AboutDialog({ onClose }: { onClose: () => void }): React.JSX.Ele
         <div className="space-y-0.5 text-sm text-fg-mid">
           <div>Created by Archwyvern</div>
           <div>Copyright © 2026 Archwyvern</div>
-          <div className="pt-1 font-mono text-2xs text-fg-mid">github.com/archwyvern/lambert</div>
+          <div className="pt-1 font-mono text-sm text-fg-mid">github.com/archwyvern/lambert</div>
         </div>
       </div>
     </Modal>

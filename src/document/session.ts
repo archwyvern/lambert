@@ -1,6 +1,5 @@
 import { z } from "zod";
-import { defaultCanvas, docSchema, normalizeLayers, LambertDoc } from "./schema";
-import { dropUnknownLayers } from "../field/registry";
+import { docSchema, hydrateDoc, LambertDoc } from "./schema";
 
 /**
  * Session memory: the app continuously stashes the whole workspace — the open project, every
@@ -12,7 +11,7 @@ const viewSchema = z.object({
   mode: z.enum(["diffuse", "normal", "lit"]).catch("lit"), // old "height" sessions fall back to lit
   opacity: z.number().min(0).max(1),
   lightDir: z.tuple([z.number(), z.number(), z.number()]),
-  raster: z.boolean().catch(false),
+  // a legacy `raster` field from before the vector/raster toggle was removed is simply ignored on load
 });
 
 const tabSchema = z.object({
@@ -35,29 +34,45 @@ const tabSchema = z.object({
     .optional(),
 });
 
-const sessionSchema = z.object({
+// Envelope only: the tabs are validated one-by-one below, NOT as a single array. A hard
+// `z.array(tabSchema)` made one corrupt tab reject the whole session — losing every restorable tab.
+const sessionEnvelopeSchema = z.object({
   version: z.literal(1),
   projectPath: z.string().nullable(),
   activeIndex: z.number().int(),
-  tabs: z.array(tabSchema),
+  tabs: z.array(z.unknown()),
 });
 
 export type View = z.infer<typeof viewSchema>;
 export type TabSession = Omit<z.infer<typeof tabSchema>, "doc"> & { doc: LambertDoc };
-export type SessionData = Omit<z.infer<typeof sessionSchema>, "tabs"> & { tabs: TabSession[] };
+export interface SessionData {
+  version: 1;
+  projectPath: string | null;
+  activeIndex: number;
+  tabs: TabSession[];
+}
+/** Parse result: the session plus how many tabs were dropped as unparseable (for a restore notice). */
+export interface ParsedSession extends SessionData {
+  droppedTabs: number;
+}
 
 export function buildSessionJson(s: Omit<SessionData, "version">): string {
   return JSON.stringify({ version: 1, ...s });
 }
 
-export function parseSessionJson(json: string): SessionData {
-  const data = sessionSchema.parse(JSON.parse(json)) as SessionData;
-  for (const t of data.tabs) {
-    const raw = t.doc as unknown as { layers?: unknown[] };
-    t.doc.layers = dropUnknownLayers(
-      normalizeLayers((raw.layers ?? []) as unknown[] as Parameters<typeof normalizeLayers>[0]),
-    );
-    t.doc.canvas = t.doc.canvas ?? defaultCanvas(t.doc.source.width, t.doc.source.height);
+export function parseSessionJson(json: string): ParsedSession {
+  const env = sessionEnvelopeSchema.parse(JSON.parse(json));
+  const tabs: TabSession[] = [];
+  let droppedTabs = 0;
+  for (const raw of env.tabs) {
+    const parsed = tabSchema.safeParse(raw);
+    if (!parsed.success) {
+      droppedTabs += 1; // one bad tab must not sink the rest of a crash-recovery session
+      continue;
+    }
+    const t = parsed.data as unknown as TabSession;
+    t.doc = hydrateDoc(t.doc as unknown as Parameters<typeof hydrateDoc>[0]); // the shared .lmb hydration path
+    tabs.push(t);
   }
-  return data;
+  return { version: 1, projectPath: env.projectPath, activeIndex: env.activeIndex, tabs, droppedTabs };
 }

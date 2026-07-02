@@ -1,12 +1,10 @@
 import { Vector2 } from "@carapace/primitives";
-import { meshEdges } from "../meshOps";
 import { sdSegment } from "../sdf";
 import { triBary } from "../tri";
-import type { FieldSample, MeshData, ObjectInstance } from "../types";
-import { v2 } from "../vec";
+import type { FieldSample, ObjectInstance } from "../types";
 
 /**
- * Shared eval for every triangulated height-field object (Mesh, Grid, Revolve, Loft, Noise). Height
+ * Shared eval for every triangulated height-field object (Mesh). Height
  * at p is the barycentric interpolation across the triangle under it, blended toward Phong
  * tessellation by the `smoothness` param (0..1); outside every triangle, sd = distance to the
  * nearest mesh edge (the outline). Identical math on CPU and in `shape_meshfield` (gpu/wgsl.ts).
@@ -37,29 +35,8 @@ export function meshFieldEval(p: Vector2, object: ObjectInstance): FieldSample {
   return { height: 0, sd: d };
 }
 
-/** Shared smoothness param + mesh control-point kind for every mesh-field object type. */
-export const MESH_PARAMS = { smoothness: { type: "px", default: 0, min: 0, max: 1, step: 0.05 } } as const;
+/** Shared smoothness param + mesh control-point kind for every mesh-field object type. `float` lets
+ *  the Inspector scrub the 0..1 Phong blend continuously — without it the field snaps to whole steps
+ *  (only 0 or 1 reachable), which made smoothness effectively binary in the UI. */
+export const MESH_PARAMS = { smoothness: { type: "px", default: 0, min: 0, max: 1, float: true } } as const;
 
-/** Build a regular (n+1)×(n+1) vertex grid spanning [-r, r]², height from `zf(x, y)`. Shared by the
- *  grid-derived seeds (Grid = flat, Noise = fractal, Revolve = radial profile). */
-export function gridMesh(n: number, r: number, zf: (x: number, y: number) => number): { controlPoints: Vector2[]; mesh: MeshData } {
-  const controlPoints: Vector2[] = [];
-  const z: number[] = [];
-  for (let j = 0; j <= n; j++) {
-    for (let i = 0; i <= n; i++) {
-      const x = -r + (2 * r * i) / n;
-      const y = -r + (2 * r * j) / n;
-      controlPoints.push(v2(x, y));
-      z.push(zf(x, y));
-    }
-  }
-  const idx = (i: number, j: number): number => j * (n + 1) + i;
-  const tris: [number, number, number][] = [];
-  for (let j = 0; j < n; j++) {
-    for (let i = 0; i < n; i++) {
-      tris.push([idx(i, j), idx(i + 1, j), idx(i + 1, j + 1)]);
-      tris.push([idx(i, j), idx(i + 1, j + 1), idx(i, j + 1)]);
-    }
-  }
-  return { controlPoints, mesh: { z, tris, edges: meshEdges({ z, tris }) } };
-}

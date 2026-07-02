@@ -1,5 +1,5 @@
 import { affineApply } from "./affine";
-import { combineHeight, type CombineOp, influence } from "./combine";
+import { combineHeight, influence, objectCombineOp } from "./combine";
 import type { ResolvedObject } from "./flatten";
 import { bakeMasks, maskCoverage } from "./maskOps";
 import { meshGradients } from "./meshOps";
@@ -26,13 +26,10 @@ export function evaluateField(resolved: ResolvedObject[], width: number, height:
     return {
       rs,
       type,
-      // op (carve vs max): a type with an `invert` param drives it per-instance (Pipe/Berm); others
-      // fall back to the type-level defaultCombine. Mirrors pack.ts so CPU and GPU folds agree.
-      op: ("invert" in rs.object.params
-        ? rs.object.params.invert === "carve"
-          ? "carve"
-          : "max"
-        : type.defaultCombine ?? "max") as CombineOp,
+      // op (max/carve/replace): shared with pack.ts so the CPU and GPU folds agree.
+      op: objectCombineOp(rs.object.params, type.defaultCombine),
+      // fold-contribution weight (mirrors the SLOT_OPACITY clamp in pack.ts)
+      alpha: Math.min(1, Math.max(0, rs.object.opacity ?? 1)),
       // attach the transient per-vertex gradient a mesh needs for its smoothness pass
       s: rs.object.mesh
         ? { ...rs.object, mesh: { ...rs.object.mesh, grad: meshGradients(rs.object.controlPoints, rs.object.mesh.z, rs.object.mesh.tris) } }
@@ -47,10 +44,11 @@ export function evaluateField(resolved: ResolvedObject[], width: number, height:
       let H = 0;
       let M = 0;
       let covered = false; // has any object hard-covered this pixel yet?
-      for (const { rs, type, op, s, baked } of items) {
+      for (const { rs, type, op, s, baked, alpha } of items) {
         const sample = type.eval(affineApply(rs.invAffine, p), s);
         const sd = sample.sd * rs.scaleHint;
-        let inf = influence(sd);
+        // per-object opacity scales the whole contribution: the mask influence AND the height step below
+        let inf = influence(sd) * alpha;
         if (rs.masks.length > 0) inf *= maskCoverage(rs.masks, baked, rs.invAffine, rs.scaleHint, p);
         if (inf <= 0) continue;
         const h = rs.elevationZ + sample.height * rs.tallnessZ; // composed elevation + extrude
@@ -64,9 +62,10 @@ export function evaluateField(resolved: ResolvedObject[], width: number, height:
         // Height is a HARD step at the footprint boundary (inside = full contribution). A vertical
         // wall must stay a wall in the height field, not melt into a 1px influence ramp — otherwise
         // deriveNormals' minmod sees a slope on both sides of the edge and can't flatten it. The
-        // edge softening lives entirely in the mask above.
+        // edge softening lives entirely in the mask above. Opacity lerps the step toward the
+        // accumulated surface (0.5 = half effect).
         if (sd < 0) {
-          H = combined;
+          H = H + (combined - H) * alpha;
           covered = true;
         }
       }

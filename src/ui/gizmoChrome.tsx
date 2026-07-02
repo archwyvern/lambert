@@ -36,7 +36,7 @@ export function RotateKnobs(props: { corners: Vector2[]; handlers: () => Pointer
           <g key={`rot${i}`}>
             <line x1={mid.x} y1={mid.y} x2={knob.x} y2={knob.y} stroke="var(--color-accent)" strokeWidth={1} strokeOpacity={0.6} />
             <circle cx={knob.x} cy={knob.y} r={10} fill="transparent" className="pointer-events-auto cursor-rotate" {...props.handlers()} />
-            <circle cx={knob.x} cy={knob.y} r={4} fill="#191a1b" stroke="var(--color-accent)" strokeWidth={1.5} className="pointer-events-none" />
+            <circle cx={knob.x} cy={knob.y} r={4} fill="var(--color-bg)" stroke="var(--color-accent)" strokeWidth={1.5} className="pointer-events-none" />
           </g>
         );
       })}
@@ -108,7 +108,7 @@ export function AnchorHandles(props: {
         const hasIn = a.hIn.x !== 0 || a.hIn.y !== 0;
         const outS = props.toScreen(v2(a.p.x + a.hOut.x, a.p.y + a.hOut.y));
         const inS = props.toScreen(v2(a.p.x + a.hIn.x, a.p.y + a.hIn.y));
-        const selStroke = props.isSelected(i) ? "#ffffff" : "#191a1b";
+        const selStroke = props.isSelected(i) ? "#ffffff" : "var(--color-bg)";
         return (
           <g key={`anc-${i}`}>
             {hasOut ? <line x1={pS.x} y1={pS.y} x2={outS.x} y2={outS.y} stroke={props.color} strokeWidth={1} strokeOpacity={0.6} /> : null}
@@ -116,13 +116,13 @@ export function AnchorHandles(props: {
             {hasOut ? (
               <g {...props.tangentProps("out", i)} style={{ cursor: "move" }}>
                 <circle cx={outS.x} cy={outS.y} r={11} fill="transparent" style={{ pointerEvents: "auto" }} />
-                <circle cx={outS.x} cy={outS.y} r={4} fill="#191a1b" stroke={props.color} strokeWidth={1.5} style={{ pointerEvents: "none" }} />
+                <circle cx={outS.x} cy={outS.y} r={4} fill="var(--color-bg)" stroke={props.color} strokeWidth={1.5} style={{ pointerEvents: "none" }} />
               </g>
             ) : null}
             {hasIn ? (
               <g {...props.tangentProps("in", i)} style={{ cursor: "move" }}>
                 <circle cx={inS.x} cy={inS.y} r={11} fill="transparent" style={{ pointerEvents: "auto" }} />
-                <circle cx={inS.x} cy={inS.y} r={4} fill="#191a1b" stroke={props.color} strokeWidth={1.5} style={{ pointerEvents: "none" }} />
+                <circle cx={inS.x} cy={inS.y} r={4} fill="var(--color-bg)" stroke={props.color} strokeWidth={1.5} style={{ pointerEvents: "none" }} />
               </g>
             ) : null}
             <g style={{ cursor: "move" }} {...props.anchorProps(i)}>

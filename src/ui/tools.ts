@@ -1,7 +1,7 @@
-/** Godot-style canvas tools: Q select, W move, E rotate, R scale, T vertex. Select-
+/** Godot-style canvas tools: Q select, W move, E rotate, R scale, T vertex, M measure. Select-
  *  mode drag overrides (godot parity): Alt = move, Ctrl = rotate, Ctrl+Alt = scale.
  *  Vertex tool: the object body never grabs drags, so any drag is a vertex marquee. */
-export type ToolMode = "select" | "move" | "rotate" | "scale" | "vertex" | "pen";
+export type ToolMode = "select" | "move" | "rotate" | "scale" | "vertex" | "pen" | "measure";
 
 export const TOOL_KEYS: Record<string, ToolMode> = {
   q: "select",
@@ -10,6 +10,7 @@ export const TOOL_KEYS: Record<string, ToolMode> = {
   r: "scale",
   t: "vertex",
   p: "pen",
+  m: "measure",
 };
 
 /** Click-to-place ("pen") mode: a new point rubber-bands from an anchor and the next left-click

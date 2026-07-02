@@ -1,6 +1,6 @@
 import { DismissRegular, FolderRegular } from "@fluentui/react-icons";
 import type { RecentProject } from "../document/recents";
-import { Button } from "./kit";
+import { Button, ICON } from "./kit";
 import { LambertMark } from "./LambertMark";
 
 interface LaunchScreenProps {
@@ -25,7 +25,7 @@ export function LaunchScreen(props: LaunchScreenProps): React.JSX.Element {
           <LambertMark className="h-11 w-11 shrink-0" />
           <div className="min-w-0">
             <div className="text-lg font-semibold leading-tight text-fg">Lambert</div>
-            <div className="text-sm leading-tight text-fg-mid">Height-field normal map editor</div>
+            <div className="text-base leading-tight text-fg-mid">Height-field normal map editor</div>
           </div>
         </header>
         <nav className="flex flex-col gap-0.5">
@@ -56,7 +56,7 @@ export function LaunchScreen(props: LaunchScreenProps): React.JSX.Element {
                   className="flex w-full items-center gap-3 rounded-sm px-3 py-2 pr-9 text-left hover:bg-hover"
                   title={`Open ${r.path}`}
                 >
-                  <FolderRegular className="shrink-0 text-fg-mid" style={{ fontSize: 20 }} />
+                  <FolderRegular className="shrink-0 text-fg-mid" style={{ fontSize: ICON.lg }} />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-base text-fg">{r.name}</span>
                     <span className="block truncate font-mono text-sm text-fg-mid">{r.path}</span>
@@ -68,7 +68,7 @@ export function LaunchScreen(props: LaunchScreenProps): React.JSX.Element {
                   title="Remove from recent projects"
                   aria-label={`Remove ${r.name} from recent projects`}
                 >
-                  <DismissRegular style={{ fontSize: 14 }} />
+                  <DismissRegular style={{ fontSize: ICON.md }} />
                 </button>
               </li>
             ))}
