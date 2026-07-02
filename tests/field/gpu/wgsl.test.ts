@@ -5,7 +5,7 @@ import { buildFoldWgsl, buildNormalWgsl, MAX_PARAMS, objectWgslFn, PARAMS_OFFSET
 
 test("RECORD_SLOT map is internally consistent and mirrored into the WGSL", () => {
   // the derived constants must stay in lockstep with the slot map (pack.ts + every object read these)
-  expect(RECORD_F32).toBe(RECORD_SLOT.OPACITY + 1);
+  expect(RECORD_F32).toBe(RECORD_SLOT.AABB_MAX_Y + 1);
   expect(PARAMS_OFFSET).toBe(RECORD_SLOT.PARAM0);
   expect(MAX_PARAMS).toBe(RECORD_SLOT.ELEVATION - RECORD_SLOT.PARAM0);
   expect(RECORD_SLOT.PARAM7).toBeLessThan(RECORD_SLOT.ELEVATION); // params (+holes) must end before elevation

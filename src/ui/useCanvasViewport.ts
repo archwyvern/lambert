@@ -4,7 +4,7 @@ import { affineApply } from "../field/affine";
 import { nodeWorldAffine } from "../document/layerOps";
 import { isGroup, isObject } from "../field/types";
 import { v2 } from "../field/vec";
-import { localBounds } from "./objectBounds";
+import { localBounds } from "../field/objectBounds";
 import { fitBounds, fitViewport, Viewport, zoomAt } from "./viewport";
 
 /**

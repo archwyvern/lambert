@@ -11,7 +11,7 @@ import type { Transform2D } from "../field/transform";
 import type { GroupLayer } from "../field/types";
 import { v2 } from "../field/vec";
 import { axisScaleFromDrag, rotationFromDrag, ROTATE_SNAP, snapAngle } from "./picking";
-import { localBounds, paddedCorners } from "./objectBounds";
+import { localBounds, paddedCorners } from "../field/objectBounds";
 import { canvasToScreen, Viewport } from "./viewport";
 import { eventToCanvas } from "./canvasCoords";
 

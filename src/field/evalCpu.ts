@@ -1,8 +1,9 @@
-import { affineApply } from "./affine";
+import { affineInvert, affineApply } from "./affine";
 import { combineHeight, influence, objectCombineOp } from "./combine";
 import type { ResolvedObject } from "./flatten";
 import { bakeMasks, maskCoverage } from "./maskOps";
 import { meshGradients } from "./meshOps";
+import { localBounds } from "./objectBounds";
 import { getObjectType } from "./registry";
 import { v2 } from "./vec";
 
@@ -35,6 +36,9 @@ export function evaluateField(resolved: ResolvedObject[], width: number, height:
         ? { ...rs.object, mesh: { ...rs.object.mesh, grad: meshGradients(rs.object.controlPoints, rs.object.mesh.z, rs.object.mesh.tris) } }
         : rs.object,
       baked: rs.masks.length > 0 ? bakeMasks(rs.masks) : [],
+      // world footprint AABB (influence-padded) — the same cull the GPU fold uses (pack.ts): outside
+      // it the contribution is exactly zero, so skipping changes nothing but the loop cost
+      aabb: worldAabb(rs),
     };
   });
 
@@ -44,7 +48,8 @@ export function evaluateField(resolved: ResolvedObject[], width: number, height:
       let H = 0;
       let M = 0;
       let covered = false; // has any object hard-covered this pixel yet?
-      for (const { rs, type, op, s, baked, alpha } of items) {
+      for (const { rs, type, op, s, baked, alpha, aabb } of items) {
+        if (p.x < aabb.minX || p.x > aabb.maxX || p.y < aabb.minY || p.y > aabb.maxY) continue;
         const sample = type.eval(affineApply(rs.invAffine, p), s);
         const sd = sample.sd * rs.scaleHint;
         // per-object opacity scales the whole contribution: the mask influence AND the height step below
@@ -75,4 +80,24 @@ export function evaluateField(resolved: ResolvedObject[], width: number, height:
     }
   }
   return { width, height, heightMap, mask };
+}
+
+/** World footprint AABB via the forward affine (inverse of invAffine), padded for the AA ramp —
+ *  kept in lockstep with the identical computation in gpu/pack.ts. */
+function worldAabb(rs: ResolvedObject): { minX: number; minY: number; maxX: number; maxY: number } {
+  const inv = rs.invAffine;
+  const fwd = affineInvert(inv); // world <- local (invAffine is world -> local)
+  const b = localBounds(rs.object);
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const [lx, ly] of [[b.min.x, b.min.y], [b.max.x, b.min.y], [b.max.x, b.max.y], [b.min.x, b.max.y]] as const) {
+    const wpt = affineApply(fwd, v2(lx, ly));
+    minX = Math.min(minX, wpt.x);
+    minY = Math.min(minY, wpt.y);
+    maxX = Math.max(maxX, wpt.x);
+    maxY = Math.max(maxY, wpt.y);
+  }
+  return { minX: minX - 1.5, minY: minY - 1.5, maxX: maxX + 1.5, maxY: maxY + 1.5 };
 }

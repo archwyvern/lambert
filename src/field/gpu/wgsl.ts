@@ -25,11 +25,15 @@ export const RECORD_SLOT = {
   MASK_COUNT: 25, // mask loop count
   CLOSED: 26, // analytic path is a closed loop
   OPACITY: 27, // fold-contribution weight 0..1 (1 = full effect)
+  // world-space footprint AABB (conservative, influence-padded): the fold's per-object cull box.
+  // Cost model: without it every fragment/vertex evaluates EVERY object's full SDF (dense outline
+  // loops, Pillow's boundary integral) — O(pixels x objects x outlinePoints).
+  AABB_MIN_X: 28, AABB_MIN_Y: 29, AABB_MAX_X: 30, AABB_MAX_Y: 31,
 } as const;
 
 export const PARAMS_OFFSET = RECORD_SLOT.PARAM0; // 13
 export const MAX_PARAMS = RECORD_SLOT.ELEVATION - RECORD_SLOT.PARAM0; // 8: params (+holes) must end before elevation
-export const RECORD_F32 = RECORD_SLOT.OPACITY + 1; // 28 f32 per record
+export const RECORD_F32 = RECORD_SLOT.AABB_MAX_Y + 1; // 32 f32 per record (8 vec4s)
 
 // WGSL mirror of RECORD_SLOT, generated so the two can't drift: emitted into FIELD_LIB, referenced by
 // every object's shader as `rec(base, SLOT_*)` instead of a bare integer literal.
@@ -309,6 +313,10 @@ fn fold_at(p: vec2f, count: u32) -> vec2f {
   var covered = false; // has any object hard-covered this pixel yet?
   for (var s = 0u; s < count; s = s + 1u) {
     let base = s * RECORD;
+    // AABB cull: outside the object's (influence-padded) world footprint its contribution is
+    // exactly zero (influence(sd)=0), so skipping is a pure win — no SDF, no mask CSG
+    if (p.x < rec(base, SLOT_AABB_MIN_X) || p.x > rec(base, SLOT_AABB_MAX_X) ||
+        p.y < rec(base, SLOT_AABB_MIN_Y) || p.y > rec(base, SLOT_AABB_MAX_Y)) { continue; }
     let pl = to_local(base, p);
     let smp = eval_shape(u32(rec(base, SLOT_TYPE)), pl, base);
     let sd = smp.y * rec(base, SLOT_SCALE);

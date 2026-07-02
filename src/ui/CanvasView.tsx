@@ -29,7 +29,7 @@ import { canvasToScreen, screenToCanvas, Viewport, zoomAt } from "./viewport";
 import { useCanvasViewport } from "./useCanvasViewport";
 import { useGuideDrag } from "./useGuideDrag";
 import { PEN_CLOSE_PX, usePenDraft } from "./usePenDraft";
-import { localBounds } from "./objectBounds";
+import { localBounds } from "../field/objectBounds";
 import { CANCEL_DRAG_EVENT } from "./usePointerDrag";
 import type { Placing, ToolMode } from "./tools";
 import type { ViewState } from "./App";

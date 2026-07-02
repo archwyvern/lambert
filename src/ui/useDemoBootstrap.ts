@@ -28,9 +28,9 @@ export function useDemoBootstrap(opts: {
     const q = new URLSearchParams(location.search);
     if (!q.has("demo")) return;
     void Promise.all([import("fast-png"), import("../field/fixtures")])
-      .then(([{ encode }, { goldenObjects, maskedObjects, meshObjects, pipeObjects, vectorFillObjects }]) => {
-        const w = 96;
-        const h = 96;
+      .then(([{ encode }, { goldenObjects, maskedObjects, meshObjects, pipeObjects, vectorFillObjects, stressFieldObjects }]) => {
+        const w = Number(q.get("size")) || 96;
+        const h = w;
         const data = new Uint8Array(w * h * 4);
         for (let i = 0; i < w * h; i++) {
           data[i * 4] = 96;
@@ -38,7 +38,7 @@ export function useDemoBootstrap(opts: {
           data[i * 4 + 2] = 118;
           data[i * 4 + 3] = 255;
         }
-        const objects = q.has("masked") ? maskedObjects() : q.has("mesh") ? meshObjects() : q.has("paths") ? [...pipeObjects(), ...vectorFillObjects()] : goldenObjects();
+        const objects = q.has("stress") ? stressFieldObjects(w, q.has("overlap")) : q.has("masked") ? maskedObjects() : q.has("mesh") ? meshObjects() : q.has("paths") ? [...pipeObjects(), ...vectorFillObjects()] : goldenObjects();
         const doc = { ...emptyDoc("file:///demo/demo.df.png", w, h), layers: objects };
         const ws = new Workspace("/demo", { schemaVersion: 1, normalDirs: { red: "right", green: "up" } });
         const tab: Tab = {
@@ -62,7 +62,62 @@ export function useDemoBootstrap(opts: {
         const markReady = (): void => {
           (window as unknown as { __lambertDemoReady?: boolean }).__lambertDemoReady = true;
         };
-        if (q.has("drag")) {
+        if (q.has("perf")) {
+          // perf harness: drive N frames in `perfmode` (render = uniform-only invalidation, no repack;
+          // edit = per-frame doc mutation incl. pack) and write the PerfProbe stats as JSON to
+          // `perfout` (URL-encoded path). markReady is DEFERRED until the file is written so the
+          // --capture runner keeps the app alive for the whole run.
+          const frames = Number(q.get("perf")) || 120;
+          const perfmode = q.get("perfmode") ?? "render";
+          const outPath = decodeURIComponent(q.get("perfout") ?? "/tmp/lambert-perf.json");
+          const probe: { frames: { packMs: number; cpuMs: number; gpuMs: number }[] } = { frames: [] };
+          (globalThis as unknown as { __lambertPerf?: typeof probe }).__lambertPerf = probe;
+          let i = 0;
+          const tick = (): void => {
+            i += 1;
+            if (perfmode === "edit") {
+              // move the first object a hair: the full edit path (flatten + pack + React render)
+              tab.store.update((d) => {
+                const first = d.layers[0];
+                if (!first || !("transform" in first)) return d;
+                const t2 = { ...first.transform, rotation: first.transform.rotation + 0.002 };
+                return { ...d, layers: [{ ...first, transform: t2 }, ...d.layers.slice(1)] };
+              });
+            } else {
+              // uniform-only invalidation: light direction wiggles, layers ref stays -> no repack
+              const a = 0.5 + 0.001 * i;
+              setViews({ [tab.id]: { ...v, lightDir: [Math.cos(a) * 0.5, Math.sin(a) * 0.5, 0.7] } });
+            }
+            if (i < frames) requestAnimationFrame(tick);
+            else {
+              if (perfmode === "edit") tab.store.endGesture();
+              setTimeout(() => {
+                const done = probe.frames.filter((f) => f.gpuMs >= 0).slice(5); // drop warmup
+                const pick = (k: "packMs" | "cpuMs" | "gpuMs"): number[] => done.map((f) => f[k]).sort((x, y) => x - y);
+                const stat = (a: number[]): { mean: number; p50: number; p95: number } => ({
+                  mean: a.reduce((x, y) => x + y, 0) / Math.max(a.length, 1),
+                  p50: a[Math.floor(a.length / 2)] ?? 0,
+                  p95: a[Math.floor(a.length * 0.95)] ?? 0,
+                });
+                const report = {
+                  mode: perfmode,
+                  size: w,
+                  objects: doc.layers.length,
+                  frames: done.length,
+                  pack: stat(pick("packMs")),
+                  cpu: stat(pick("cpuMs")),
+                  gpu: stat(pick("gpuMs")),
+                };
+                void import("./host").then(({ getHost }) =>
+                  getHost()
+                    .writeFile(outPath, new TextEncoder().encode(JSON.stringify(report, null, 2)))
+                    .then(markReady),
+                );
+              }, 800);
+            }
+          };
+          setTimeout(() => requestAnimationFrame(tick), 600); // let the first real frame settle
+        } else if (q.has("drag")) {
           // capture aid: synthesize a left-button pointer drag `drag=x0,y0,x1,y1` (window px) on the
           // element under the start point — drives marquee/move flows for automated visual checks
           const [x0, y0, x1, y1] = q.get("drag")!.split(",").map(Number) as [number, number, number, number];

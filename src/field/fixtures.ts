@@ -365,3 +365,47 @@ export function mirrorQuadGroupLayers(): LayerNode[] {
 
 export const GOLDEN_W = 96;
 export const GOLDEN_H = 96;
+
+/** Perf-stress scene: a grid of mixed objects scaled to the doc — Pillows/Contours carry dense baked
+ *  outlines and Pillow's per-fragment boundary integral, i.e. the worst per-pixel eval cost. Object
+ *  count grows with size (like a real dense document) so frame cost scales realistically. */
+export function stressFieldObjects(size: number, overlap = false): ObjectInstance[] {
+  if (overlap) {
+    // adversarial: N big objects STACKED over the whole doc — AABB culling can't reject anything,
+    // so every fragment pays every object's full SDF (the worst-case fold cost)
+    const out: ObjectInstance[] = [];
+    const kinds = [ObjectTypeId.Pillow, ObjectTypeId.SurfaceVector, ObjectTypeId.Sphere, ObjectTypeId.Plateau];
+    for (let i = 0; i < 16; i++) {
+      const o = createObjectInstance(kinds[i % kinds.length]!, v2(size / 2, size / 2));
+      o.id = `overlap-${i}`;
+      const k = (size / 96) * (0.9 - i * 0.02);
+      o.transform.scale = new Vector3(k, k, 1);
+      o.transform.rotation = i * 0.4;
+      o.opacity = 0.6;
+      out.push(o);
+    }
+    return out;
+  }
+  const out: ObjectInstance[] = [];
+  const cols = Math.max(3, Math.min(8, Math.round(size / 128)));
+  const cell = size / cols;
+  const kinds = [
+    ObjectTypeId.Pillow,
+    ObjectTypeId.SurfaceVector,
+    ObjectTypeId.Sphere,
+    ObjectTypeId.PipeVector,
+    ObjectTypeId.Plateau,
+    ObjectTypeId.BermVector,
+  ];
+  for (let r = 0; r < cols; r++) {
+    for (let c = 0; c < cols; c++) {
+      const o = createObjectInstance(kinds[(r * cols + c) % kinds.length]!, v2((c + 0.5) * cell, (r + 0.5) * cell));
+      o.id = `stress-${r}-${c}`;
+      const k = (cell / 96) * 0.8;
+      o.transform.scale = new Vector3(k, k, 1);
+      o.transform.rotation = ((r * cols + c) % 7) * 0.31;
+      out.push(o);
+    }
+  }
+  return out;
+}
