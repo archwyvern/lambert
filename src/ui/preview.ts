@@ -32,6 +32,12 @@ export interface PreviewParams {
 
 /** Owns the WebGPU canvas: the analytic 2D composite + the 3D inspection pass (both evaluate the
  *  field straight from the packed object buffers — no pre-folded textures). */
+/** Perf-probe collector (the `perf=` capture aid): when installed on globalThis, renderNow reports
+ *  per-frame CPU (pack/encode) and GPU (onSubmittedWorkDone) timings into it. Zero cost when absent. */
+export interface PerfProbe {
+  frames: { packMs: number; cpuMs: number; gpuMs: number }[];
+}
+
 export class PreviewRenderer {
   private gpu!: GpuFieldRenderer;
   private ctx!: GPUCanvasContext;
@@ -300,12 +306,16 @@ export class PreviewRenderer {
 
   private renderNow(docW: number, docH: number, p: PreviewParams): void {
     if (!this.diffuseTex) return;
+    const probe = (globalThis as { __lambertPerf?: PerfProbe }).__lambertPerf;
+    const t0 = probe ? performance.now() : 0;
 
     // pack the objects BOTH analytic passes evaluate (2D composite + 3D preview); re-pack only when the
     // layer tree changes
+    let packMs = 0;
     if (p.layers !== this.lastShapes2d || !this.recordsBuf) {
       this.packObjectBuffers(flattenLayers(p.layers));
       this.lastShapes2d = p.layers;
+      if (probe) packMs = performance.now() - t0;
     }
 
     const dpr = this.canvas.width / (this.canvas.getBoundingClientRect().width || this.canvas.width) || 1;
@@ -357,6 +367,14 @@ export class PreviewRenderer {
     pass.end();
     this.device.queue.submit([enc.finish()]);
     this.render3D(docW, docH, p);
+    if (probe) {
+      const cpuMs = performance.now() - t0;
+      const rec = { packMs, cpuMs, gpuMs: -1 };
+      probe.frames.push(rec);
+      void this.device.queue.onSubmittedWorkDone().then(() => {
+        rec.gpuMs = performance.now() - t0;
+      });
+    }
     // capture-readiness flag: the window has presented real content at least once
     (globalThis as unknown as { __lambertFrameReady?: boolean }).__lambertFrameReady = true;
   }

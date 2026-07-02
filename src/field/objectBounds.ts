@@ -1,8 +1,8 @@
 import { Vector2 } from "@carapace/primitives";
-import { bezierSpine } from "../field/bezier";
-import { ObjectTypeId } from "../field/objectTypeIds";
-import type { ObjectInstance } from "../field/types";
-import { v2 } from "../field/vec";
+import { bezierSpine } from "./bezier";
+import { ObjectTypeId } from "./objectTypeIds";
+import type { ObjectInstance } from "./types";
+import { v2 } from "./vec";
 
 /** Object-local footprint bounds: control-point extents, analytic-stroke bezier extents, or parametric
  *  extents from the object's params (pipe = length/radius/cap, sphere = radius, torus = fixed). Shared by
@@ -36,7 +36,10 @@ export function localBounds(s: ObjectInstance): { min: Vector2; max: Vector2 } {
       maxX = Math.max(maxX, p.x);
       maxY = Math.max(maxY, p.y);
     }
-    const pad = Number(s.params.radius ?? s.params.width ?? 8); // cross-section half-extent (pipe radius / berm width)
+    // cross-section half-extent (pipe radius / berm width) x the LARGEST per-anchor taper scale —
+    // the bounds are also the GPU fold's cull box, so they must be conservative, not cosmetic
+    const maxTaper = s.bezier.reduce((m, a) => Math.max(m, a.scale ?? 1), 1);
+    const pad = Number(s.params.radius ?? s.params.width ?? 8) * maxTaper;
     return { min: v2(minX - pad, minY - pad), max: v2(maxX + pad, maxY + pad) };
   }
   if (s.typeId === ObjectTypeId.Pipe) {
@@ -48,6 +51,11 @@ export function localBounds(s: ObjectInstance): { min: Vector2; max: Vector2 } {
   if (s.typeId === ObjectTypeId.Sphere) {
     const r = Number(s.params.radius ?? 48);
     return { min: v2(-r, -r), max: v2(r, r) };
+  }
+  if (s.typeId === ObjectTypeId.Berm) {
+    const w = Number(s.params.width ?? 16);
+    const ex = Number(s.params.length ?? 80) / 2 + (s.params.cap === "flat" ? 0 : w); // round caps bulge
+    return { min: v2(-ex, -w), max: v2(ex, w) };
   }
   if (s.typeId === ObjectTypeId.Torus) {
     return { min: v2(-64, -64), max: v2(64, 64) }; // major radius 48 + tube radius 16

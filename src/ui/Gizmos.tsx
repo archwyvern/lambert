@@ -24,7 +24,7 @@ import { fromLocal } from "../field/transform";
 import { isGroup, isObject, type ObjectInstance } from "../field/types";
 import { GroupGizmo } from "./GroupGizmo";
 import { MaskGizmo } from "./MaskGizmo";
-import { localBounds, paddedCorners } from "./objectBounds";
+import { localBounds, paddedCorners } from "../field/objectBounds";
 import { Vector2, Vector3 } from "@carapace/primitives";
 import { v2 } from "../field/vec";
 import { ContextMenu, MenuEntry } from "./kit";

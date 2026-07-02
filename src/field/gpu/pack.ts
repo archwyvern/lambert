@@ -3,6 +3,9 @@ import { COMBINE_OP_INDEX, objectCombineOp } from "../combine";
 import type { ResolvedObject } from "../flatten";
 import { meshGradients } from "../meshOps";
 import { getObjectType } from "../registry";
+import { affineApply, affineInvert } from "../affine";
+import { v2 } from "../vec";
+import { localBounds } from "../objectBounds";
 import { gpuTypeIndex, MAX_PARAMS, PARAMS_OFFSET, RECORD_F32, RECORD_SLOT } from "./wgsl";
 
 
@@ -73,6 +76,27 @@ export function packObjects(resolved: ResolvedObject[]): PackedObjects {
     records[base + RECORD_SLOT.CP_COUNT] = analytic(s) ? s.bezier!.length : s.controlPoints.length;
     records[base + RECORD_SLOT.CLOSED] = s.closed ? 1 : 0; // analytic path is a closed loop (wrap last->first)
     records[base + RECORD_SLOT.OPACITY] = Math.min(1, Math.max(0, s.opacity ?? 1)); // fold-contribution weight
+    // world footprint AABB = the object's local bounds' corners through the FORWARD affine (the
+    // inverse of invAffine), padded 1.5px so the influence AA ramp (sd < 0.5) is never culled
+    {
+      const fwd = affineInvert(inv); // world <- local (invAffine is world -> local)
+      const b = localBounds(s);
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const [lx, ly] of [[b.min.x, b.min.y], [b.max.x, b.min.y], [b.max.x, b.max.y], [b.min.x, b.max.y]] as const) {
+        const wpt = affineApply(fwd, v2(lx, ly));
+        minX = Math.min(minX, wpt.x);
+        minY = Math.min(minY, wpt.y);
+        maxX = Math.max(maxX, wpt.x);
+        maxY = Math.max(maxY, wpt.y);
+      }
+      records[base + RECORD_SLOT.AABB_MIN_X] = minX - 1.5;
+      records[base + RECORD_SLOT.AABB_MIN_Y] = minY - 1.5;
+      records[base + RECORD_SLOT.AABB_MAX_X] = maxX + 1.5;
+      records[base + RECORD_SLOT.AABB_MAX_Y] = maxY + 1.5;
+    }
     records[base + RECORD_SLOT.RING] = s.ringSplit ?? (s.controlPoints.length >> 1); // base-ring count (rings objects)
     const paramKeys = Object.entries(type.params);
     if (paramKeys.length > MAX_PARAMS) throw new Error(`${s.typeId}: too many params for record`);

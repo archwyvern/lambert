@@ -4,7 +4,7 @@ import { flattenLayers } from "../field/flatten";
 import { isGroup, isObject, type LayerNode, type ObjectInstance } from "../field/types";
 import { v2 } from "../field/vec";
 import { findNode, findParentId, nodeWorldAffine, updateNode } from "../document/layerOps";
-import { localBounds } from "./objectBounds";
+import { localBounds } from "../field/objectBounds";
 
 export type AlignMode = "left" | "hcenter" | "right" | "top" | "vcenter" | "bottom";
 export type DistributeAxis = "h" | "v";
