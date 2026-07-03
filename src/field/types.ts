@@ -18,6 +18,9 @@ export interface ParamSpecEnum {
   type: "enum";
   options: string[];
   default: string;
+  /** false = no generic record slot; the type's own `pack` hook encodes it (e.g. into a sign bit).
+   *  Keeps a full type (Pillow: 2 params + 6 hole slots) from overflowing the 8-slot budget. */
+  packed?: boolean;
 }
 
 export type ParamSpec = ParamSpecPx | ParamSpecEnum;
@@ -162,5 +165,8 @@ export interface ObjectType {
   /** Optional post-construction hook (createObjectInstance) — e.g. cable seeds its anchors and
    *  resamples them into the dense controlPoints. */
   onCreate?(object: ObjectInstance): void;
+  /** Optional record-packing hook, run AFTER the generic slots are written — for type-specific
+   *  encodings (unpacked params, derived per-shape scalars in type-unused slots). */
+  pack?(records: Float32Array, base: number, object: ObjectInstance): void;
   eval(pLocal: Vector2, object: ObjectInstance): FieldSample;
 }

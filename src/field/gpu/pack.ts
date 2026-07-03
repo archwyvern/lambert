@@ -98,7 +98,8 @@ export function packObjects(resolved: ResolvedObject[]): PackedObjects {
       records[base + RECORD_SLOT.AABB_MAX_Y] = maxY + 1.5;
     }
     records[base + RECORD_SLOT.RING] = s.ringSplit ?? (s.controlPoints.length >> 1); // base-ring count (rings objects)
-    const paramKeys = Object.entries(type.params);
+    // params with packed: false get no generic slot — the type's pack() hook encodes them
+    const paramKeys = Object.entries(type.params).filter(([, spec]) => spec.type !== "enum" || spec.packed !== false);
     if (paramKeys.length > MAX_PARAMS) throw new Error(`${s.typeId}: too many params for record`);
     paramKeys.forEach(([key, spec], pi) => {
       const value = s.params[key];
@@ -168,6 +169,7 @@ export function packObjects(resolved: ResolvedObject[]): PackedObjects {
         }
       }
     }
+    type.pack?.(records, base, s); // type-specific encodings (see ObjectType.pack)
     const loops = bakedByObject[si]!;
     records[base + RECORD_SLOT.MASK_START] = loopIdx;
     records[base + RECORD_SLOT.MASK_COUNT] = loops.length;
