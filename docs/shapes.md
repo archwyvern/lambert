@@ -54,7 +54,7 @@ transformed). Kinds:
 | **Clamp** | limits heights to a min/max band |
 | **Curve** | remaps heights through an ease curve |
 | **Ramp** | a directional height ramp across the region (`angle`, `depth`) |
-| **Emboss / Detail** | lifts detail out of the diffuse's own luminance: a tolerance-gated gradient extraction integrated into height. `radius` (feature size), `strength` (negative inverts to dark-high), `blur`, `tolerance` (denoise). Recomputes progressively off the UI thread — scrub freely |
+| **Emboss / Detail** | lifts detail out of the diffuse's own luminance (transparency reads as dark, so silhouettes and semi-transparent detail emboss): a tolerance-gated gradient extraction integrated into height. `radius` (feature size), `strength` (negative inverts to dark-high), `blur`, `tolerance` (denoise). Recomputes progressively off the UI thread — scrub freely |
 
 ## Mesh
 
