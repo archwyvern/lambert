@@ -86,3 +86,23 @@ test("subscribe fires on structural changes and on notify()", () => {
   w.openTab(tab({ id: "c" })); // after unsub: no further hits
   expect(hits).toBe(5);
 });
+
+test("moveTab reorders by insertion slot and keeps the active tab active", () => {
+  const w = ws();
+  w.openTab(tab({ id: "a" }));
+  w.openTab(tab({ id: "b" }));
+  w.openTab(tab({ id: "c" }));
+  w.focus("b");
+  w.moveTab("a", 3); // move A to the end (slot after C)
+  expect(w.tabs.map((t) => t.id)).toEqual(["b", "c", "a"]);
+  expect(w.active?.id).toBe("b"); // active follows the reorder
+  w.moveTab("a", 0); // back to the front
+  expect(w.tabs.map((t) => t.id)).toEqual(["a", "b", "c"]);
+  expect(w.active?.id).toBe("b");
+  let hits = 0;
+  const unsub = w.subscribe(() => (hits += 1));
+  w.moveTab("a", 1); // dropping in its own slot is a no-op (slot 1 = right of itself)
+  expect(w.tabs.map((t) => t.id)).toEqual(["a", "b", "c"]);
+  expect(hits).toBe(0); // no phantom emit -> no session stash churn
+  unsub();
+});

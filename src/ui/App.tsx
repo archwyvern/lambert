@@ -1162,6 +1162,7 @@ export function App(): React.JSX.Element {
               activeId={tabInfos[workspace?.activeIndex ?? -1]?.id ?? null}
               onSelect={(id) => workspaceRef.current?.focus(id)}
               onClose={closeDoc}
+              onReorder={(id, toIndex) => workspaceRef.current?.moveTab(id, toIndex)}
             />
           ) : null}
           {active && state ? (
