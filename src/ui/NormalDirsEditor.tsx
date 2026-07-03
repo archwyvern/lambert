@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
-import { normalSigns, type NormalDirs } from "../document/schema";
+import { Segmented, SpinSlider } from "@carapace/shell";
+import { normalXform, type NormalDirs } from "../document/schema";
 import { cx } from "./kit";
 
 /**
@@ -11,7 +12,7 @@ export function drawNormalSphere(canvas: HTMLCanvasElement, dirs: NormalDirs): v
   const size = canvas.width;
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
-  const s = normalSigns(dirs);
+  const m = normalXform(dirs); // channel signs + encoded-frame rotation
   const img = ctx.createImageData(size, size);
   const r = size / 2;
   for (let y = 0; y < size; y++) {
@@ -22,8 +23,8 @@ export function drawNormalSphere(canvas: HTMLCanvasElement, dirs: NormalDirs): v
       const i = (y * size + x) * 4;
       if (d >= 1) continue; // outside: transparent
       const nz = Math.sqrt(Math.max(0, 1 - dx * dx - dy * dy));
-      img.data[i] = Math.round((0.5 + (s.red * dx) / 2) * 255);
-      img.data[i + 1] = Math.round((0.5 + (s.green * dy) / 2) * 255);
+      img.data[i] = Math.round((0.5 + (m.xx * dx + m.xy * dy) / 2) * 255);
+      img.data[i + 1] = Math.round((0.5 + (m.yx * dx + m.yy * dy) / 2) * 255);
       img.data[i + 2] = Math.round((0.5 + nz / 2) * 255);
       img.data[i + 3] = Math.round(Math.min(1, (1 - d) * r) * 255); // ~1px coverage ramp at the rim
     }
@@ -91,6 +92,7 @@ export function NormalDirsEditor(props: {
   disabled?: boolean;
 }): React.JSX.Element {
   const { dirs, onChange, disabled } = props;
+  const rotation = dirs.rotation ?? 0;
   return (
     <div className={cx("flex flex-col items-start gap-3", disabled && "opacity-60")}>
       <div className="grid w-max grid-cols-[2rem_9rem_2rem] grid-rows-[2rem_9rem_2rem] items-center justify-items-center gap-1">
@@ -132,10 +134,40 @@ export function NormalDirsEditor(props: {
         />
         <div />
       </div>
+      {/* frame rotation: for consumers that rotate the artwork itself (e.g. skyrat sprites at -90°).
+          Quarter-turn presets + a free degree scrubber; the ball above shows the result live. */}
+      <div className="flex items-center gap-3">
+        <span className="text-base text-fg-mid">Rotation</span>
+        <Segmented
+          label="Rotation preset"
+          options={[
+            { value: "-90", label: "-90°" },
+            { value: "0", label: "0°" },
+            { value: "90", label: "90°" },
+            { value: "180", label: "180°" },
+          ]}
+          value={String(rotation) as "-90" | "0" | "90" | "180"}
+          onChange={(v) => !disabled && onChange({ ...dirs, rotation: Number(v) })}
+        />
+        <div className="w-20">
+          <SpinSlider
+            value={rotation}
+            min={-180}
+            max={180}
+            integer
+            suffix="°"
+            readOnly={disabled}
+            onChange={(v) => onChange({ ...dirs, rotation: v })}
+          />
+        </div>
+      </div>
       <p className="max-w-sm text-base leading-snug text-fg-mid">
         <span style={{ color: RED }}>Red</span> points {dirs.red}, <span style={{ color: GREEN }}>green</span> points{" "}
-        {dirs.green} — {dirs.green === "up" ? "the OpenGL convention" : "the DirectX convention"}. The ball is a raised
-        hemisphere encoded with this convention; match it against a known-good normal map from your engine.
+        {dirs.green}
+        {rotation !== 0 ? `, frame rotated ${rotation}°` : ""} —{" "}
+        {rotation === 0 ? (dirs.green === "up" ? "the OpenGL convention" : "the DirectX convention") : "a rotated frame for consumers that rotate the artwork itself"}
+        . The ball is a raised hemisphere encoded with this convention; match it against a known-good normal map from
+        your engine.
       </p>
     </div>
   );

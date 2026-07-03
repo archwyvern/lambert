@@ -13,7 +13,7 @@ import { getObjectType, ObjectTypeId } from "../field/registry";
 import { editSnap } from "./snapPoint";
 import { fromLocal, toLocal } from "../field/transform";
 import type { ObjectInstance } from "../field/types";
-import { normalSigns, type NormalDirs } from "../document/schema";
+import { normalXform, type NormalDirs } from "../document/schema";
 import { NormalSphere } from "./NormalDirsEditor";
 import { Vector2, Vector3 } from "@carapace/primitives";
 import { EmptyState, ShortcutGuide, SpinSlider } from "@carapace/shell";
@@ -269,7 +269,7 @@ export function CanvasView(props: {
       opacity: view.opacity,
       lightDir: view.lightDir,
       lightEnergy: view.lightEnergy,
-      normalSigns: normalSigns(normalDirs),
+      normalXform: normalXform(normalDirs),
       orbit3d,
     });
   });
@@ -1083,6 +1083,7 @@ export function CanvasView(props: {
             type="button"
             title={
               `Normal directions: red ${normalDirs.red}, green ${normalDirs.green}` +
+              (normalDirs.rotation ? `, frame rotated ${normalDirs.rotation}°` : "") +
               (overridesNormalDirs ? " (document override)" : " (project)") +
               " — click to edit"
             }
@@ -1094,6 +1095,7 @@ export function CanvasView(props: {
             <span className="text-sm tabular-nums text-fg-mid">
               <span className="text-[#e06666]">R{normalDirs.red === "right" ? "→" : "←"}</span>{" "}
               <span className="text-[#7bc96f]">G{normalDirs.green === "up" ? "↑" : "↓"}</span>
+              {normalDirs.rotation ? <span> ⟲{normalDirs.rotation}°</span> : null}
             </span>
           </button>
           <div className="pointer-events-none flex gap-3 border border-border bg-surface2/90 px-2 py-0.5 text-sm tabular-nums text-fg-mid">
