@@ -86,6 +86,21 @@ export class Workspace {
     }
   }
 
+  /** Drag-reorder: move a tab to insertion slot `toIndex` (0..tabs.length, in the CURRENT array).
+   *  The active tab stays active (its index follows the move). */
+  moveTab(id: string, toIndex: number): void {
+    const from = this.indexById(id);
+    if (from < 0) return;
+    const activeId = this.active?.id ?? null;
+    const next = [...this.tabs];
+    const [tab] = next.splice(from, 1);
+    next.splice(toIndex > from ? toIndex - 1 : toIndex, 0, tab!);
+    if (next.every((t, i) => t === this.tabs[i])) return; // no-op move: don't emit
+    this.tabs = next;
+    if (activeId !== null) this.activeIndex = this.indexById(activeId);
+    this.emit();
+  }
+
   /** Close a tab; the active selection moves to the tab that slid into its slot (or the previous). */
   closeTab(id: string): void {
     const i = this.indexById(id);
