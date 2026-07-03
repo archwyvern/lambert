@@ -1,8 +1,16 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import os from "node:os";
 import { exposeFs, exposeOs } from "@carapace/shell/ipc";
 
 contextBridge.exposeInMainWorld("lambertHost", {
+  // filesystem path for a DataTransfer File (drag-drop) — File.path is gone in modern Electron
+  pathForFile: (file: File) => {
+    try {
+      return webUtils.getPathForFile(file);
+    } catch {
+      return null;
+    }
+  },
   // runtime versions + OS for the About dialog's diagnostics block (preload has process access)
   diagnostics: () => ({
     electron: process.versions.electron ?? "?",

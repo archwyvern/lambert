@@ -68,9 +68,27 @@ export async function newProjectFlow(host: Host, defaultPath?: string): Promise<
   return { projectPath: dir, config };
 }
 
+/** The diffuse changed size underneath a document. Carries everything the UI needs to offer the
+ *  adopt-vs-scale migration (see document/migrate.ts) instead of a dead-end refusal. */
+export class DimsMismatchError extends Error {
+  constructor(
+    readonly docPath: string,
+    readonly doc: LambertDoc,
+    readonly bytes: Uint8Array,
+    readonly width: number,
+    readonly height: number,
+  ) {
+    super(
+      `${basename(docPath)} diffuse is ${width}x${height} but the document expects ` +
+        `${doc.source.width}x${doc.source.height}`,
+    );
+  }
+}
+
 /**
  * Open a saved `.lmb` as a tab: parse the doc, resolve + decode its diffuse (file or remote), and
- * enforce the NX dims contract. The diffuse is carried as resolved bytes; the docPath is the `.lmb`.
+ * enforce the NX dims contract (a mismatch throws DimsMismatchError so the UI can offer the resize
+ * migration). The diffuse is carried as resolved bytes; the docPath is the `.lmb`.
  * `droppedUnknown` is how many legacy/removed-type object layers were dropped on load (the drop is
  * intended graceful-degrade; the count lets the caller tell the user it happened).
  */
@@ -79,10 +97,7 @@ export async function openDocTab(host: Host, docPath: string): Promise<{ tab: Ta
   const bytes = await resolveDiffuse(host, doc.source.uri);
   const decoded = decode(bytes);
   if (decoded.width !== doc.source.width || decoded.height !== doc.source.height) {
-    throw new Error(
-      `${basename(docPath)} diffuse is ${decoded.width}x${decoded.height} but the document expects ` +
-        `${doc.source.width}x${doc.source.height} — the NX contract requires an exact match`,
-    );
+    throw new DimsMismatchError(docPath, doc, bytes, decoded.width, decoded.height);
   }
   const droppedUnknown = countUnknownLayers(doc.layers);
   const tab: Tab = { id: crypto.randomUUID(), docPath, store: new DocumentStore(doc, docPath), diffuse: { bytes } };
@@ -125,7 +140,7 @@ export async function exportDocNx(host: Host, doc: LambertDoc, label: string, co
   if (diffuse.width !== doc.source.width || diffuse.height !== doc.source.height) {
     throw new Error(
       `${basename(label)} diffuse is ${diffuse.width}x${diffuse.height} but the document expects ` +
-        `${doc.source.width}x${doc.source.height} — the NX contract requires an exact match`,
+        `${doc.source.width}x${doc.source.height} — open the document to adopt or scale to the new size`,
     );
   }
   const file = buildNxExport(doc, render, outPath, effectiveNormalDirs(doc, config), effectiveOutput(doc, config), diffuseOpacity(diffuse));

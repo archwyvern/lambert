@@ -8,10 +8,12 @@ import { addNode, cloneNode, findNode, ungroup, updateNode, wrapInGroup } from "
 import { flattenLayers } from "../field/flatten";
 import { isGroup, isObject, type LayerNode, type ObjectInstance } from "../field/types";
 import { Vector2, Vector3 } from "@carapace/primitives";
-import { effectiveNormalDirs, effectiveOutput, emptyDoc, hydrateObjectRaw, parseDoc, parseProjectConfig, presetLibrarySchema, ProjectConfig, serializeDoc, serializeProjectConfig, type SavedPreset } from "../document/schema";
+import { effectiveNormalDirs, effectiveOutput, emptyDoc, hydrateObjectRaw, parseDoc, parseProjectConfig, presetLibrarySchema, ProjectConfig, serializeDoc, serializeProjectConfig, type LambertDoc, type SavedPreset } from "../document/schema";
 import { getObjectType, ObjectTypeId } from "../field/registry";
-import { exportDocNx, exportTabHeightmap, exportTabNx, newProjectFlow, openDocTab, openProjectByPath, openProjectFlow, saveTab, type OpenedProject } from "../document/io";
+import { DimsMismatchError, exportDocNx, exportTabHeightmap, exportTabNx, newProjectFlow, openDocTab, openProjectByPath, openProjectFlow, saveTab, type OpenedProject } from "../document/io";
 import { nxExtension } from "../document/exports";
+import { migrateDocToDims, type ResizeMode } from "../document/migrate";
+import { ResizeMigrationDialog } from "./ResizeMigrationDialog";
 import { resolveDiffuse } from "../document/diffuseSource";
 import { basename, dirname, joinPath } from "../document/paths";
 import { pushRecent, removeRecent, type RecentProject } from "../document/recents";
@@ -243,6 +245,40 @@ export function App(): React.JSX.Element {
   const openPathRef = useRef(openPath);
   openPathRef.current = openPath;
 
+  // Diffuse-resize migration prompt (open / reload hit a dims mismatch); null = closed
+  const [resizeAsk, setResizeAsk] = useState<
+    | { kind: "open"; docPath: string; doc: LambertDoc; bytes: Uint8Array; width: number; height: number }
+    | { kind: "reload"; tabId: string; bytes: Uint8Array; width: number; height: number; oldW: number; oldH: number }
+    | null
+  >(null);
+
+  const applyResizeMigration = (mode: ResizeMode): void => {
+    const ask = resizeAsk;
+    setResizeAsk(null);
+    const ws = workspaceRef.current;
+    if (!ask || !ws) return;
+    if (ask.kind === "open") {
+      // open the tab on the MIGRATED doc, dirty (the migration is an unsaved change)
+      const migrated = migrateDocToDims(ask.doc, ask.width, ask.height, mode);
+      const store = new DocumentStore(migrated, ask.docPath);
+      store.reset(migrated, ask.docPath, { dirty: true });
+      const tab: Tab = { id: crypto.randomUUID(), docPath: ask.docPath, store, diffuse: { bytes: ask.bytes } };
+      const prevView = (ws.active && viewsRef.current[ws.active.id]) || DEFAULT_VIEW;
+      setViews((vs) => ({ ...vs, [tab.id]: { ...prevView } }));
+      ws.openTab(tab);
+      notify(`Opened ${basename(ask.docPath)} at ${ask.width}×${ask.height} (${mode === "adopt" ? "positions kept" : "objects scaled"}) — save to keep`);
+    } else {
+      const t = ws.tabs[ws.indexById(ask.tabId)];
+      if (!t) return;
+      t.store.update((d) => migrateDocToDims(d, ask.width, ask.height, mode));
+      t.store.endGesture();
+      t.diffuse.bytes = ask.bytes;
+      t.diffuse.unresolved = false;
+      ws.notify();
+      notify(`Reloaded diffuse at ${ask.width}×${ask.height} (${mode === "adopt" ? "positions kept" : "objects scaled"})`);
+    }
+  };
+
   // open a saved .lmb from the explorer; focus it if already open, else load + resolve its diffuse
   const openDoc = (docPath: string): void => {
     const ws = workspaceRef.current;
@@ -254,7 +290,18 @@ export function App(): React.JSX.Element {
     }
     run(
       (async () => {
-        const { tab, droppedUnknown } = await openDocTab(getHost(), docPath);
+        let opened: Awaited<ReturnType<typeof openDocTab>>;
+        try {
+          opened = await openDocTab(getHost(), docPath);
+        } catch (err) {
+          if (err instanceof DimsMismatchError) {
+            // the diffuse changed size: offer the adopt/scale migration instead of refusing
+            setResizeAsk({ kind: "open", docPath, doc: err.doc, bytes: err.bytes, width: err.width, height: err.height });
+            return;
+          }
+          throw err;
+        }
+        const { tab, droppedUnknown } = opened;
         // a new tab inherits the current tab's view (mode/opacity/light) rather than snapping to the
         // lit/100% default — so flipping between docs keeps the working view.
         const prevView = (ws.active && viewsRef.current[ws.active.id]) || DEFAULT_VIEW;
@@ -346,11 +393,9 @@ export function App(): React.JSX.Element {
   };
 
   // source chosen → write the .lmb ONLY if the diffuse resolves + decodes; otherwise leave no file
-  const createDoc = (uri: string): void => {
-    const path = newDocPath;
-    setNewDocPath(null);
+  const createDocAt = (path: string, uri: string): void => {
     const ws = workspaceRef.current;
-    if (!ws || !path) return;
+    if (!ws) return;
     run(
       (async () => {
         // never clobber an existing .lmb with a blank doc — the explorer's inline namer does no collision
@@ -370,7 +415,66 @@ export function App(): React.JSX.Element {
     );
   };
 
-  // Reload the active doc's diffuse from its source (refresh remote cache), re-validating dims
+  // Files dropped onto the WINDOW — the DnD twin of the argv/file-association path:
+  // project folder / project.lambert opens the project; .lmb opens a tab (resolving its project
+  // first if none is open); .png becomes a new document over that diffuse in the current project.
+  const handleDroppedPath = async (path: string): Promise<string | undefined> => {
+    const host = getHost();
+    const openDocIn = async (lmb: string): Promise<string | undefined> => {
+      if (!workspaceRef.current) {
+        // no project open: walk up from the .lmb to its project.lambert and enter that project
+        let dir = dirname(lmb);
+        for (;;) {
+          if (await host.pathExists(joinPath(dir, PROJECT_FILE))) break;
+          const parent = dirname(dir);
+          if (parent === dir) throw new Error(`${basename(lmb)} isn't inside a Lambert project (no ${PROJECT_FILE} above it)`);
+          dir = parent;
+        }
+        enterProject(await openProjectByPath(host, dir));
+      }
+      openDoc(lmb);
+      return undefined; // openDoc reports its own status
+    };
+    if (basename(path) === PROJECT_FILE) return enterProject(await openProjectByPath(host, dirname(path)));
+    if (/\.lmb$/i.test(path)) return openDocIn(path);
+    if (/\.png$/i.test(path)) {
+      const ws = workspaceRef.current;
+      if (!ws) throw new Error("Open a project first — a dropped .png becomes a new document in it");
+      // non-colliding <stem>.lmb at the project root, then the normal create path (validates the png)
+      const stem = basename(path).replace(/\.(df\.)?png$/i, "");
+      let lmb = joinPath(ws.projectPath, `${stem}.lmb`);
+      for (let n = 2; await host.pathExists(lmb); n++) lmb = joinPath(ws.projectPath, `${stem}-${n}.lmb`);
+      createDocAt(lmb, `file://${path}`);
+      return undefined;
+    }
+    // anything else: a directory is a project candidate; otherwise reject clearly
+    if (await host.pathExists(joinPath(path, PROJECT_FILE))) return enterProject(await openProjectByPath(host, path));
+    throw new Error(`${basename(path)} isn't something Lambert opens (drop a project folder, .lmb, or .png)`);
+  };
+  const handleDroppedPathRef = useRef(handleDroppedPath);
+  handleDroppedPathRef.current = handleDroppedPath;
+  useEffect(() => {
+    const onDragOver = (e: DragEvent): void => {
+      if (e.dataTransfer?.types.includes("Files")) e.preventDefault();
+    };
+    const onDropFiles = (e: DragEvent): void => {
+      const file = e.dataTransfer?.files[0];
+      if (!file) return; // in-app drags (palette objects) keep their own handlers
+      e.preventDefault();
+      const path = getHost().pathForFile(file);
+      if (path) run(handleDroppedPathRef.current(path));
+    };
+    window.addEventListener("dragover", onDragOver);
+    window.addEventListener("drop", onDropFiles);
+    return () => {
+      window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("drop", onDropFiles);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Reload the active doc's diffuse from its source (refresh remote cache), re-validating dims —
+  // a size change offers the adopt/scale migration instead of refusing
   const reloadDiffuse = (): void => {
     const ws = workspaceRef.current;
     const t = ws?.active;
@@ -381,10 +485,8 @@ export function App(): React.JSX.Element {
         const bytes = await resolveDiffuse(getHost(), doc.source.uri, { refresh: true });
         const d = decode(bytes);
         if (d.width !== doc.source.width || d.height !== doc.source.height) {
-          throw new Error(
-            `reloaded diffuse is ${d.width}x${d.height} but the document expects ` +
-              `${doc.source.width}x${doc.source.height} — the NX contract requires an exact match`,
-          );
+          setResizeAsk({ kind: "reload", tabId: t.id, bytes, width: d.width, height: d.height, oldW: doc.source.width, oldH: doc.source.height });
+          return undefined;
         }
         t.diffuse.bytes = bytes; // new array → preview's WeakMap<bytes,tex> cache misses → re-decode
         t.diffuse.unresolved = false; // a successful relink clears the placeholder/relink state
@@ -1088,6 +1190,17 @@ export function App(): React.JSX.Element {
         }
       />
       {showAbout ? <AboutDialog onClose={() => setShowAbout(false)} /> : null}
+      {resizeAsk ? (
+        <ResizeMigrationDialog
+          name={resizeAsk.kind === "open" ? basename(resizeAsk.docPath) : "The reloaded diffuse"}
+          oldW={resizeAsk.kind === "open" ? resizeAsk.doc.source.width : resizeAsk.oldW}
+          oldH={resizeAsk.kind === "open" ? resizeAsk.doc.source.height : resizeAsk.oldH}
+          newW={resizeAsk.width}
+          newH={resizeAsk.height}
+          onPick={applyResizeMigration}
+          onClose={() => setResizeAsk(null)}
+        />
+      ) : null}
       <CommandProvider registry={registry}>
         <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       </CommandProvider>
@@ -1104,7 +1217,16 @@ export function App(): React.JSX.Element {
           onClose={() => setSettingsScreen(null)}
         />
       ) : null}
-      {newDocPath !== null ? <NewDocumentDialog onConfirm={createDoc} onClose={() => setNewDocPath(null)} /> : null}
+      {newDocPath !== null ? (
+        <NewDocumentDialog
+          onConfirm={(uri) => {
+            const path = newDocPath;
+            setNewDocPath(null);
+            createDocAt(path, uri);
+          }}
+          onClose={() => setNewDocPath(null)}
+        />
+      ) : null}
       <div className="flex min-h-0 flex-1">
         {workspace ? (
           <>

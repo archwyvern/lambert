@@ -26,6 +26,8 @@ export interface DiagnosticsInfo {
 export interface Host {
   /** Runtime versions + OS string for the About dialog (synchronous — read in the preload). */
   diagnostics(): DiagnosticsInfo;
+  /** Filesystem path of a drag-dropped File (webUtils.getPathForFile); null if unavailable. */
+  pathForFile(file: File): string | null;
   openDialog(opts: { title: string; filters: FileFilter[] }): Promise<string | null>;
   saveDialog(opts: { title: string; defaultPath?: string; filters: FileFilter[] }): Promise<string | null>;
   /** Folder picker (project open/new); defaultPath reopens the dialog at the last-used directory. */
