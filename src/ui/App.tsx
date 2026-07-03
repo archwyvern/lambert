@@ -144,6 +144,9 @@ export function App(): React.JSX.Element {
   const cam3d = use3DCamera();
   const canvas3dRef = useRef<HTMLCanvasElement>(null);
   const [swapped, setSwapped] = usePersistentState("panel:3d:swapped", false);
+  // 3D preview OFF by default: the displaced-grid fold is the most expensive pass in the app, so
+  // it only runs when the user opts in (click the pane to enable; the power button disables)
+  const [preview3dOn, setPreview3dOn] = usePersistentState("panel:3d:enabled", false);
   const [cornerHeight, setCornerHeight] = usePersistentState("panel:3d:corner", 300);
   const [, bumpRender] = useReducer((x: number) => x + 1, 0);
   const [, forceUpdate] = useReducer((x: number) => x + 1, 0);
@@ -1328,7 +1331,7 @@ export function App(): React.JSX.Element {
                   onLightChange={(d) => setActiveView((v) => ({ ...v, lightDir: d }))}
                   onEnergyChange={(en) => setActiveView((v) => ({ ...v, lightEnergy: en }))}
                   canvas3dRef={canvas3dRef}
-                  orbit3d={cam3d.orbit}
+                  orbit3d={preview3dOn ? cam3d.orbit : null}
                   normalDirs={effectiveNormalDirs(state.doc, workspace!.config)}
                   overridesNormalDirs={state.doc.normalDirs !== undefined}
                   openSettings={openSettings}
@@ -1373,7 +1376,8 @@ export function App(): React.JSX.Element {
                   canvasRef={canvas3dRef}
                   docW={state.doc.source.width}
                   docH={state.doc.source.height}
-                  enabled={true}
+                  enabled={preview3dOn}
+                  onToggle={() => setPreview3dOn((v) => !v)}
                   onResize={bumpRender}
                   big={swapped}
                   onSwap={() => setSwapped((s) => !s)}

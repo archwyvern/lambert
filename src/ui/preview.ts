@@ -64,6 +64,7 @@ export class PreviewRenderer {
   private detailBuf: GPUBuffer | null = null;
   private lastDetail: DetailField | null | undefined = undefined; // sentinel: never uploaded
   private shapeCount = 0;
+  private packSeq = 0;
   private lastShapes2d: LayerNode[] | null = null;
   private frame: number | null = null;
   private pending: { docW: number; docH: number; params: PreviewParams } | null = null;
@@ -163,6 +164,36 @@ export class PreviewRenderer {
     if (!this.ctx3d || !this.canvas3d || !p.orbit3d || !this.diffuseTex || !this.recordsBuf) return;
     const w = this.canvas3d.width;
     const h = this.canvas3d.height;
+    const l = this.last3d;
+    if (
+      l &&
+      l.packSeq === this.packSeq &&
+      l.orbit === p.orbit3d &&
+      l.lx === p.lightDir[0] &&
+      l.ly === p.lightDir[1] &&
+      l.lz === p.lightDir[2] &&
+      l.detail === (p.detail ?? null) &&
+      l.w === w &&
+      l.h === h &&
+      l.docW === docW &&
+      l.docH === docH &&
+      l.tex === this.diffuseTex
+    ) {
+      return; // the canvas keeps presenting its last frame — nothing 3D-relevant changed
+    }
+    this.last3d = {
+      packSeq: this.packSeq,
+      orbit: p.orbit3d,
+      lx: p.lightDir[0],
+      ly: p.lightDir[1],
+      lz: p.lightDir[2],
+      detail: p.detail ?? null,
+      w,
+      h,
+      docW,
+      docH,
+      tex: this.diffuseTex,
+    };
     if (!this.depth3d || this.depth3d.width !== w || this.depth3d.height !== h) {
       this.depth3d?.destroy();
       this.depth3d = this.device.createTexture({
@@ -314,6 +345,22 @@ export class PreviewRenderer {
     this.shapeCount = packed.count;
   }
 
+  // 3D-pass input signature — render3D skips when none of ITS inputs changed, so 2D-only work
+  // (pan/zoom, mode/opacity, overlays) never pays for the displaced-grid fold.
+  private last3d: {
+    packSeq: number;
+    orbit: Orbit;
+    lx: number;
+    ly: number;
+    lz: number;
+    detail: DetailField | null;
+    w: number;
+    h: number;
+    docW: number;
+    docH: number;
+    tex: GPUTexture;
+  } | null = null;
+
   private renderNow(docW: number, docH: number, p: PreviewParams): void {
     if (!this.diffuseTex) return;
     const probe = (globalThis as { __lambertPerf?: PerfProbe }).__lambertPerf;
@@ -325,6 +372,7 @@ export class PreviewRenderer {
     if (p.layers !== this.lastShapes2d || !this.recordsBuf) {
       this.packObjectBuffers(flattenLayers(p.layers));
       this.lastShapes2d = p.layers;
+      this.packSeq++;
       if (probe) packMs = performance.now() - t0;
     }
 
