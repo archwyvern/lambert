@@ -21,8 +21,8 @@ export { Pillow } from "./pillow";
 // Meshes — the free triangulated height field (per-vertex Z); flat primitives bake into it (convert.ts).
 export { Mesh } from "./mesh";
 
-// Effects — adjustment-layer prototypes (QC-REQ-5); region-scoped field contributions.
-export { Gradient } from "./gradient";
+// Effects — the Adjustment FILTER layer (region-scoped transforms of the accumulated field).
+export { Adjust } from "./adjust";
 
 // Palette presets (familiar tiles backed by the parameterized types) — side-effect registration.
 import "../presetDefs";

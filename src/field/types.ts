@@ -34,6 +34,18 @@ export interface ControlPointSpec {
   default: Vector2[];
 }
 
+/** One composable height transform hosted by an adjustment layer (see field/adjustments.ts). */
+export interface Adjustment {
+  id: string;
+  /** Kind id in ADJUSTMENT_KINDS ("add" | "multiply" | "clamp" | "curve" | "ramp" | ...). */
+  kind: string;
+  /** Blend 0..1: out = mix(H, f(H), strength) — the fold-opacity lerp model. */
+  strength: number;
+  params: Record<string, number>;
+  /** Absent = active; false = bypassed (kept but not applied). */
+  visible?: boolean;
+}
+
 /** A mesh-plane's topology: per-vertex height (index-aligned with controlPoints) + triangles. */
 export interface MeshData {
   /** Height in px at each vertex (scale.z multiplies, pos.z elevates — like every object). */
@@ -93,8 +105,12 @@ export interface ObjectInstance {
    *  into the accumulated surface and scales its mask influence (meaningful for carve/replace too). */
   opacity?: number;
   /** true = anti-aliased edge (box-filter coverage ramp on the NX mask); absent/false = HARD step at
-   *  sd < 0 — the default, matching crisp sprite silhouettes. */
+   *  sd < 0 — the default, matching crisp sprite silhouettes. (An adjustment layer's region edge
+   *  inherits this too.) */
   aa?: boolean;
+  /** Adjustment layers only (typeId ObjectTypeId.Adjust): the ordered transform list applied to the
+   *  height accumulated BELOW this layer, inside its region. */
+  adjustments?: Adjustment[];
   visible: boolean;
   locked: boolean;
 }

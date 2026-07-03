@@ -73,14 +73,17 @@ export function surfaceObjects(): ObjectInstance[] {
   plane.transform.pos = plane.transform.pos.withZ(8); // elevation (the low edge floats 8px) + tilt
   plane.params.tiltX = 0.6;
   plane.params.tiltY = -0.45;
-  // an angled Gradient effect region over the corner — parity for the region-normalised ramp
-  const grad = createObjectInstance(ObjectTypeId.Gradient, v2(70, 70));
-  grad.id = "fx-gradient";
-  grad.params.angle = 35;
-  grad.params.depth = 10;
-  grad.transform.rotation = 0.25;
-  grad.transform.scale = new Vector3(0.5, 0.4, 1);
-  return [plane, grad];
+  // an angled Adjustment region over the corner (ramp + clamp at half strength) — parity for the
+  // op == adjust fold branch: coverage gating, the region-normalised ramp, and the strength lerp
+  const adj = createObjectInstance(ObjectTypeId.Adjust, v2(70, 70));
+  adj.id = "fx-adjust";
+  adj.transform.rotation = 0.25;
+  adj.transform.scale = new Vector3(0.5, 0.4, 1);
+  adj.adjustments = [
+    { id: "a-ramp", kind: "ramp", strength: 1, params: { angle: 35, depth: 10 } },
+    { id: "a-clamp", kind: "clamp", strength: 0.5, params: { min: 2, max: 20 } },
+  ];
+  return [plane, adj];
 }
 
 /** One of each parametric primitive (cone/pyramid/torus/wedge/fillet) with scale + rotation,

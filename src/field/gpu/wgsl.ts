@@ -19,8 +19,8 @@ export const RECORD_SLOT = {
   CP_COUNT: 12, // control-point / anchor count
   PARAM0: 13, PARAM1: 14, PARAM2: 15, PARAM3: 16, PARAM4: 17, PARAM5: 18, PARAM6: 19, PARAM7: 20,
   ELEVATION: 21, // composed base elevation (post-extrude add)
-  TRI_START: 22, // mesh: first vec4 of this object's triangles
-  TRI_COUNT: 23, // mesh: triangle count
+  TRI_START: 22, // mesh: first vec4 of its triangles | adjust: first vec2 of its transform stream | middle-pillow: max soft distance
+  TRI_COUNT: 23, // mesh: triangle count | adjust: transform count
   MASK_START: 24, // first mask loop index
   MASK_COUNT: 25, // mask loop count
   CLOSED: 26, // analytic path is a closed loop
@@ -152,6 +152,37 @@ fn soft_ring_inv(p: vec2f, start: u32, count: u32) -> f32 {
 // The C-inf soft distance to one ring: (∮ ds/d⁴)^(-1/3).
 fn soft_ring_dist(p: vec2f, start: u32, count: u32) -> f32 {
   return pow(soft_ring_inv(p, start, count), -0.33333333);
+}
+
+// One adjustment-layer transform f(H). Kind indices MUST match ADJUSTMENT_KINDS in adjustments.ts
+// (add=0, multiply=1, clamp=2, curve=3, ramp=4) — pack.ts derives them via the array order. Params
+// arrive as two packed vec2s ((p0,p1), (p2,p3)); pl is the REGION-local point for positional kinds.
+fn adjust_apply(kind: u32, H: f32, a: vec2f, b: vec2f, pl: vec2f, base: u32) -> f32 {
+  switch kind {
+    case 0u: { return H + a.x; }             // add (raise / lower)
+    case 1u: { return H * a.x; }             // multiply
+    case 2u: { return clamp(H, a.x, a.y); }  // clamp
+    case 3u: {                                // curve: levels + gamma over [low, high]
+      let span = max(a.y - a.x, 1e-6);
+      let t = clamp((H - a.x) / span, 0.0, 1.0);
+      return a.x + span * pow(t, max(b.x, 1e-3));
+    }
+    default: {                                // ramp: 0 -> depth across the region along angle
+      let ang = a.x * 0.017453292519943295;
+      let dir = vec2f(cos(ang), sin(ang));
+      let cs = u32(rec(base, SLOT_CP_START));
+      let nB = u32(rec(base, SLOT_RING)); // outer ring only spans the ramp
+      var minP = 1e30;
+      var maxP = -1e30;
+      for (var i = 0u; i < nB; i = i + 1u) {
+        let t2 = dot(points[cs + i], dir);
+        minP = min(minP, t2);
+        maxP = max(maxP, t2);
+      }
+      let t = clamp((dot(pl, dir) - minP) / max(maxP - minP, 1e-6), 0.0, 1.0);
+      return H + a.y * t;
+    }
+  }
 }
 
 fn sd_segment(p: vec2f, a: vec2f, b: vec2f) -> f32 {
@@ -361,8 +392,20 @@ fn fold_at(p: vec2f, count: u32) -> vec2f {
     var inf = select(select(0.0, 1.0, sd < 0.0), influence(sd), aa) * alpha;
     inf = inf * mask_cover(base, p, pl);
     if (inf <= 0.0) { continue; }
-    let h = rec(base, SLOT_ELEVATION) + smp.x * rec(base, SLOT_TALLNESS); // elevation + extrude
     let op = u32(rec(base, SLOT_OP));
+    if (op == 3u) {
+      // adjustment layer: transform the ACCUMULATED height inside its region (coverage-gated
+      // blend, out = mix(H, f(H), strength * coverage)); no height or mask contribution of its own
+      let n = u32(rec(base, SLOT_TRI_COUNT));
+      var ai = u32(rec(base, SLOT_TRI_START));
+      for (var k = 0u; k < n; k = k + 1u) {
+        let head = points[ai];
+        bigH = mix(bigH, adjust_apply(u32(head.x), bigH, points[ai + 1u], points[ai + 2u], pl, base), head.y * inf);
+        ai = ai + 3u;
+      }
+      continue;
+    }
+    let h = rec(base, SLOT_ELEVATION) + smp.x * rec(base, SLOT_TALLNESS); // elevation + extrude
     // the FIRST object (a non-carve "max" object) to cover a pixel SETS the surface, so it can go below
     // the ground plane — negative Z is allowed. Later overlapping objects, and carve objects (which
     // subtract from the ground), always combine.

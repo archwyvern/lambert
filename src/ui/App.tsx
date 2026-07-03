@@ -4,6 +4,7 @@ import { decode, encode } from "fast-png";
 import { DocumentStore } from "../document/store";
 import { addInstance, duplicateObject, removeObject, reorderObject, updateObject } from "../document/docOps";
 import { createFromPreset } from "../field/presets";
+import { bakeRings, bezierAnchor } from "../field/bezier";
 import { addNode, cloneNode, findNode, ungroup, updateNode, wrapInGroup } from "../document/layerOps";
 import { flattenLayers } from "../field/flatten";
 import { isGroup, isObject, type LayerNode, type ObjectInstance } from "../field/types";
@@ -679,15 +680,22 @@ export function App(): React.JSX.Element {
   const resolvePaletteObject = (presetId: string, pos: Vector2): ObjectInstance => {
     const sp = workspaceRef.current?.config.presets?.find((x) => x.id === presetId);
     const o = sp ? instantiateSaved(sp, pos) : createFromPreset(presetId, pos);
-    // effect layers (Gradient) default to the FULL image bounds regardless of the drop point —
-    // an adjustment region, not a placed shape (QC-REQ-5)
-    if (o.typeId === ObjectTypeId.Gradient) {
+    // adjustment layers default to the FULL image bounds regardless of the drop point —
+    // a filter region over everything below, not a placed shape
+    if (o.typeId === ObjectTypeId.Adjust) {
       const doc = workspaceRef.current?.active?.store.state.doc;
       if (doc) {
         const hw = doc.source.width / 2;
         const hh = doc.source.height / 2;
         o.transform = { ...o.transform, pos: new Vector3(hw, hh, o.transform.pos.z) };
-        o.controlPoints = [v2(-hw, -hh), v2(hw, -hh), v2(hw, hh), v2(-hw, hh)];
+        const c = (x: number, y: number) => bezierAnchor(v2(x, y), v2(0, 0), v2(0, 0), "manual");
+        const box = [c(-hw, -hh), c(hw, -hh), c(hw, hh), c(-hw, hh)];
+        const baked = bakeRings(box, undefined);
+        o.bezier = box;
+        o.closed = true;
+        o.controlPoints = baked.controlPoints;
+        o.ringSplit = baked.ringSplit;
+        o.contourCounts = baked.contourCounts;
       }
     }
     return o;

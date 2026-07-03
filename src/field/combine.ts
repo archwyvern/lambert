@@ -1,9 +1,9 @@
 import { clamp } from "./vec";
 
-export type CombineOp = "max" | "carve" | "replace";
+export type CombineOp = "max" | "carve" | "replace" | "adjust";
 
 /** Fold-op index packed into the GPU record (must match `combine_height` in gpu/wgsl.ts). */
-export const COMBINE_OP_INDEX: Record<CombineOp, number> = { max: 0, carve: 1, replace: 2 };
+export const COMBINE_OP_INDEX: Record<CombineOp, number> = { max: 0, carve: 1, replace: 2, adjust: 3 };
 
 /**
  * Fold step. max = objects clip into each other like solids; carve subtracts; replace overwrites the
@@ -14,6 +14,7 @@ export const COMBINE_OP_INDEX: Record<CombineOp, number> = { max: 0, carve: 1, r
 export function combineHeight(op: CombineOp, H: number, h: number): number {
   if (op === "carve") return Math.min(H, H - h);
   if (op === "replace") return h;
+  if (op === "adjust") return H; // adjustment layers transform H in their own fold branch, not here
   return Math.max(H, h);
 }
 

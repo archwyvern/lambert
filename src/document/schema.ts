@@ -16,6 +16,16 @@ const bezierAnchorSchema = z.object({
   radius: z.number().optional(),
 });
 
+const adjustmentSchema = z.object({
+  id: z.string(),
+  kind: z.string(),
+  /** Blend 0..1: out = mix(H, f(H), strength). */
+  strength: z.number().min(0).max(1),
+  params: z.record(z.string(), z.number()),
+  /** Absent = active; false = bypassed. */
+  visible: z.boolean().optional(),
+});
+
 const maskSchema = z.object({
   id: z.string(),
   anchors: z.array(bezierAnchorSchema),
@@ -67,6 +77,8 @@ const objectSchema = z.object({
   opacity: z.number().min(0).max(1).optional(),
   /** true = anti-aliased edge; absent/false = hard step (the default — crisp sprite silhouettes). */
   aa: z.boolean().optional(),
+  /** Adjustment layers only: the ordered height-transform list (see field/adjustments.ts). */
+  adjustments: z.array(adjustmentSchema).optional(),
   visible: z.boolean(),
   locked: z.boolean(),
 });

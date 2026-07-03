@@ -6,6 +6,8 @@ import { getObjectType } from "../registry";
 import { affineApply, affineInvert } from "../affine";
 import { v2 } from "../vec";
 import { localBounds } from "../objectBounds";
+import { ADJUSTMENT_KINDS, adjustmentKindIndex } from "../adjustments";
+import type { Adjustment } from "../types";
 import { gpuTypeIndex, MAX_PARAMS, PARAMS_OFFSET, RECORD_F32, RECORD_SLOT } from "./wgsl";
 
 
@@ -36,7 +38,14 @@ export function packObjects(resolved: ResolvedObject[]): PackedObjects {
   // Bézier path is BAKED to a dense controlPoints polyline/polygon (the bezier stays as the edit source
   // but the field math walks the baked points). So: pack anchors only when there are no controlPoints.
   const analytic = (s: { bezier?: unknown[]; controlPoints: unknown[] }): boolean => !!s.bezier && s.controlPoints.length === 0;
-  const totalPoints = visible.reduce((n, { object: s }) => n + (analytic(s) ? s.bezier!.length * 4 : s.controlPoints.length), 0);
+  // adjustment layers append their transform stream to the points buffer: 3 vec2 per PACKABLE
+  // adjustment — (kind, strength) + (p0, p1) + (p2, p3)
+  const packableAdjustments = (s: { adjustments?: Adjustment[] }): Adjustment[] =>
+    (s.adjustments ?? []).filter((a) => a.visible !== false && adjustmentKindIndex(a.kind) >= 0);
+  const totalPoints = visible.reduce(
+    (n, { object: s }) => n + (analytic(s) ? s.bezier!.length * 4 : s.controlPoints.length) + packableAdjustments(s).length * 3,
+    0,
+  );
   const totalTris = visible.reduce((n, { object: s }) => n + (s.mesh?.tris.length ?? 0), 0);
   const records = new Float32Array(Math.max(visible.length, 1) * RECORD_F32);
   const points = new Float32Array(Math.max(totalPoints, 1) * 2);
@@ -168,6 +177,30 @@ export function packObjects(resolved: ResolvedObject[]): PackedObjects {
           meshTris[triVec4 * 4] = g[1]; // gradY in the next vec4's .x
           triVec4++;
         }
+      }
+    }
+    // adjustment layers: the ordered transform stream, appended to the points buffer after this
+    // object's control points. fold_at reads it via the mesh-only TRI_START/TRI_COUNT slots.
+    const adjs = packableAdjustments(s);
+    if (adjs.length > 0) {
+      records[base + RECORD_SLOT.TRI_START] = cpStart;
+      records[base + RECORD_SLOT.TRI_COUNT] = adjs.length;
+      for (const a of adjs) {
+        const kind = ADJUSTMENT_KINDS[adjustmentKindIndex(a.kind)]!;
+        const keys = Object.keys(kind.params);
+        const val = (i: number): number => {
+          const k = keys[i];
+          if (k === undefined) return 0;
+          const v = a.params[k];
+          return typeof v === "number" ? v : kind.params[k]!.default;
+        };
+        points[cpStart * 2] = adjustmentKindIndex(a.kind);
+        points[cpStart * 2 + 1] = Math.min(1, Math.max(0, a.strength));
+        points[cpStart * 2 + 2] = val(0);
+        points[cpStart * 2 + 3] = val(1);
+        points[cpStart * 2 + 4] = val(2);
+        points[cpStart * 2 + 5] = val(3);
+        cpStart += 3;
       }
     }
     type.pack?.(records, base, s); // type-specific encodings (see ObjectType.pack)
