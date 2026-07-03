@@ -44,10 +44,17 @@ Tools (Godot-style):
 | P | Mask pen | draw a trim mask on the selected object (see Masks) |
 | M | Measure | drag between two points: length, Δx/Δy, angle |
 
-View: wheel zooms, middle-drag or **hold Space + drag** pans, **V** cycles Diffuse/Normal/Lit,
-**X** swaps the 2D/3D views, Ctrl+0 fit, Ctrl+Shift+0 fit selection, Ctrl+1 100%. Arrows nudge
-(Shift ×10), Esc cancels a drag in progress (reverting it) or deselects. The `?  Shortcuts`
-pill (bottom-right) shows the full contextual list.
+View: wheel zooms, middle-drag or **hold Space + drag** pans, **V** cycles
+Diffuse/Normal/Lit/Coverage (coverage paints red wherever the diffuse is opaque but no shape has
+touched — the "what haven't I covered yet" audit), **X** swaps the 2D/3D views, Ctrl+0 fit,
+Ctrl+Shift+0 fit selection, Ctrl+1 100%. Past ~800% zoom a faint pixel grid fades in (View menu
+toggles it). In normal view, the encode is hidden where the diffuse is transparent by default —
+matching what the export ships; the checker-square toggle next to the opacity field shows the
+raw field instead. Arrows nudge (Shift ×10), Esc cancels a drag in progress (reverting it) or
+deselects. The `?  Shortcuts` pill (bottom-right) shows the full contextual list.
+
+Every menu action is a **command**: Ctrl+Shift+P opens the palette (fuzzy search, Enter runs),
+and Settings ▸ Application ▸ Shortcuts rebinds any of them (click a row, press the new chord).
 
 Edit: Ctrl+C/V copies objects (works across tabs), Ctrl+D duplicates, Ctrl+G groups,
 Ctrl+Shift+G ungroups, Delete removes. The **Arrange** menu aligns (left/center/right,
@@ -80,6 +87,22 @@ group.
 Groups nest, transform their children together, and can **mirror** (X / Y / quad) for symmetric
 detail. Group masks apply to all children. Rename anything with F2 or double-click in Layers.
 
+## Adjustment layers
+
+**Adjustment** (in the palette's Effects section) filters everything below it inside a region
+(full-canvas by default; reshape it with the vertex tool). It hosts an ordered list of height
+transforms — raise/lower, multiply, clamp, curve, ramp, and **Emboss/Detail**, which lifts
+surface detail out of the diffuse's own luminance (scrub `strength`; negative inverts to
+dark-high). Each entry has a blend slider and a bypass eye. See the
+[shape reference](shapes.md#adjustment-layers) for every kind.
+
+## Settings
+
+**Ctrl+,** opens Settings (searchable): **Project** holds the normal-channel directions (a
+visual ball editor, with rotation presets for engine conventions) and the default output
+format; **Document** can override both per-`.lmb`; **Application** holds editor preferences and
+the shortcut editor. Everything applies instantly — the canvas peeks around the modal.
+
 ## Presets
 
 Tuned an object you'll reuse? **Edit ▸ Save as Preset** stores it in the project; it appears in
@@ -88,14 +111,18 @@ Presets…** moves a preset library between projects as a JSON file.
 
 ## The 3D view
 
-The corner 3D panel shows the displaced height field with the same lighting as the lit view —
-swap it big with **X**. Right-drag orbits, left/middle-drag pans, wheel dollies. Use it to
-judge height *relationships*; the lit 2D view is ground truth for the final look (the game only
-ever sees the normal map).
+The corner 3D panel shows the displaced height field with the same lighting as the lit view.
+It is **off by default** (it is the most expensive view in the app) — click the pane to enable
+it, and the power button in its corner turns it back off. Swap it big with **X**. Right-drag
+orbits, left/middle-drag pans, wheel dollies. Use it to judge height *relationships*; the lit
+2D view is ground truth for the final look (the game only ever sees the normal map).
 
 ## Export
 
-**Ctrl+E** exports the active document's `.nx.png`; **Ctrl+Shift+E** exports every open saved
-document. The alpha channel is the authored mask — pixels your shapes never touched stay
-transparent so the engine keeps its baseline normals there. Normal channel directions
-(red/green orientation) are a *project* setting in the Inspector's Normal Directions section.
+**Ctrl+E** exports the active document's normal map; **Ctrl+Shift+E** exports every open saved
+document; **File ▸ Export Height Map** writes a 16-bit grayscale height PNG. The normal map's
+alpha channel is the authored mask — pixels your shapes never touched stay transparent so the
+engine keeps its baseline normals there. Normal channel directions (red/green orientation,
+plus rotation for engine conventions) and the output format (RGB/RGBA/RG/RGA channels, 8/16-bit
+depth, PNG / EXR / Radiance HDR) live in **Settings ▸ Project**, with per-document overrides in
+**Settings ▸ Document** — so exports are reproducible from the project files alone.
