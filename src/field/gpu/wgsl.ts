@@ -422,15 +422,19 @@ fn fold_at(p: vec2f, count: u32) -> vec2f {
     if (inf <= 0.0) { continue; }
     let op = u32(rec(base, SLOT_OP));
     if (op == 3u) {
-      // adjustment layer: transform the ACCUMULATED height inside its region (coverage-gated
-      // blend, out = mix(H, f(H), strength * coverage)); no height or mask contribution of its own
+      // Adjustment layer: transform the ACCUMULATED height inside its region (coverage-gated
+      // blend, out = mix(H, f(H), strength * coverage)). Mask coverage is written only where the
+      // surface actually CHANGED (0.05px ramp — ADJUST_MASK_EPS in evalCpu.ts), so an emboss
+      // shows in the normal view / NX alpha while a no-op transform stays un-authored.
       let n = u32(rec(base, SLOT_TRI_COUNT));
       var ai = u32(rec(base, SLOT_TRI_START));
+      let before = bigH;
       for (var k = 0u; k < n; k = k + 1u) {
         let head = points[ai];
         bigH = mix(bigH, adjust_apply(u32(head.x), bigH, points[ai + 1u], points[ai + 2u], pl, p, base), head.y * inf);
         ai = ai + 3u;
       }
+      bigM = max(bigM, inf * min(1.0, abs(bigH - before) / 0.05));
       continue;
     }
     let h = rec(base, SLOT_ELEVATION) + smp.x * rec(base, SLOT_TALLNESS); // elevation + extrude

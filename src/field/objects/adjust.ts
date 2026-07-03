@@ -14,8 +14,9 @@ import { v2 } from "../vec";
  * out = mix(H, f(H), strength). The region edge honors the object's `aa` flag (hard by default).
  *
  * eval returns (0, region sd): the fold's op == adjust branch consumes ONLY the sd (coverage) and
- * applies the adjustment list to the accumulated H — it never contributes height or mask itself
- * (adjusting bare ground would push normals outside the authored mask).
+ * applies the adjustment list to the accumulated H. It contributes mask coverage exactly where it
+ * CHANGES the surface (delta-gated) — an emboss registers in the normal view and the NX alpha,
+ * while a no-op transform over bare ground never un-gates the override.
  */
 export function adjustEval(p: Vector2, object: ObjectInstance): FieldSample {
   const cps = object.controlPoints;

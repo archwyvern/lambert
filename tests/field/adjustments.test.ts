@@ -45,7 +45,7 @@ test("ramp: 0 -> depth across the region along the angle, region-local", () => {
 
 test("fold integration: an adjustment layer transforms the surface below, inside its region only", () => {
   // a flat 24-tall plateau across the canvas, then an Adjust layer (add +10, half-strength) over
-  // the left half. Right half untouched; outside the plateau the ground stays 0 (no mask added).
+  // the left half. Right half untouched; mask coverage appears exactly where the surface CHANGED.
   const slab = createObjectInstance(ObjectTypeId.Plateau, v2(32, 16));
   slab.controlPoints = [v2(-30, -14), v2(30, -14), v2(30, 14), v2(-30, 14), v2(-30, -14), v2(30, -14), v2(30, 14), v2(-30, 14)];
   slab.ringSplit = 4;
@@ -58,6 +58,11 @@ test("fold integration: an adjustment layer transforms the surface below, inside
   expect(at(16, 16)).toBeCloseTo(29, 4); // 24 + 10*0.5 inside the region
   expect(at(48, 16)).toBeCloseTo(24, 4); // right half: untouched
   const mask = (x: number, y: number): number => field.mask[y * 64 + x]!;
-  expect(mask(16, 0)).toBe(0); // region over bare ground adds NO mask
-  expect(at(16, 0)).toBeCloseTo(5, 4); // but the ground height inside the region is raised (10*0.5)
+  expect(at(16, 0)).toBeCloseTo(5, 4); // ground inside the region is raised (10*0.5)...
+  expect(mask(16, 0)).toBe(1); // ...and that CHANGE authors the mask (visible in normal view / NX alpha)
+  expect(mask(48, 0)).toBe(0); // outside the region: untouched ground stays un-authored
+  // a NO-OP adjustment (clamp that binds nothing) authors NOTHING even inside its region
+  adj.adjustments = [{ ...createAdjustment("clamp"), params: { min: -100, max: 100 } }];
+  const noop = evaluateField(resolveObjects([slab, adj]), 64, 32);
+  expect(noop.mask[0 * 64 + 16]!).toBe(0);
 });
