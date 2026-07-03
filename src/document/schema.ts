@@ -88,10 +88,13 @@ const groupLayerSchema: z.ZodType = z.lazy(() =>
 );
 const layerNodeSchema: z.ZodType = z.lazy(() => z.union([groupLayerSchema, objectSchema]));
 
-/** Which way the encoded channels point. Default: red right, green up. */
+/** Which way the encoded channels point. Default: red right, green up.
+ *  `rotation` (degrees, default 0) additionally rotates the encoded XY frame counter-clockwise on
+ *  screen — for consumers that rotate the artwork itself (e.g. skyrat sprites authored -90°). */
 export interface NormalDirs {
   red: "right" | "left";
   green: "up" | "down";
+  rotation?: number;
 }
 
 export const DEFAULT_NORMAL_DIRS: NormalDirs = { red: "right", green: "up" };
@@ -101,10 +104,30 @@ export function normalSigns(dirs: NormalDirs): { red: number; green: number } {
   return { red: dirs.red === "left" ? -1 : 1, green: dirs.green === "up" ? -1 : 1 };
 }
 
+/** The full XY encode transform for image-space (y-down) normals: rotation then channel signs.
+ *  encodedX = xx·nx + xy·ny, encodedY = yx·nx + yy·ny (both then mapped 0.5 + v/2). Positive
+ *  rotation turns the encoded frame counter-clockwise on screen — verify on the reference ball. */
+export interface NormalXform {
+  xx: number;
+  xy: number;
+  yx: number;
+  yy: number;
+}
+
+export function normalXform(dirs: NormalDirs): NormalXform {
+  const s = normalSigns(dirs);
+  const t = ((dirs.rotation ?? 0) * Math.PI) / 180;
+  const c = Math.cos(t);
+  const sn = Math.sin(t);
+  return { xx: s.red * c, xy: -s.red * sn, yx: s.green * sn, yy: s.green * c };
+}
+
 const normalDirsSchema = z
   .object({
     red: z.enum(["right", "left"]).default("right"),
     green: z.enum(["up", "down"]).default("up"),
+    /** Degrees, absent = 0 — kept optional so untouched configs don't gain a field. */
+    rotation: z.number().optional(),
   })
   // factory, not the shared constant: a plain `.default(DEFAULT_NORMAL_DIRS)` hands every default-parse
   // the SAME object, so one in-place mutation would poison the module constant for all later parses
@@ -114,6 +137,7 @@ const normalDirsSchema = z
 const normalDirsOverrideSchema = z.object({
   red: z.enum(["right", "left"]),
   green: z.enum(["up", "down"]),
+  rotation: z.number().optional(),
 });
 
 // --- NX output format (project-wide, per-document overridable) ---

@@ -1,5 +1,5 @@
 import { encode } from "fast-png";
-import { DEFAULT_OUTPUT, NormalDirs, normalSigns, OutputSettings } from "../document/schema";
+import { DEFAULT_OUTPUT, NormalDirs, normalXform, OutputSettings } from "../document/schema";
 import { encodeExr, type ExrChannel } from "./exr";
 import { encodeRadianceHdr } from "./hdr";
 import { q16, q8 } from "./normalmap";
@@ -14,14 +14,16 @@ function nxPlanes(
   dirs: NormalDirs,
   opaque?: Uint8Array | null,
 ): { r: Float64Array; g: Float64Array; b: Float64Array; a: Float64Array } {
-  const s = normalSigns(dirs);
+  const m = normalXform(dirs); // channel signs + the encoded-frame rotation
   const r = new Float64Array(n);
   const g = new Float64Array(n);
   const b = new Float64Array(n);
   const a = new Float64Array(n);
   for (let i = 0; i < n; i++) {
-    r[i] = 0.5 + (s.red * normals[i * 3]!) / 2;
-    g[i] = 0.5 + (s.green * normals[i * 3 + 1]!) / 2;
+    const nx = normals[i * 3]!;
+    const ny = normals[i * 3 + 1]!;
+    r[i] = 0.5 + (m.xx * nx + m.xy * ny) / 2;
+    g[i] = 0.5 + (m.yx * nx + m.yy * ny) / 2;
     b[i] = normals[i * 3 + 2]!; // NX contract: blue is FULL-range z
     // the override only applies where the diffuse has a pixel (A > 0) — clear the mask elsewhere
     a[i] = opaque && opaque[i] === 0 ? 0 : mask[i]!;

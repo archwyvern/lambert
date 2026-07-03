@@ -24,8 +24,8 @@ export interface PreviewParams {
   lightDir: [number, number, number];
   /** Lit-mode light intensity multiplier (1 = default). */
   lightEnergy: number;
-  /** Project channel signs for the normal-view encode (normalSigns(doc.normalDirs)). */
-  normalSigns: { red: number; green: number };
+  /** The XY encode transform for the normal view (normalXform of the effective dirs). */
+  normalXform: { xx: number; xy: number; yx: number; yy: number };
   /** Orbit camera for the attached 3D inspection canvas; null/undefined skips the pass. */
   orbit3d?: Orbit | null;
 }
@@ -333,9 +333,11 @@ export class PreviewRenderer {
     f[8] = p.lightDir[0];
     f[9] = p.lightDir[1];
     f[10] = p.lightDir[2];
-    f[11] = p.normalSigns.red;
-    f[12] = p.normalSigns.green;
-    f[13] = p.lightEnergy;
+    f[11] = p.normalXform.xx;
+    f[12] = p.normalXform.xy;
+    f[13] = p.normalXform.yx;
+    f[14] = p.normalXform.yy;
+    f[15] = p.lightEnergy;
     this.device.queue.writeBuffer(this.uniforms, 0, ub);
 
     const bind = this.device.createBindGroup({

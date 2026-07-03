@@ -176,6 +176,26 @@ test("nx hdr: RGBE round-trips within mantissa precision; non-rgb layouts are re
   expect(() => encodeNx(normals, new Float32Array(w).fill(1), w, 1, DIRS, null, out({ format: "hdr", channels: "rgba" }))).toThrow(/RGB/);
 });
 
+test("normal rotation: ±90° swap the tilt between channels (encoded frame rotates on screen)", () => {
+  const right = new Float32Array([Math.SQRT1_2, 0, Math.SQRT1_2]); // right-tilted normal
+  // -90° (clockwise): the right-tilt reads as a downward-tilt — bright green under green-DOWN sense…
+  // with green-up it lands bright: g = 0.5 + nx/2
+  const cw = decode(encodeNx(right, new Float32Array([1]), 1, 1, { ...DIRS, rotation: -90 }, null, out({ depth: 8 })));
+  expect(cw.data[0]).toBe(128); // red neutral
+  expect(cw.data[1]! / 255).toBeCloseTo(0.5 + Math.SQRT1_2 / 2, 1);
+  // +90° (counter-clockwise): the same tilt lands dark green
+  const ccw = decode(encodeNx(right, new Float32Array([1]), 1, 1, { ...DIRS, rotation: 90 }, null, out({ depth: 8 })));
+  expect(ccw.data[0]).toBe(128);
+  expect(ccw.data[1]! / 255).toBeCloseTo(0.5 - Math.SQRT1_2 / 2, 1);
+  // 180° flips red
+  const flip = decode(encodeNx(right, new Float32Array([1]), 1, 1, { ...DIRS, rotation: 180 }, null, out({ depth: 8 })));
+  expect(flip.data[0]! / 255).toBeCloseTo(0.5 - Math.SQRT1_2 / 2, 1);
+  // rotation 0 (and absent) match byte-for-byte
+  const zero = encodeNx(right, new Float32Array([1]), 1, 1, { ...DIRS, rotation: 0 }, null, out({}));
+  const absent = encodeNx(right, new Float32Array([1]), 1, 1, DIRS, null, out({}));
+  expect(zero).toEqual(absent);
+});
+
 test("toRgbe: zero maps to zero; values round-trip within 1/256", () => {
   expect(toRgbe(0, 0, 0)).toEqual([0, 0, 0, 0]);
   for (const v of [0.001, 0.25, 0.5, 0.7071, 0.9999, 1]) {

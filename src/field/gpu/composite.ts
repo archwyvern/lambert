@@ -29,8 +29,10 @@ struct CompositeUniforms {
   lightX: f32,
   lightY: f32,
   lightZ: f32,
-  redSign: f32,       // project normal-direction signs for the normal view encode
-  greenSign: f32,
+  nXX: f32,           // normal-direction encode transform (channel signs + frame rotation):
+  nXY: f32,           //   encodedX = nXX*nx + nXY*ny, encodedY = nYX*nx + nYY*ny
+  nYX: f32,
+  nYY: f32,
   lightEnergy: f32,   // lit mode: scales the diffuse light term (1 = default; >1 brightens)
 }
 
@@ -75,7 +77,11 @@ fn fs(@builtin(position) fragPos: vec4f) -> @location(0) vec4f {
   let n = vec3f(-dHdx * inv, -dHdy * inv, inv);
   if (cu.mode == 1u) {
     // normal view: the height-derived NX encoded over the sprite
-    let enc = vec3f(0.5 + n.x * cu.redSign * 0.5, 0.5 + n.y * cu.greenSign * 0.5, 0.5 + n.z * 0.5);
+    let enc = vec3f(
+      0.5 + (cu.nXX * n.x + cu.nXY * n.y) * 0.5,
+      0.5 + (cu.nYX * n.x + cu.nYY * n.y) * 0.5,
+      0.5 + n.z * 0.5,
+    );
     return vec4f(mix(base, enc, mask * cu.opacity), 1.0);
   }
   // lit: light only the diffuse itself, gated by its alpha. Transparent pixels (alpha 0) keep the white
