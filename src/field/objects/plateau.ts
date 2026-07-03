@@ -13,8 +13,8 @@ import { clamp, v2 } from "../vec";
  * the same anchor count), and each side lofts as a flat trapezoid, height ramping 0 (base) -> 1 (top)
  * shaped by `profile`. Seams fall on the natural corner edges, not the polygon's medial axis. A single
  * top vertex fans to an apex (a pyramid); the distance ramp is only the fallback for points no slope
- * triangle covers. (Plateau and Pyramid are palette presets; Mesa shares this eval/WGSL,
- * lofting two baked Bézier rings.)
+ * triangle covers. (Plateau and Pyramid are palette presets. Mesa used to share this loft but now
+ * blends soft ring distances instead — see plateauVector.ts.)
  */
 
 /** Barycentric height inside triangle abc (corner heights ha/hb/hc); null if p is outside it.
@@ -54,7 +54,7 @@ export function plateauEval(p: Vector2, object: ObjectInstance): FieldSample {
   return { height: h * applyProfile(profile, t, 1), sd: sdB };
 }
 
-/** The shared WGSL body under `fn`. params: 13=profile; cps: base ring (nB = rec(2)) then top rim.
+/** The Plateau WGSL body under `fn`. params: 13=profile; cps: base ring (nB = rec(2)) then top rim.
  *  Mirrors plateauEval: walk the paired strip, barycentric height per triangle, distance-ramp fallback. */
 export function plateauWgsl(fn: string): string {
   return /* wgsl */ `

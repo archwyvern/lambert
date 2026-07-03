@@ -1,5 +1,5 @@
 import { Vector2 } from "@carapace/primitives";
-import { bakeRings, bakeRingsUniform, bezierAnchor } from "./bezier";
+import { bakeRings, bezierAnchor } from "./bezier";
 import { frustumStrip } from "./controlPoints";
 import { meshEdges } from "./meshOps";
 import { ObjectTypeId } from "./registry";
@@ -83,7 +83,7 @@ export function convertToVector(object: ObjectInstance): ObjectInstance | null {
       const top = object.controlPoints.slice(nB).map(corner);
       const bezier = [...base, ...top];
       const subpathStarts = [0, base.length];
-      const r = bakeRingsUniform(bezier, subpathStarts); // equal dense counts -> clean paired loft (no fan)
+      const r = bakeRings(bezier, subpathStarts); // Mesa's soft-distance slope needs no ring pairing
       return {
         ...common,
         typeId: ObjectTypeId.PlateauVector,
