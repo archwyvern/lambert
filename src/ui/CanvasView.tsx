@@ -119,11 +119,13 @@ export function CanvasView(props: {
   rulers: boolean;
   /** Pixel grid overlay at high zoom (View > Pixel Grid). */
   pixelGrid: boolean;
+  /** Normal view: hide the encode where the diffuse is transparent (matches the export). */
+  normalAlphaGate: boolean;
 }): React.JSX.Element {
   const { store, state, view, tool, diffuseBytes, selVerts, setSelVerts, onLightChange, onEnergyChange, canvas3dRef, orbit3d, normalDirs, swapped } =
     props;
   const { tabId, savedViewport, onViewportChange, setTool, snap, rulers, resolvePaletteObject, maskFocus } = props;
-  const { overridesNormalDirs, openSettings, pixelGrid } = props;
+  const { overridesNormalDirs, openSettings, pixelGrid, normalAlphaGate } = props;
   const inset = rulers ? RULER : 0;
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -286,6 +288,7 @@ export function CanvasView(props: {
       normalXform: normalXform(normalDirs),
       orbit3d,
       detail,
+      normalAlphaGate,
     });
   });
 

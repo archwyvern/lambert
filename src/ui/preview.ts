@@ -32,6 +32,9 @@ export interface PreviewParams {
   orbit3d?: Orbit | null;
   /** The Emboss/Detail bands for this doc (null when no detail adjustment exists). */
   detail?: DetailField | null;
+  /** Normal view: hide the encode where the diffuse is fully transparent (matches the export's
+   *  alpha gate). Default on. */
+  normalAlphaGate?: boolean;
 }
 
 /** Owns the WebGPU canvas: the analytic 2D composite + the 3D inspection pass (both evaluate the
@@ -332,7 +335,7 @@ export class PreviewRenderer {
     f[0] = p.viewport.zoom * dpr;
     f[1] = p.viewport.panX * dpr;
     f[2] = p.viewport.panY * dpr;
-    u[3] = MODE_INDEX[p.mode];
+    u[3] = MODE_INDEX[p.mode] | (p.normalAlphaGate !== false ? 8 : 0); // bit 3 = normal-view alpha gate
     f[4] = docW;
     f[5] = docH;
     f[6] = p.opacity;

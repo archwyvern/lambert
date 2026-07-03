@@ -119,10 +119,11 @@ export function detailDiffuse(): { data: Uint8Array; width: number; height: numb
       const dy = y - 30;
       if (dx * dx + dy * dy < 400) v += 80; // a large blob
       const i = (y * w + x) * 4;
+      const transparent = x + y > 150; // a cut corner: exercises the opaque gating (chain + views)
       data[i] = Math.min(255, v);
       data[i + 1] = Math.min(255, v);
       data[i + 2] = Math.min(255, v);
-      data[i + 3] = 255;
+      data[i + 3] = transparent ? 0 : 255;
     }
   }
   return { data, width: w, height: h, channels: 4 };

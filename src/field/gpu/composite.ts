@@ -21,7 +21,7 @@ struct CompositeUniforms {
   zoom: f32,
   panX: f32,
   panY: f32,
-  mode: u32,          // 0 diffuse, 1 normal, 2 lit, 3 coverage (red = opaque diffuse, no mask)
+  mode: u32,          // bits 0-2: 0 diffuse, 1 normal, 2 lit, 3 coverage; bit 3: normal-view alpha gate
   canvasW: f32,
   canvasH: f32,
   opacity: f32,       // overlay opacity for the normal mode (1 = pure overlay)
@@ -60,10 +60,11 @@ fn fs(@builtin(position) fragPos: vec4f) -> @location(0) vec4f {
   if (p.x < 0.0 || p.y < 0.0 || p.x >= cu.canvasW || p.y >= cu.canvasH) {
     return vec4f(0.024, 0.024, 0.047, 1.0); // outside doc: viewport background (#06060c)
   }
+  let mode = cu.mode & 7u;
   let diffuse = textureLoad(diffuseTex, vec2i(p), 0);
   // composite over white using the diffuse's straight (un-premultiplied) alpha.
   let base = mix(vec3f(1.0, 1.0, 1.0), diffuse.rgb, diffuse.a);
-  if (cu.mode == 0u) { return vec4f(base, 1.0); }
+  if (mode == 0u) { return vec4f(base, 1.0); }
   // Always the exported (raster) look: snap to the doc pixel centre + gradient at 1 doc px, so the
   // preview matches the pixelated NX bake exactly — there is no crisp "vector" mode that could mislead.
   let pe = floor(p) + vec2f(0.5, 0.5);
@@ -75,20 +76,23 @@ fn fs(@builtin(position) fragPos: vec4f) -> @location(0) vec4f {
   let dHdy = minmod(fold_at(pe + vec2f(0.0, e), cu.shapeCount).x - hc, hc - fold_at(pe - vec2f(0.0, e), cu.shapeCount).x) / e;
   let inv = inverseSqrt(dHdx * dHdx + dHdy * dHdy + 1.0);
   let n = vec3f(-dHdx * inv, -dHdy * inv, inv);
-  if (cu.mode == 3u) {
+  if (mode == 3u) {
     // coverage audit: solid red wherever the diffuse is OPAQUE but the authored mask is 0 —
     // "what haven't I covered yet". Covered/transparent pixels show the plain diffuse for context.
     let uncovered = diffuse.a > 0.0 && mask <= 0.0;
     return select(vec4f(base, 1.0), vec4f(0.85, 0.11, 0.11, 1.0), uncovered);
   }
-  if (cu.mode == 1u) {
-    // normal view: the height-derived NX encoded over the sprite
+  if (mode == 1u) {
+    // normal view: the height-derived NX encoded over the sprite. The alpha gate (mode bit 3,
+    // on by default) hides the encode where the diffuse is fully transparent — matching the
+    // export, whose NX alpha is cleared wherever the diffuse has no pixel (see exporters/nx.ts).
+    let gated = (cu.mode & 8u) != 0u && diffuse.a <= 0.0;
     let enc = vec3f(
       0.5 + (cu.nXX * n.x + cu.nXY * n.y) * 0.5,
       0.5 + (cu.nYX * n.x + cu.nYY * n.y) * 0.5,
       0.5 + n.z * 0.5,
     );
-    return vec4f(mix(base, enc, mask * cu.opacity), 1.0);
+    return vec4f(mix(base, enc, mask * cu.opacity * select(1.0, 0.0, gated)), 1.0);
   }
   // lit: light only the diffuse itself, gated by its alpha. Transparent pixels (alpha 0) keep the white
   // backdrop and are never touched by the light, no matter what object/normal sits under them — in 2D the
