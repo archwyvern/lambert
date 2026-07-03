@@ -67,7 +67,7 @@ export function AdjustmentList(props: {
                   />
                 </div>
                 <div className="grid grid-cols-[5.5rem_1fr] items-center gap-x-2 gap-y-1">
-                  <span className="text-sm text-fg-mid">strength</span>
+                  <span className="text-sm text-fg-mid">blend</span>
                   <SpinSlider
                     value={Math.round(a.strength * 100)}
                     min={0}

@@ -99,7 +99,7 @@ export function detailObjects(): ObjectInstance[] {
   adj.transform.rotation = 0.15; // off the sample grid (knife-edge rims flip sides under f32)
   adj.transform.scale = new Vector3(0.9, 0.85, 1);
   adj.adjustments = [
-    { id: "d-detail", kind: "detail", strength: 0.8, params: { amount: 6, fine: 1, medium: 0.5, large: 0.25 } },
+    { id: "d-detail", kind: "detail", strength: 0.8, params: { radius: 1, strength: 4, blur: 1, tolerance: 0.05 } },
   ];
   return [slab, adj];
 }

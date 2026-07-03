@@ -133,9 +133,10 @@ export async function saveTab(host: Host, tab: Tab, projectPath: string): Promis
 export async function exportDocNx(host: Host, doc: LambertDoc, label: string, config: ProjectConfig, outPath: string): Promise<string> {
   const { gpuExportRender } = await import("../ui/exportRender");
   const bytes = await resolveDiffuse(host, doc.source.uri);
-  const { layersUseDetail } = await import("../field/adjustments");
+  const { detailChainParams } = await import("../field/adjustments");
   const { detailFieldForDiffuse } = await import("../field/detail");
-  const detail = layersUseDetail(doc.layers) ? detailFieldForDiffuse(bytes) : null;
+  const chain = detailChainParams(doc.layers);
+  const detail = chain ? detailFieldForDiffuse(bytes, chain) : null;
   const render = await gpuExportRender(doc, detail);
   const diffuse = decode(bytes);
   // Re-validate dims before the alpha gate: if the diffuse changed size since the doc was opened, its
@@ -164,9 +165,10 @@ export async function exportTabHeightmap(host: Host, tab: Tab, outPath: string):
   if (!tab.docPath) throw new Error("Save the document before exporting its height map");
   const { gpuExportRender } = await import("../ui/exportRender");
   const doc = tab.store.state.doc;
-  const { layersUseDetail } = await import("../field/adjustments");
+  const { detailChainParams } = await import("../field/adjustments");
   const { detailFieldForDiffuse } = await import("../field/detail");
-  const detail = layersUseDetail(doc.layers) ? detailFieldForDiffuse(tab.diffuse.bytes) : null;
+  const chain = detailChainParams(doc.layers);
+  const detail = chain ? detailFieldForDiffuse(tab.diffuse.bytes, chain) : null;
   const render = await gpuExportRender(doc, detail);
   const { encodeHeightmapPng } = await import("../exporters/heightmap");
   await host.writeFile(outPath, encodeHeightmapPng(render));

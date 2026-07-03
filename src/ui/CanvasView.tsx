@@ -13,8 +13,8 @@ import { getObjectType, ObjectTypeId } from "../field/registry";
 import { editSnap } from "./snapPoint";
 import { fromLocal, toLocal } from "../field/transform";
 import type { ObjectInstance } from "../field/types";
-import { layersUseDetail } from "../field/adjustments";
-import { detailFieldForDiffuse } from "../field/detail";
+import { detailChainParams } from "../field/adjustments";
+import { detailFieldForDiffuse, detailParamsKey } from "../field/detail";
 import { normalXform, type NormalDirs } from "../document/schema";
 import { NormalSphere } from "./NormalDirsEditor";
 import { Vector2, Vector3 } from "@carapace/primitives";
@@ -262,12 +262,15 @@ export function CanvasView(props: {
     }
   }, [ready, diffuseBytes, doc.source.width, doc.source.height]);
 
-  // Emboss/Detail bands: computed once per diffuse (parameter-free chain, cached on the byte
-  // buffer) — only when the doc actually hosts a detail adjustment
+  // Emboss/Detail field: recomputed only when a CHAIN param (radius/blur/tolerance) or the diffuse
+  // changes — strength scrubs are fold constants and stay free. Cached per diffuse + param key.
+  const chainParams = detailChainParams(doc.layers);
+  const chainKey = chainParams ? detailParamsKey(chainParams) : null;
   const detail = useMemo(() => {
-    if (!diffuseBytes || !layersUseDetail(doc.layers)) return null;
-    return detailFieldForDiffuse(diffuseBytes);
-  }, [diffuseBytes, doc.layers]);
+    if (!diffuseBytes || !chainKey) return null;
+    return detailFieldForDiffuse(diffuseBytes, chainParams!);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [diffuseBytes, chainKey]);
 
   // render on any relevant change (rAF-coalesced inside the renderer)
   useEffect(() => {

@@ -95,19 +95,19 @@ export const ADJUSTMENT_KINDS: AdjustmentKindDef[] = [
   {
     id: "detail",
     name: "Emboss / Detail",
-    // Diffuse-luminance surface detail (the skyrat "Gradient" sense): adds the precomputed
-    // multi-band detail field (field/detail.ts), weighted per band. amount is the height amplitude
-    // in px — NEGATIVE inverts (dark-high instead of bright-high).
+    // The skyrat Gradient stage, exactly (field/detail.ts): tolerance-gated Sobel of the diffuse
+    // grayscale, blurred, integrated to height. radius/blur/tolerance are CHAIN params (the
+    // precompute re-runs when they change); strength is a fold constant (default 0.25 = skyrat's
+    // detailStrength) — NEGATIVE inverts (dark-high instead of bright-high).
     params: {
-      amount: { default: 6, float: true },
-      fine: { default: 1, min: 0, float: true },
-      medium: { default: 0.4, min: 0, float: true },
-      large: { default: 0.15, min: 0, float: true },
+      radius: { default: 1, min: 1, max: 8 },
+      strength: { default: 0.25, float: true },
+      blur: { default: 1, min: 0, max: 10, float: true },
+      tolerance: { default: 0.3, min: 0, max: 1, float: true },
     },
     apply: (H, p, _pl, pw, _region, ctx) => {
       if (!ctx.sampleDetail) return H;
-      const [f, m, l] = ctx.sampleDetail(pw);
-      return H + p("amount") * (f * p("fine") + m * p("medium") + l * p("large"));
+      return H + p("strength") * ctx.sampleDetail(pw)[0];
     },
   },
 ];
@@ -164,16 +164,23 @@ export function applyAdjustments(
   return out;
 }
 
-/** Whether any (visible) adjustment layer in the tree hosts a "detail" adjustment — gates the
- *  detail-field precompute (the chain is skipped entirely for docs that never use it). */
-export function layersUseDetail(layers: import("./types").LayerNode[]): boolean {
+/** The chain params of the FIRST active "detail" adjustment in the tree, or null when none —
+ *  gates the precompute AND keys its cache. One Emboss chain per document (matching skyrat,
+ *  where it is a whole-image pass); additional detail entries reuse the same field. */
+export function detailChainParams(layers: import("./types").LayerNode[]): import("./detail").DetailParams | null {
   for (const n of layers) {
     if ("children" in n && Array.isArray(n.children)) {
       if (!n.visible) continue;
-      if (layersUseDetail(n.children)) return true;
+      const hit = detailChainParams(n.children);
+      if (hit) return hit;
     } else if ("adjustments" in n && n.visible) {
-      if (n.adjustments?.some((a) => a.kind === "detail" && a.visible !== false)) return true;
+      const a = n.adjustments?.find((x) => x.kind === "detail" && x.visible !== false);
+      if (a) {
+        const kind = byId.get("detail")!;
+        const p = (key: string): number => (typeof a.params[key] === "number" ? a.params[key]! : kind.params[key]!.default);
+        return { radius: p("radius"), blur: p("blur"), tolerance: p("tolerance") };
+      }
     }
   }
-  return false;
+  return null;
 }
