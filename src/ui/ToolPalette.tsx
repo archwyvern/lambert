@@ -2,10 +2,10 @@ import {
   ArrowExpandRegular,
   ArrowMoveRegular,
   ArrowRotateClockwiseRegular,
-  BezierCurveSquareRegular,
   CursorRegular,
   PenRegular,
   RulerRegular,
+  SquareHintRegular,
 } from "@fluentui/react-icons";
 import { IconButton } from "@carapace/shell";
 import type { ToolMode } from "./tools";
@@ -17,7 +17,9 @@ const TOOLS: Array<{ id: ToolMode; key: string; label: string; Icon: typeof Curs
   { id: "move", key: "W", label: "Move", Icon: ArrowMoveRegular },
   { id: "rotate", key: "E", label: "Rotate", Icon: ArrowRotateClockwiseRegular },
   { id: "scale", key: "R", label: "Scale", Icon: ArrowExpandRegular },
-  { id: "vertex", key: "T", label: "Edit Vertices", Icon: BezierCurveSquareRegular },
+  // SquareHint = a box drawn as its four corner nodes — reads as "edit the vertices", where the
+  // old bezier-curve glyph read as a hill
+  { id: "vertex", key: "T", label: "Edit Vertices", Icon: SquareHintRegular },
   { id: "pen", key: "P", label: "Mask Pen", Icon: PenRegular },
   { id: "measure", key: "M", label: "Measure", Icon: RulerRegular },
 ];
@@ -25,7 +27,7 @@ const TOOLS: Array<{ id: ToolMode; key: string; label: string; Icon: typeof Curs
 export function ToolPalette(props: { tool: ToolMode; setTool: (t: ToolMode) => void }): React.JSX.Element {
   const { tool, setTool } = props;
   return (
-    <div className="shrink-0 bg-bg p-2">
+    <div className="shrink-0 border-l border-border bg-bg p-2">
       <div className="grid grid-cols-1 gap-1">
         {TOOLS.map(({ id, key, label, Icon }) => (
           <IconButton

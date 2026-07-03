@@ -7,7 +7,7 @@ import { affineApply } from "../field/affine";
 
 import { insertVertex } from "../field/controlPoints";
 import { bakeRings, bezierAnchor, BezierAnchor, bezierSpine, insertOnPath, nearestOnPath, resolvePath, splitSubpaths } from "../field/bezier";
-import { applyBezierEdit, dragHandle, isCornerAnchor as isCorner, movePoint, toggleMode } from "../field/bezierEdit";
+import { applyBezierEdit, dragHandle, isCornerAnchor as isCorner, movePoint } from "../field/bezierEdit";
 import {
   alignVertToPlane,
   connectVerts,
@@ -440,23 +440,34 @@ function GizmosInner(props: {
   const commitBezier = (next: BezierAnchor[], coalesce: string, starts?: { subpathStarts: number[] | undefined }): void => {
     store.update((d) => updateObject(d, object.id, (sh) => applyBezierEdit(sh, next, starts)), { coalesce });
   };
-  // toggle smooth<->corner: going manual bakes the current resolved tangents (no visual jump);
-  // going smooth clears them so resolveHandles takes over again
-  const toggleAnchorMode = (i: number): void => {
-    commitBezier(toggleMode(object.bezier!, i), `mode:${object.id}`);
-    store.endGesture();
-  };
-  const toggleAnchorSym = (i: number): void => {
-    commitBezier(object.bezier!.map((a, idx) => (idx === i ? { ...a, sym: a.sym === false } : a)), `sym:${object.id}`);
-    store.endGesture();
-  };
-  const deleteAnchor = (i: number): void => {
-    const b = object.bezier!;
-    if (b.length <= 2) return; // a cable needs >= 2 anchors
+  // The clicked anchor decides the target state; every anchor in `targets` gets it (the menu's
+  // keep-membership rule: right-clicking a member acts on the whole selection, like drags).
+  const setAnchorsMode = (targets: number[], toCorner: boolean): void => {
     commitBezier(
-      b.filter((_, idx) => idx !== i),
+      object.bezier!.map((a, idx) =>
+        targets.includes(idx) && isCorner(a) !== toCorner
+          ? { ...a, hIn: v2(0, 0), hOut: v2(0, 0), mode: toCorner ? ("manual" as const) : ("smooth" as const) }
+          : a,
+      ),
+      `mode:${object.id}`,
+    );
+    store.endGesture();
+  };
+  const setAnchorsSym = (targets: number[], sym: boolean): void => {
+    commitBezier(
+      object.bezier!.map((a, idx) => (targets.includes(idx) ? { ...a, sym: sym ? undefined : false } : a)),
+      `sym:${object.id}`,
+    );
+    store.endGesture();
+  };
+  const deleteAnchors = (targets: number[]): void => {
+    const b = object.bezier!;
+    if (b.length - targets.length < 2) return; // a cable needs >= 2 anchors
+    commitBezier(
+      b.filter((_, idx) => !targets.includes(idx)),
       `del:${object.id}`,
     );
+    setSelVerts([]);
     store.endGesture();
   };
   // join/unjoin the ends: toggle the path between an open stroke and a closed loop (O-ring). Path-level
@@ -489,12 +500,24 @@ function GizmosInner(props: {
   const cableMenuItems = (i: number): MenuEntry[] => {
     const b = object.bezier!;
     const items: MenuEntry[] = [];
-    if (!object.closed && (i === 0 || i === b.length - 1)) {
+    // keep-membership rule: right-clicking a SELECTED anchor acts on the whole selection
+    const targets = selVerts.includes(i) && selVerts.length > 1 ? selVerts : [i];
+    const n = targets.length;
+    if (!object.closed && (i === 0 || i === b.length - 1) && n === 1) {
       items.push({ label: "Extend Cable", onClick: () => setPlacing({ kind: "cable-end", objectId: object.id, end: i === 0 ? "start" : "end" }) });
     }
-    items.push({ label: isCorner(b[i]!) ? "Make Smooth" : "Make Corner", onClick: () => toggleAnchorMode(i) });
+    // the clicked anchor decides the direction; the whole selection gets it
+    const toCorner = !isCorner(b[i]!);
+    items.push({
+      label: n > 1 ? (toCorner ? `Make ${n} Corners` : `Make ${n} Smooth`) : toCorner ? "Make Corner" : "Make Smooth",
+      onClick: () => setAnchorsMode(targets, toCorner),
+    });
     if (!isCorner(b[i]!)) {
-      items.push({ label: b[i]!.sym === false ? "Make Tangents Symmetric" : "Make Tangents Independent", onClick: () => toggleAnchorSym(i) });
+      const toSym = b[i]!.sym === false;
+      items.push({
+        label: `${toSym ? "Make Tangents Symmetric" : "Make Tangents Independent"}${n > 1 ? ` (${n})` : ""}`,
+        onClick: () => setAnchorsSym(targets, toSym),
+      });
     }
     if (b.length >= 3) {
       items.push("separator", { label: object.closed ? "Open Path" : "Close Path", onClick: toggleClosed });
@@ -502,8 +525,8 @@ function GizmosInner(props: {
     if ((object.typeId === ObjectTypeId.SurfaceVector || object.typeId === ObjectTypeId.Pillow) && (object.subpathStarts?.length ?? 1) < 7) {
       items.push({ label: "Add Hole", onClick: addHole }); // up to 6 holes (the spare record slots)
     }
-    if (b.length > 2) {
-      items.push("separator", { label: "Delete Vertex", danger: true, hotkey: "⌫", onClick: () => deleteAnchor(i) });
+    if (b.length - n >= 2) {
+      items.push("separator", { label: n > 1 ? `Delete ${n} Vertices` : "Delete Vertex", danger: true, hotkey: "⌫", onClick: () => deleteAnchors(targets) });
     }
     return items;
   };
@@ -791,7 +814,10 @@ function GizmosInner(props: {
               );
             };
             // fat transparent hit-line over a real edge (ia,ib): right-click for the menu,
-            // Alt-click to insert a vertex inline. Lives over the visible seg() line.
+            // Alt-click to insert a vertex inline. Lives over the visible seg() line. Mesh edges
+            // show the context-menu pointer instead of copy/+ — a plain click does NOT insert
+            // there, so the + cursor promised an action a click wouldn't deliver.
+            const edgeCursor = kind === "mesh" ? "cursor-context-menu" : "cursor-copy";
             const edgeHit = (ia: number, ib: number, a: Vector2, b: Vector2, key: string): React.JSX.Element => (
               <line
                 key={key}
@@ -801,7 +827,7 @@ function GizmosInner(props: {
                 y2={b.y}
                 stroke="transparent"
                 strokeWidth={9}
-                className="pointer-events-auto cursor-copy"
+                className={`pointer-events-auto ${edgeCursor}`}
                 onPointerDown={insertOnEdge(ia, ib)}
                 onContextMenu={openEdgeMenu(ia, ib)}
               />

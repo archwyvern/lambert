@@ -21,7 +21,7 @@ struct CompositeUniforms {
   zoom: f32,
   panX: f32,
   panY: f32,
-  mode: u32,          // 0 diffuse, 1 normal, 2 lit
+  mode: u32,          // 0 diffuse, 1 normal, 2 lit, 3 coverage (red = opaque diffuse, no mask)
   canvasW: f32,
   canvasH: f32,
   opacity: f32,       // overlay opacity for the normal mode (1 = pure overlay)
@@ -75,6 +75,12 @@ fn fs(@builtin(position) fragPos: vec4f) -> @location(0) vec4f {
   let dHdy = minmod(fold_at(pe + vec2f(0.0, e), cu.shapeCount).x - hc, hc - fold_at(pe - vec2f(0.0, e), cu.shapeCount).x) / e;
   let inv = inverseSqrt(dHdx * dHdx + dHdy * dHdy + 1.0);
   let n = vec3f(-dHdx * inv, -dHdy * inv, inv);
+  if (cu.mode == 3u) {
+    // coverage audit: solid red wherever the diffuse is OPAQUE but the authored mask is 0 —
+    // "what haven't I covered yet". Covered/transparent pixels show the plain diffuse for context.
+    let uncovered = diffuse.a > 0.0 && mask <= 0.0;
+    return select(vec4f(base, 1.0), vec4f(0.85, 0.11, 0.11, 1.0), uncovered);
+  }
   if (cu.mode == 1u) {
     // normal view: the height-derived NX encoded over the sprite
     let enc = vec3f(

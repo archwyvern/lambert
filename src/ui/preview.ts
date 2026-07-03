@@ -7,9 +7,9 @@ import { buildPreview3dWgsl, GRID3D_WGSL, Orbit, orbitMvp } from "../field/gpu/p
 import type { LayerNode } from "../field/types";
 import type { Viewport } from "./viewport";
 
-export type ViewMode = "diffuse" | "normal" | "lit";
-export const VIEW_MODES: ViewMode[] = ["diffuse", "normal", "lit"];
-const MODE_INDEX: Record<ViewMode, number> = { diffuse: 0, normal: 1, lit: 2 };
+export type ViewMode = "diffuse" | "normal" | "lit" | "coverage";
+export const VIEW_MODES: ViewMode[] = ["diffuse", "normal", "lit", "coverage"];
+const MODE_INDEX: Record<ViewMode, number> = { diffuse: 0, normal: 1, lit: 2, coverage: 3 };
 
 // 3D displaced-grid resolution cap: the grid is sized to the doc (1 cell ~= 1 doc px) so hard height
 // cliffs read crisply, clamped here so very large docs don't explode the vertex count (512^2*6 ~= 1.5M).

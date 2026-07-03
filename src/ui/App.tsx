@@ -10,7 +10,7 @@ import { isGroup, isObject, type LayerNode, type ObjectInstance } from "../field
 import { Vector2, Vector3 } from "@carapace/primitives";
 import { effectiveNormalDirs, effectiveOutput, emptyDoc, hydrateObjectRaw, parseDoc, parseProjectConfig, presetLibrarySchema, ProjectConfig, serializeDoc, serializeProjectConfig, type SavedPreset } from "../document/schema";
 import { getObjectType, ObjectTypeId } from "../field/registry";
-import { exportDocNx, exportTabNx, newProjectFlow, openDocTab, openProjectByPath, openProjectFlow, saveTab, type OpenedProject } from "../document/io";
+import { exportDocNx, exportTabHeightmap, exportTabNx, newProjectFlow, openDocTab, openProjectByPath, openProjectFlow, saveTab, type OpenedProject } from "../document/io";
 import { nxExtension } from "../document/exports";
 import { resolveDiffuse } from "../document/diffuseSource";
 import { basename, dirname, joinPath } from "../document/paths";
@@ -129,6 +129,7 @@ export function App(): React.JSX.Element {
   const nudgeEndTimer = useRef<ReturnType<typeof setTimeout> | null>(null); // commits a nudge burst's undo group
   const [snap, setSnap] = usePersistentState("snap", true); // global ½px grid snap for all edits
   const [rulers, setRulers] = usePersistentState("rulers", true); // top/left canvas rulers (View > Rulers)
+  const [pixelGrid, setPixelGrid] = usePersistentState("pixelGrid", true); // 1px-cell grid past ~800% zoom
   const [recents, setRecents] = usePersistentState<RecentProject[]>("recentProjects", []); // launch-screen MRU
   const [lastDir, setLastDir] = usePersistentState<string | null>("lastProjectDir", null); // open-dialog defaultPath
   const [leftWidth, setLeftWidth] = usePersistentState("panel:left", 220);
@@ -474,6 +475,28 @@ export function App(): React.JSX.Element {
     })();
   };
 
+  // height-map export: the authored height field as 16-bit grayscale, next to Export NX
+  const exportHeightmap = (): void => {
+    const ws = workspaceRef.current;
+    const t = ws?.active;
+    if (!ws || !t) return;
+    if (!t.docPath) {
+      notify("Save the document before exporting its height map", "error");
+      return;
+    }
+    void (async () => {
+      const exportsDir = joinPath(ws.projectPath, ".exports");
+      await getHost().mkdir(exportsDir).catch(() => {});
+      const out = await getHost().saveDialog({
+        title: "Export Height Map",
+        defaultPath: joinPath(exportsDir, basename(t.docPath!).replace(/\.lmb$/i, "") + ".height.png"),
+        filters: [{ name: "Height map (16-bit grayscale)", extensions: ["png"] }],
+      });
+      if (!out) return;
+      run(exportTabHeightmap(getHost(), t, out).then((r) => { refreshGitStatus(); return r; }));
+    })();
+  };
+
   // batch NX export: EVERY .lmb in the project (recursive walk), not just open tabs. An open tab
   // exports its LIVE doc (what you see is what you get, unsaved edits included); closed files parse
   // from disk. One OS folder picker for the whole batch, defaulting to <project>/.exports/.
@@ -699,6 +722,8 @@ export function App(): React.JSX.Element {
         return saveAll();
       case "export-nx":
         return exportActive();
+      case "export-height":
+        return exportHeightmap();
       case "export-all":
         return exportAll();
       case "save-preset":
@@ -807,6 +832,8 @@ export function App(): React.JSX.Element {
         return;
       case "toggle-rulers":
         return setRulers((r) => !r);
+      case "toggle-pixel-grid":
+        return setPixelGrid((g) => !g);
       case "settings":
         return openSettings();
       case "command-palette":
@@ -1045,6 +1072,7 @@ export function App(): React.JSX.Element {
     canRedo: !!active?.store.canRedo,
     hasPresets: (workspace?.config.presets?.length ?? 0) > 0,
     rulers,
+    pixelGrid,
   });
 
   return (
@@ -1170,6 +1198,7 @@ export function App(): React.JSX.Element {
                   setTool={setTool}
                   snap={snap}
                   rulers={rulers}
+                  pixelGrid={pixelGrid}
                 />
               </main>
               <div className="flex" style={{ gridArea: "sash" }}>

@@ -23,8 +23,9 @@ export function buildMenuModel(opts: {
   canRedo: boolean;
   hasPresets: boolean;
   rulers: boolean;
+  pixelGrid: boolean;
 }): MenuModel {
-  const { action, about, keys, hasWorkspace, hasActive, hasSel, canAlign, canDistribute, canUndo, canRedo, hasPresets, rulers } = opts;
+  const { action, about, keys, hasWorkspace, hasActive, hasSel, canAlign, canDistribute, canUndo, canRedo, hasPresets, rulers, pixelGrid } = opts;
   return [
     {
       label: "&&File",
@@ -39,6 +40,7 @@ export function buildMenuModel(opts: {
         { label: "Save All", shortcut: keys("save-all"), enabled: hasWorkspace, run: () => action("save-all") },
         { separator: true },
         { label: "Export NX", shortcut: keys("export-nx"), enabled: hasActive, run: () => action("export-nx") },
+        { label: "Export Height Map", shortcut: keys("export-height"), enabled: hasActive, run: () => action("export-height") },
         { label: "Export All NX", shortcut: keys("export-all"), enabled: hasWorkspace, run: () => action("export-all") },
         { separator: true },
         { label: "Import Presets…", enabled: hasWorkspace, run: () => action("import-presets") },
@@ -93,6 +95,7 @@ export function buildMenuModel(opts: {
         { label: "100%", shortcut: keys("zoom-100"), enabled: hasActive, run: () => action("zoom-100") },
         { separator: true },
         { label: "Rulers", shortcut: keys("toggle-rulers"), enabled: hasActive, role: "checkbox", checked: rulers, keepOpen: true, run: () => action("toggle-rulers") },
+        { label: "Pixel Grid", shortcut: keys("toggle-pixel-grid"), enabled: hasActive, role: "checkbox", checked: pixelGrid, keepOpen: true, run: () => action("toggle-pixel-grid") },
         { separator: true },
         { label: "Command Palette…", shortcut: keys("command-palette"), run: () => action("command-palette") },
       ],

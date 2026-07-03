@@ -1,5 +1,6 @@
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig, externalizeDepsPlugin } from "electron-vite";
+import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -17,13 +18,26 @@ const BUNDLE = ["@carapace/shell", "chokidar", "electron-updater"];
 // Baked into the renderer for the About dialog; reflects the version electron-builder packages
 // (CI bumps package.json before the build, so this is the released version).
 const appVersion = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")).version;
+// Commit + build date for the About dialog's diagnostics block (best-effort: a tarball build
+// without git still builds, it just shows "unknown").
+let appCommit = "unknown";
+try {
+  appCommit = execSync("git rev-parse --short HEAD", { encoding: "utf8" }).trim();
+} catch {
+  // not a git checkout
+}
+const appBuildDate = new Date().toISOString().slice(0, 10);
 
 export default defineConfig({
   main: { plugins: [externalizeDepsPlugin({ exclude: BUNDLE })] },
   preload: { plugins: [externalizeDepsPlugin({ exclude: BUNDLE })] },
   renderer: {
     plugins: [tailwindcss()],
-    define: { __APP_VERSION__: JSON.stringify(appVersion) },
+    define: {
+      __APP_VERSION__: JSON.stringify(appVersion),
+      __APP_COMMIT__: JSON.stringify(appCommit),
+      __APP_BUILD_DATE__: JSON.stringify(appBuildDate),
+    },
     resolve: {
       // carapace is aliased to its SOURCE, which imports react itself — force a SINGLE react instance
       // (else carapace's hooks hit a different react copy: "Invalid hook call / null useState").
