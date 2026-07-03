@@ -65,6 +65,8 @@ const objectSchema = z.object({
   masks: z.array(maskSchema).optional(),
   /** Fold-contribution weight 0..1 (absent = 1). */
   opacity: z.number().min(0).max(1).optional(),
+  /** true = anti-aliased edge; absent/false = hard step (the default — crisp sprite silhouettes). */
+  aa: z.boolean().optional(),
   visible: z.boolean(),
   locked: z.boolean(),
 });

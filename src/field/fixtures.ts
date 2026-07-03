@@ -34,6 +34,7 @@ export function goldenObjects(): ObjectInstance[] {
   const dome = createObjectInstance(ObjectTypeId.Sphere, v2(40, 48));
   dome.id = "dome";
   dome.transform.scale = new Vector3(16 / 48, 16 / 48, 36 / 48); // 16px footprint, 36px tall
+  dome.aa = true; // one AA-edged object: pins the box-filter coverage path in goldens + drift parity
   const capsule = createObjectInstance(ObjectTypeId.Pipe, v2(72, 24));
   capsule.id = "capsule";
   capsule.transform.rotation = Math.PI / 6;

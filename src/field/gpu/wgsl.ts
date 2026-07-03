@@ -355,7 +355,10 @@ fn fold_at(p: vec2f, count: u32) -> vec2f {
     let sd = smp.y * rec(base, SLOT_SCALE);
     // per-object opacity scales the whole contribution: the mask influence AND the height step below
     let alpha = rec(base, SLOT_OPACITY);
-    var inf = influence(sd) * alpha;
+    // edge coverage: AA objects get the box-filter ramp; the default is a HARD step at sd < 0
+    // (crisp sprite silhouettes). bit1 of SLOT_CLOSED carries the flag (see pack.ts).
+    let aa = (u32(rec(base, SLOT_CLOSED)) & 2u) != 0u;
+    var inf = select(select(0.0, 1.0, sd < 0.0), influence(sd), aa) * alpha;
     inf = inf * mask_cover(base, p, pl);
     if (inf <= 0.0) { continue; }
     let h = rec(base, SLOT_ELEVATION) + smp.x * rec(base, SLOT_TALLNESS); // elevation + extrude
