@@ -133,6 +133,8 @@ export function App(): React.JSX.Element {
   const [snap, setSnap] = usePersistentState("snap", true); // global ½px grid snap for all edits
   const [rulers, setRulers] = usePersistentState("rulers", true); // top/left canvas rulers (View > Rulers)
   const [pixelGrid, setPixelGrid] = usePersistentState("pixelGrid", true); // 1px-cell grid past ~800% zoom
+  // normal view: hide the encode where the diffuse is transparent (matches the export's alpha gate)
+  const [normalAlphaGate, setNormalAlphaGate] = usePersistentState("normalAlphaGate", true);
   const [recents, setRecents] = usePersistentState<RecentProject[]>("recentProjects", []); // launch-screen MRU
   const [lastDir, setLastDir] = usePersistentState<string | null>("lastProjectDir", null); // open-dialog defaultPath
   const [leftWidth, setLeftWidth] = usePersistentState("panel:left", 220);
@@ -1193,7 +1195,16 @@ export function App(): React.JSX.Element {
         state={active && state ? state : undefined}
         controls={
           active && state ? (
-            <ViewControls store={active.store} state={state} view={activeView} setView={setActiveView} snap={snap} setSnap={setSnap} />
+            <ViewControls
+              store={active.store}
+              state={state}
+              view={activeView}
+              setView={setActiveView}
+              snap={snap}
+              setSnap={setSnap}
+              normalAlphaGate={normalAlphaGate}
+              setNormalAlphaGate={setNormalAlphaGate}
+            />
           ) : undefined
         }
       />
@@ -1330,6 +1341,7 @@ export function App(): React.JSX.Element {
                   snap={snap}
                   rulers={rulers}
                   pixelGrid={pixelGrid}
+                  normalAlphaGate={normalAlphaGate}
                 />
               </main>
               <div className="flex" style={{ gridArea: "sash" }}>

@@ -1,4 +1,4 @@
-import { CircleHalfFillRegular, ColorFillRegular, GridRegular, ImageRegular, LightbulbRegular, LockClosedRegular, LockOpenRegular, RulerRegular } from "@fluentui/react-icons";
+import { CircleHalfFillRegular, ColorFillRegular, GridRegular, ImageRegular, LightbulbRegular, LockClosedRegular, LockOpenRegular, RulerRegular, TransparencySquareRegular } from "@fluentui/react-icons";
 import { IconButton, SpinSlider } from "@carapace/shell";
 import type { DocumentStore, EditorState } from "../document/store";
 import type { ViewState } from "./App";
@@ -23,8 +23,11 @@ export function ViewControls(props: {
   setView: (fn: (v: ViewState) => ViewState) => void;
   snap: boolean;
   setSnap: (fn: (s: boolean) => boolean) => void;
+  /** Normal view: hide the encode where the diffuse is transparent (matches the export). */
+  normalAlphaGate: boolean;
+  setNormalAlphaGate: (fn: (g: boolean) => boolean) => void;
 }): React.JSX.Element {
-  const { store, state, view, setView, snap, setSnap } = props;
+  const { store, state, view, setView, snap, setSnap, normalAlphaGate, setNormalAlphaGate } = props;
   const canvas = state.doc.canvas;
   return (
     <div className="flex items-center gap-1">
@@ -50,16 +53,25 @@ export function ViewControls(props: {
         onClick={() => store.commit((d) => ({ ...d, canvas: { ...d.canvas, guidesLocked: !d.canvas.guidesLocked } }))}
       />
       {view.mode === "normal" ? (
-        <div className="mx-1 w-24" title="Normal overlay opacity">
-          <SpinSlider
-            value={Math.round(view.opacity * 100)}
-            min={0}
-            max={100}
-            integer
-            suffix="%"
-            onChange={(v) => setView((s) => ({ ...s, opacity: v / 100 }))}
+        <>
+          <IconButton
+            tooltip="Hide normals where the diffuse is transparent — what the export's alpha gate ships"
+            label="Gate normals by diffuse alpha"
+            active={normalAlphaGate}
+            icon={<TransparencySquareRegular />}
+            onClick={() => setNormalAlphaGate((g) => !g)}
           />
-        </div>
+          <div className="mx-1 w-24" title="Normal overlay opacity">
+            <SpinSlider
+              value={Math.round(view.opacity * 100)}
+              min={0}
+              max={100}
+              integer
+              suffix="%"
+              onChange={(v) => setView((s) => ({ ...s, opacity: v / 100 }))}
+            />
+          </div>
+        </>
       ) : null}
       <div className="mx-1 h-4 w-px bg-border" />
       <div role="group" aria-label="View mode" className="flex items-center gap-1">
