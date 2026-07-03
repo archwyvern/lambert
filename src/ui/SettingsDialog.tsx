@@ -147,7 +147,7 @@ export function SettingsDialog(props: {
           <Blurb>
             What Export NX writes: channel layout, bit depth, and file container. Project-wide, stored
             in project.lambert so exports are reproducible; a document can override it (Document ›
-            Output Format). The default — 16-bit RGBA PNG — is the Skyrat NX contract.
+            Output Format). The default is 16-bit RGBA PNG.
           </Blurb>
           <OutputFormatEditor value={config.output} onChange={(output) => onConfig({ ...config, output })} />
         </div>

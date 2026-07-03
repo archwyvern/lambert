@@ -31,7 +31,7 @@ by construction — no seams, no hand-painted lighting errors.
 - **Editor chrome** — command palette, rebindable shortcuts with an editor, JetBrains-style
   settings, groups with mirror symmetry, trim masks, per-object presets, drag-drop project and
   image opening, git-friendly JSON documents.
-- **Exports** — the Skyrat-convention `.nx.png` (derived normals, authored-mask alpha),
+- **Exports** — engine-ready `.nx.png` normal maps (derived normals, authored-mask alpha),
   16-bit grayscale height maps, and configurable output: RGB/RGBA/RG/RGA channel layouts,
   8/16-bit depth, PNG / EXR / Radiance HDR.
 
