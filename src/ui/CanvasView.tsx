@@ -14,6 +14,7 @@ import { editSnap } from "./snapPoint";
 import { fromLocal, toLocal } from "../field/transform";
 import type { ObjectInstance } from "../field/types";
 import { normalSigns, type NormalDirs } from "../document/schema";
+import { NormalSphere } from "./NormalDirsEditor";
 import { Vector2, Vector3 } from "@carapace/primitives";
 import { EmptyState, ShortcutGuide, SpinSlider } from "@carapace/shell";
 import { v2 } from "../field/vec";
@@ -95,8 +96,12 @@ export function CanvasView(props: {
   onEnergyChange: (energy: number) => void;
   canvas3dRef: React.RefObject<HTMLCanvasElement | null>;
   orbit3d: Orbit;
-  /** Project normal-channel convention (project.lambert), for the normal-view encode. */
+  /** EFFECTIVE normal-channel convention (doc override, else project), for the normal-view encode. */
   normalDirs: NormalDirs;
+  /** The doc overrides the project convention (the tint widget labels itself accordingly). */
+  overridesNormalDirs: boolean;
+  /** Open the Settings dialog at a screen (the tint widget links to the normal-dirs screens). */
+  openSettings: (screen: string) => void;
   /** 3D preview is occupying the big slot (this 2D view is hidden behind it) — hide the 2D guide. */
   swapped: boolean;
   /** Per-tab viewport persistence: the tab's stable id, its saved pan/zoom (undefined = not yet fitted),
@@ -114,6 +119,7 @@ export function CanvasView(props: {
   const { store, state, view, tool, diffuseBytes, selVerts, setSelVerts, onLightChange, onEnergyChange, canvas3dRef, orbit3d, normalDirs, swapped } =
     props;
   const { tabId, savedViewport, onViewportChange, setTool, snap, rulers, resolvePaletteObject, maskFocus } = props;
+  const { overridesNormalDirs, openSettings } = props;
   const inset = rulers ? RULER : 0;
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -1071,15 +1077,35 @@ export function CanvasView(props: {
           })()
         : null}
       {diffuseBytes ? (
-        <div className="pointer-events-none absolute bottom-2 left-2 flex gap-3 border border-border bg-surface2/90 px-2 py-0.5 text-sm tabular-nums text-fg-mid">
-          <span title="Zoom (Ctrl+0 fit, Ctrl+1 100%)" className="text-fg">
-            {Math.round(viewport.zoom * 100)}%
-          </span>
-          {cursor ? (
-            <span>
-              {cursor.x - doc.canvas.origin.x}, {cursor.y - doc.canvas.origin.y}
+        <div className="absolute bottom-2 left-2 flex flex-col items-start gap-1.5">
+          {/* normal-directions tint widget: the active convention at a glance; click = its settings */}
+          <button
+            type="button"
+            title={
+              `Normal directions: red ${normalDirs.red}, green ${normalDirs.green}` +
+              (overridesNormalDirs ? " (document override)" : " (project)") +
+              " — click to edit"
+            }
+            className="flex cursor-pointer items-center gap-1.5 border border-border bg-surface2/90 px-1.5 py-1 hover:border-border-light"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => openSettings(overridesNormalDirs ? "doc-normals" : "project-normals")}
+          >
+            <NormalSphere dirs={normalDirs} size={22} />
+            <span className="text-sm tabular-nums text-fg-mid">
+              <span className="text-[#e06666]">R{normalDirs.red === "right" ? "→" : "←"}</span>{" "}
+              <span className="text-[#7bc96f]">G{normalDirs.green === "up" ? "↑" : "↓"}</span>
             </span>
-          ) : null}
+          </button>
+          <div className="pointer-events-none flex gap-3 border border-border bg-surface2/90 px-2 py-0.5 text-sm tabular-nums text-fg-mid">
+            <span title="Zoom (Ctrl+0 fit, Ctrl+1 100%)" className="text-fg">
+              {Math.round(viewport.zoom * 100)}%
+            </span>
+            {cursor ? (
+              <span>
+                {cursor.x - doc.canvas.origin.x}, {cursor.y - doc.canvas.origin.y}
+              </span>
+            ) : null}
+          </div>
         </div>
       ) : null}
       {bodyMenu

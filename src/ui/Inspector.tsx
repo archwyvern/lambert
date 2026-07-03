@@ -1,5 +1,4 @@
 import type { DocumentStore, EditorState } from "../document/store";
-import type { NormalDirs } from "../document/schema";
 import { updateObject } from "../document/docOps";
 import { findNode, findParentId, nodeFrames, updateNode } from "../document/layerOps";
 import { isGroup, isObject } from "../field/types";
@@ -37,9 +36,8 @@ export function Inspector(props: {
   store: DocumentStore;
   state: EditorState;
   selVerts: number[];
-  /** Project-level normal-channel convention (project.lambert), shared by every image. */
-  normalDirs: NormalDirs;
-  onNormalDirs: (dirs: NormalDirs) => void;
+  /** Open the Settings dialog at a screen (the no-selection state links to Document settings). */
+  openSettings: (screen: string) => void;
   /** Switch the active canvas tool (the Masks "+ Add" button enters the pen tool). */
   setTool: (t: ToolMode) => void;
   /** Clicking a mask row selects that mask (all anchors) in the editor. */
@@ -47,7 +45,7 @@ export function Inspector(props: {
   /** Global ½px grid snap (drives ring-regen snap + spinbox step granularity). */
   snap: boolean;
 }): React.JSX.Element {
-  const { store, state, selVerts, normalDirs, onNormalDirs, setTool, snap, onSelectMask } = props;
+  const { store, state, selVerts, openSettings, setTool, snap, onSelectMask } = props;
   const selNode = state.selectedId ? findNode(state.doc.layers, state.selectedId) : null;
   const object = selNode && isObject(selNode) ? selNode : undefined;
   // when several layers are selected we edit the PRIMARY (last picked) and show a count banner
@@ -112,64 +110,24 @@ export function Inspector(props: {
     );
   }
 
+  // no selection: the inspector is for the SELECTION — document-level configuration (origin, normal
+  // directions, output format) lives in Settings > Document, not here.
   if (!object) {
     const doc = state.doc;
-    const setDirs = (patch: Partial<NormalDirs>): void => onNormalDirs({ ...normalDirs, ...patch });
-    const setOrigin = (origin: { x: number; y: number }): void => {
-      store.update((d) => ({ ...d, canvas: { ...d.canvas, origin } }));
-      store.endGesture();
-    };
-    const fields: InspectorField[] = [
-      vec({
-        key: "origin",
-        label: "origin",
-        group: "Canvas",
-        value: [doc.canvas.origin.x, doc.canvas.origin.y],
-        size: 2,
-        onChange: (a) => store.update((d) => ({ ...d, canvas: { ...d.canvas, origin: { x: a[0]!, y: a[1]! } } }), { coalesce: "origin" }),
-        onCommit: () => store.endGesture(),
-      }),
-      // guides-locked + snap-to-guides live on the toolbar (next to grid-snap), not here — see Toolbar.tsx
-      {
-        kind: "enum",
-        key: "red",
-        label: "red",
-        group: "Normal Directions",
-        value: normalDirs.red === "left" ? 1 : 0,
-        options: ["right", "left"],
-        onChange: (i) => setDirs({ red: i === 1 ? "left" : "right" }),
-      },
-      {
-        kind: "enum",
-        key: "green",
-        label: "green",
-        group: "Normal Directions",
-        value: normalDirs.green === "down" ? 1 : 0,
-        options: ["up", "down"],
-        onChange: (i) => setDirs({ green: i === 1 ? "down" : "up" }),
-      },
-    ];
     return (
       <div>
         <div className="mb-2 border-b border-border pb-1.5 text-md font-semibold text-fg">Document</div>
         <p className="mb-2 px-2 text-sm text-fg-mid">
           {doc.source.uri.split("/").pop()} · {doc.source.width}×{doc.source.height}
         </p>
-        <PropertyInspector fields={fields} sections={[{ name: "Canvas" }, { name: "Normal Directions" }]} />
-        <div className="mt-1 mb-2 flex gap-1 px-2">
-          <Button className="flex-1" onClick={() => setOrigin({ x: doc.source.width / 2, y: doc.source.height / 2 })}>
-            Centre
-          </Button>
-          <Button className="flex-1" onClick={() => setOrigin({ x: doc.source.width / 2, y: 0 })}>
-            Top Ctr
-          </Button>
-          <Button className="flex-1" onClick={() => setOrigin({ x: 0, y: 0 })}>
-            Top Left
+        <p className="mb-3 px-2 text-base leading-snug text-fg-mid">
+          Select an object to edit its parameters.
+        </p>
+        <div className="px-2">
+          <Button className="w-full" onClick={() => openSettings("doc-canvas")}>
+            Document Settings…
           </Button>
         </div>
-        <p className="mt-2 px-2 text-base leading-snug text-fg-mid">
-          Project-wide; applies to exports and the normal view. Select an object to edit its parameters.
-        </p>
       </div>
     );
   }

@@ -376,6 +376,8 @@ app.whenReady().then(() => {
           { label: "Export NX", accelerator: "CmdOrCtrl+E", click: send("export-nx") },
           { label: "Export All NX", accelerator: "CmdOrCtrl+Shift+E", click: send("export-all") },
           { type: "separator" },
+          { label: "Settings…", accelerator: "CmdOrCtrl+,", click: send("settings") },
+          { type: "separator" },
           { role: "quit" },
         ],
       },

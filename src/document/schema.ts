@@ -110,6 +110,12 @@ const normalDirsSchema = z
   // the SAME object, so one in-place mutation would poison the module constant for all later parses
   .default(() => ({ ...DEFAULT_NORMAL_DIRS }));
 
+/** Per-document override shape: no defaults — absent means "inherit the project setting". */
+const normalDirsOverrideSchema = z.object({
+  red: z.enum(["right", "left"]),
+  green: z.enum(["up", "down"]),
+});
+
 // --- project file (project.lambert): folder-level config ---
 
 /** The highest on-disk schema this build understands. Files above it were written by a newer Lambert. */
@@ -191,6 +197,8 @@ export const docSchema = z.object({
   }),
   layers: z.array(layerNodeSchema).optional(),
   canvas: canvasSchema.optional(),
+  /** Per-document normal-channel override; absent = inherit the project's normalDirs. */
+  normalDirs: normalDirsOverrideSchema.optional(),
 });
 
 export type LambertDoc = Omit<z.infer<typeof docSchema>, "layers" | "canvas"> & {
@@ -286,6 +294,7 @@ export function hydrateDoc(raw: {
   source: LambertDoc["source"];
   layers?: unknown;
   canvas?: CanvasState;
+  normalDirs?: NormalDirs;
 }): LambertDoc {
   return {
     schemaVersion: raw.schemaVersion,
@@ -293,7 +302,13 @@ export function hydrateDoc(raw: {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     layers: dropUnknownLayers(normalizeLayers(((raw.layers ?? []) as unknown[]) as any[])),
     canvas: raw.canvas ?? defaultCanvas(raw.source.width, raw.source.height),
+    normalDirs: raw.normalDirs,
   };
+}
+
+/** The dirs a document actually renders/exports with: its own override, else the project's. */
+export function effectiveNormalDirs(doc: Pick<LambertDoc, "normalDirs">, config: ProjectConfig): NormalDirs {
+  return doc.normalDirs ?? config.normalDirs;
 }
 
 export function parseDoc(json: string): LambertDoc {

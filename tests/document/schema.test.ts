@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 import "../../src/field/objects";
 import { createObjectInstance, ObjectTypeId } from "../../src/field/registry";
 import {
+  effectiveNormalDirs,
   emptyDoc,
   emptyProjectConfig,
   hydrateObjectRaw,
@@ -38,12 +39,17 @@ test("a newer-than-supported schemaVersion throws a friendly forward-compat mess
   expect(() => parseDoc(JSON.stringify(future))).toThrow(/newer version of Lambert/);
 });
 
-test("doc no longer carries normalDirs; a legacy normalDirs field is dropped on load", () => {
+test("doc-level normalDirs is an optional override: absent inherits the project, present wins", () => {
   const doc = emptyDoc("hull.df.png", 64, 64);
-  expect("normalDirs" in doc).toBe(false);
-  const legacy = { ...(doc as Record<string, unknown>), normalDirs: { red: "left", green: "down" } };
-  const back = parseDoc(JSON.stringify(legacy));
-  expect("normalDirs" in back).toBe(false);
+  expect(doc.normalDirs).toBeUndefined(); // new docs inherit
+  const config = emptyProjectConfig();
+  expect(effectiveNormalDirs(doc, config)).toEqual({ red: "right", green: "up" });
+  // an override round-trips through the .lmb (this also honors legacy pre-project-format docs,
+  // which carried the same field with the same meaning)
+  const overridden = { ...(doc as Record<string, unknown>), normalDirs: { red: "left", green: "down" } };
+  const back = parseDoc(JSON.stringify(overridden));
+  expect(back.normalDirs).toEqual({ red: "left", green: "down" });
+  expect(effectiveNormalDirs(back, config)).toEqual({ red: "left", green: "down" });
 });
 
 test("source is referenced by uri and round-trips", () => {

@@ -8,7 +8,7 @@ import { addNode, cloneNode, findNode, ungroup, updateNode, wrapInGroup } from "
 import { flattenLayers } from "../field/flatten";
 import { isGroup, isObject, type LayerNode, type ObjectInstance } from "../field/types";
 import { Vector2, Vector3 } from "@carapace/primitives";
-import { emptyDoc, hydrateObjectRaw, NormalDirs, parseDoc, parseProjectConfig, presetLibrarySchema, ProjectConfig, serializeDoc, serializeProjectConfig, type SavedPreset } from "../document/schema";
+import { effectiveNormalDirs, emptyDoc, hydrateObjectRaw, parseDoc, parseProjectConfig, presetLibrarySchema, ProjectConfig, serializeDoc, serializeProjectConfig, type SavedPreset } from "../document/schema";
 import { getObjectType, ObjectTypeId } from "../field/registry";
 import { exportDocNx, exportTabNx, newProjectFlow, openDocTab, openProjectByPath, openProjectFlow, saveTab, type OpenedProject } from "../document/io";
 import { resolveDiffuse } from "../document/diffuseSource";
@@ -43,6 +43,7 @@ import { LambertMark } from "./LambertMark";
 import { LaunchScreen } from "./LaunchScreen";
 import { NewDocumentDialog } from "./NewDocumentDialog";
 import { AboutDialog } from "./AboutDialog";
+import { SettingsDialog } from "./SettingsDialog";
 import type { ViewMode } from "./preview";
 import { VIEW_MODES } from "./preview";
 import { TOOL_KEYS, ToolMode } from "./tools";
@@ -88,6 +89,10 @@ export function App(): React.JSX.Element {
   const [tool, setTool] = useState<ToolMode>("select");
   const [selVerts, setSelVerts] = useState<number[]>([]);
   const [showAbout, setShowAbout] = useState(false);
+  // Settings dialog: null = closed, else the screen it's showing. The last-viewed screen persists
+  // so File > Settings reopens where you left off.
+  const [settingsScreen, setSettingsScreen] = useState<string | null>(null);
+  const [lastSettingsScreen, setLastSettingsScreen] = usePersistentState("settings:screen", "project-normals");
   // New Document = name-first: the explorer's inline editor sets the path, then a modal picks the
   // diffuse source; the .lmb is written only if the source resolves. newDocPath holds that path.
   const [newDocPath, setNewDocPath] = useState<string | null>(null);
@@ -500,10 +505,11 @@ export function App(): React.JSX.Element {
     );
   };
 
-  const setNormalDirs = (dirs: NormalDirs): void => {
-    const ws = workspaceRef.current;
-    if (!ws) return;
-    persistConfig({ ...ws.config, normalDirs: dirs });
+  // open the Settings dialog at a screen (defaults to the last-viewed one)
+  const openSettings = (screen?: string): void => {
+    if (!workspaceRef.current) return;
+    if (screen) setLastSettingsScreen(screen);
+    setSettingsScreen(screen ?? lastSettingsScreen);
   };
 
   /** Instantiate a saved preset template: deep-clone (the store must never alias the template),
@@ -773,6 +779,8 @@ export function App(): React.JSX.Element {
         return;
       case "toggle-rulers":
         return setRulers((r) => !r);
+      case "settings":
+        return openSettings();
     }
   };
   const runMenuActionRef = useRef(runMenuAction);
@@ -930,7 +938,7 @@ export function App(): React.JSX.Element {
   }, [workspace, active, views, viewports, orbits]);
 
   // ?demo capture bootstrap (fixtures -> in-memory project + readiness flag) — QC-CARRY-2 extraction
-  useDemoBootstrap({ setWorkspace, setViews, setSwapped, setNewDocPath, setSelVerts, setTool, defaultView: DEFAULT_VIEW });
+  useDemoBootstrap({ setWorkspace, setViews, setSwapped, setNewDocPath, setSelVerts, setTool, openSettings, defaultView: DEFAULT_VIEW });
   // the window-level editor keymap (tools, Esc, Delete, nudges, copy/paste, X/V) — QC-CARRY-2 extraction
   useEditorKeymap({ workspaceRef, runMenuActionRef, selVertsRef, nudgeEndTimer, setSwapped, setSelVerts, setTool, setActiveView });
   const tabInfos = workspace
@@ -971,6 +979,17 @@ export function App(): React.JSX.Element {
         }
       />
       {showAbout ? <AboutDialog onClose={() => setShowAbout(false)} /> : null}
+      {settingsScreen !== null && workspace ? (
+        <SettingsDialog
+          config={workspace.config}
+          onConfig={persistConfig}
+          store={active?.store ?? null}
+          state={state}
+          initialScreen={settingsScreen}
+          onScreenChange={setLastSettingsScreen}
+          onClose={() => setSettingsScreen(null)}
+        />
+      ) : null}
       {newDocPath !== null ? <NewDocumentDialog onConfirm={createDoc} onClose={() => setNewDocPath(null)} /> : null}
       <div className="flex min-h-0 flex-1">
         {workspace ? (
@@ -1055,7 +1074,9 @@ export function App(): React.JSX.Element {
                   onEnergyChange={(en) => setActiveView((v) => ({ ...v, lightEnergy: en }))}
                   canvas3dRef={canvas3dRef}
                   orbit3d={cam3d.orbit}
-                  normalDirs={workspace!.config.normalDirs}
+                  normalDirs={effectiveNormalDirs(state.doc, workspace!.config)}
+                  overridesNormalDirs={state.doc.normalDirs !== undefined}
+                  openSettings={openSettings}
                   swapped={swapped}
                   tabId={active.id}
                   savedViewport={viewports[active.id]}
@@ -1073,8 +1094,7 @@ export function App(): React.JSX.Element {
                   store={active.store}
                   state={state}
                   selVerts={selVerts}
-                  normalDirs={workspace!.config.normalDirs}
-                  onNormalDirs={setNormalDirs}
+                  openSettings={openSettings}
                   setTool={setTool}
                   snap={snap}
                   onSelectMask={(nodeId, maskId) => {

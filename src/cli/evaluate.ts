@@ -58,7 +58,7 @@ async function main(): Promise<void> {
   const r = renderField(flattenLayers(doc.layers), doc.source.width, doc.source.height, { supersample: 2 });
   if (r.mask.every((m) => m === 0)) console.warn("warning: authored mask is empty — NX would change nothing");
 
-  const normalDirs = resolveNormalDirs(docDir);
+  const normalDirs = doc.normalDirs ?? resolveNormalDirs(docDir); // per-doc override wins
   const outDir = outDirArg ? path.resolve(outDirArg) : docDir;
   const stem = path.basename(docPath).replace(/\.lmb$/i, "");
   const nxPath = path.join(outDir, `${stem}.nx.png`);
