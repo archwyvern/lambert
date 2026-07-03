@@ -2,7 +2,7 @@ import { ObjectTypeId } from "../field/objectTypeIds";
 import bermIcon from "./icons/berm.png";
 import cableIcon from "./icons/cable.png";
 import contourIcon from "./icons/contour.png";
-import gradientIcon from "./icons/gradient.png";
+import adjustIcon from "./icons/gradient.png"; // reused clay render until a dedicated icon lands
 import mesaIcon from "./icons/mesa.png";
 import meshIcon from "./icons/mesh.png";
 import pillowIcon from "./icons/pillow.png";
@@ -33,7 +33,7 @@ export const OBJECT_ICONS: Record<string, string> = {
   [ObjectTypeId.PlateauVector]: mesaIcon,
   [ObjectTypeId.Pillow]: pillowIcon,
   // Effects
-  [ObjectTypeId.Gradient]: gradientIcon,
+  [ObjectTypeId.Adjust]: adjustIcon,
   // Mesh
   [ObjectTypeId.Mesh]: meshIcon,
 };

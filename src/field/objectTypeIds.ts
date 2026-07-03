@@ -19,8 +19,11 @@ export const ObjectTypeId = {
   // Meshes
   Mesh: "e0500e2a-31a9-4b38-a899-9b1ff31e8a75",
   // Effects
-  Gradient: "c27799cc-6e25-4b3a-a071-191ca341a5ee",
+  Adjust: "3cd31b67-bc9f-4695-9cc1-12cf74b9beb8",
 } as const;
+
+// RETIRED GUIDs (deleted types — never reuse; docs carrying them degrade gracefully on load):
+//   Gradient c27799cc-6e25-4b3a-a071-191ca341a5ee — replaced by the Adjustment layer's "ramp" kind.
 
 export type ObjectTypeIdValue = (typeof ObjectTypeId)[keyof typeof ObjectTypeId];
 

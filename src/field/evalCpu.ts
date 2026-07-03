@@ -1,4 +1,5 @@
 import { affineInvert, affineApply } from "./affine";
+import { applyAdjustments } from "./adjustments";
 import { combineHeight, influence, objectCombineOp } from "./combine";
 import type { ResolvedObject } from "./flatten";
 import { bakeMasks, maskCoverage } from "./maskOps";
@@ -50,7 +51,8 @@ export function evaluateField(resolved: ResolvedObject[], width: number, height:
       let covered = false; // has any object hard-covered this pixel yet?
       for (const { rs, type, op, s, baked, alpha, aabb } of items) {
         if (p.x < aabb.minX || p.x > aabb.maxX || p.y < aabb.minY || p.y > aabb.maxY) continue;
-        const sample = type.eval(affineApply(rs.invAffine, p), s);
+        const local = affineApply(rs.invAffine, p);
+        const sample = type.eval(local, s);
         const sd = sample.sd * rs.scaleHint;
         // per-object opacity scales the whole contribution: the mask influence AND the height step
         // below. Edge coverage: AA objects get the box-filter ramp; the default is a HARD step at
@@ -58,6 +60,12 @@ export function evaluateField(resolved: ResolvedObject[], width: number, height:
         let inf = (rs.object.aa ? influence(sd) : sd < 0 ? 1 : 0) * alpha;
         if (rs.masks.length > 0) inf *= maskCoverage(rs.masks, baked, rs.invAffine, rs.scaleHint, p);
         if (inf <= 0) continue;
+        // adjustment layer: transform the ACCUMULATED height inside its region (coverage-gated blend);
+        // contributes no height or mask of its own. WGSL fold_at op == 3u mirrors this.
+        if (op === "adjust") {
+          if (rs.object.adjustments?.length) H = applyAdjustments(H, rs.object.adjustments, local, rs.object, inf);
+          continue;
+        }
         const h = rs.elevationZ + sample.height * rs.tallnessZ; // composed elevation + extrude
         // the FIRST object (a non-carve "max" object) to cover a pixel SETS the surface, so it can go
         // below the ground plane — negative Z is allowed. Later overlapping objects, and carve objects

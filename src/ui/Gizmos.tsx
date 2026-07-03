@@ -522,7 +522,7 @@ function GizmosInner(props: {
     if (b.length >= 3) {
       items.push("separator", { label: object.closed ? "Open Path" : "Close Path", onClick: toggleClosed });
     }
-    if ((object.typeId === ObjectTypeId.SurfaceVector || object.typeId === ObjectTypeId.Pillow) && (object.subpathStarts?.length ?? 1) < 7) {
+    if ((object.typeId === ObjectTypeId.SurfaceVector || object.typeId === ObjectTypeId.Pillow || object.typeId === ObjectTypeId.Adjust) && (object.subpathStarts?.length ?? 1) < 7) {
       items.push({ label: "Add Hole", onClick: addHole }); // up to 6 holes (the spare record slots)
     }
     if (b.length - n >= 2) {

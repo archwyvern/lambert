@@ -11,6 +11,7 @@ import { Inspector as PropertyInspector } from "@carapace/shell";
 import type { InspectorField, InspectorSectionInfo } from "@carapace/shell";
 import { Vector3 } from "@carapace/primitives";
 import { humanizeLabel } from "@carapace/shell";
+import { AdjustmentList } from "./AdjustmentList";
 import { NodeMaskList, transformFields } from "./inspectorParts";
 import { Button } from "./kit";
 import type { ToolMode } from "./tools";
@@ -455,6 +456,12 @@ export function Inspector(props: {
     <div>
       {multiBanner}
       <div className="mb-2 border-b border-border pb-1.5 text-md font-semibold text-fg">{type.name}</div>
+      {object.typeId === ObjectTypeId.Adjust ? (
+        <>
+          <AdjustmentList store={store} nodeId={object.id} adjustments={object.adjustments ?? []} />
+          <div className="my-3 border-t border-border" />
+        </>
+      ) : null}
       <PropertyInspector fields={fields} sections={sections} />
       {editVerts ? (
         <p className="mt-1 px-2 text-base leading-snug text-fg-mid">

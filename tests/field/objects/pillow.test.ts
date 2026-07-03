@@ -71,16 +71,6 @@ test("NO medial-axis crease: the slope changes smoothly across a rectangle's cen
   expect(h(-7)).toBeCloseTo(h(7), 6);
 });
 
-test("Gradient effect: a directional ramp normalised across its region", () => {
-  const g = createObjectInstance(ObjectTypeId.Gradient, v2(0, 0)); // 96px square, angle 90 (down), depth 12
-  const t = getObjectType(ObjectTypeId.Gradient);
-  expect(t.eval(v2(0, -48), g).height).toBeCloseTo(0, 3); // the low side
-  expect(t.eval(v2(0, 48), g).height).toBeCloseTo(12, 3); // the high side
-  expect(t.eval(v2(0, 0), g).height).toBeCloseTo(6, 3); // midway
-  expect(t.eval(v2(30, 0), g).height).toBeCloseTo(6, 3); // constant across the perpendicular
-  expect(t.eval(v2(0, 60), g).sd).toBeGreaterThan(0); // outside the region
-});
-
 test('extent "middle": no fixed-distance plateau — the surface keeps rising to the fattest point', () => {
   // a big slab: with inflate=10 the FIXED profile saturates ~10px in (flat top);
   // MIDDLE spans the whole half-width, so an intermediate point sits well below the peak
