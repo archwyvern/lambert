@@ -1192,7 +1192,6 @@ export function App(): React.JSX.Element {
       {/* always rendered: with a frameless window this bar IS the titlebar (drag + window controls) */}
       <Toolbar
         menu={menuModel}
-        state={active && state ? state : undefined}
         controls={
           active && state ? (
             <ViewControls
