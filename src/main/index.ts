@@ -319,6 +319,12 @@ app.whenReady().then(() => {
   const win = new BrowserWindow(winOpts);
   mainWindow = win;
 
+  // renderer links (target=_blank, e.g. the About credits) open in the OS browser, never a popup
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith("https://") || url.startsWith("http://")) void shell.openExternal(url);
+    return { action: "deny" };
+  });
+
   // Persist editor bounds (debounced) so "remembered state" survives restarts. Never while on the
   // welcome screen (its compact size must not overwrite the editor geometry) or in automation.
   let boundsSaveTimer: ReturnType<typeof setTimeout> | null = null;

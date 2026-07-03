@@ -146,7 +146,8 @@ export function App(): React.JSX.Element {
   const [swapped, setSwapped] = usePersistentState("panel:3d:swapped", false);
   // 3D preview OFF by default: the displaced-grid fold is the most expensive pass in the app, so
   // it only runs when the user opts in (click the pane to enable; the power button disables)
-  const [preview3dOn, setPreview3dOn] = usePersistentState("panel:3d:enabled", false);
+  // (the `3d` query flag pre-enables it for capture/demo shots — automation profiles are fresh)
+  const [preview3dOn, setPreview3dOn] = usePersistentState("panel:3d:enabled", new URLSearchParams(location.search).has("3d"));
   const [cornerHeight, setCornerHeight] = usePersistentState("panel:3d:corner", 300);
   const [, bumpRender] = useReducer((x: number) => x + 1, 0);
   const [, forceUpdate] = useReducer((x: number) => x + 1, 0);

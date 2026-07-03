@@ -38,13 +38,23 @@ smooth at any zoom.
 | **Ridge** | embankment swept along a path | `width`+`slope`+`height`, `cap`, `invert`. **Per-anchor scale** tapers the whole cross-section as a unit |
 | **Contour** | filled Bézier outline | supports up to 6 **holes** (sub-loops); `tiltX/Y` height plane |
 | **Mesa** | plateau lofting two Bézier rings (base + top) | the Bézier twin of Plateau |
-| **Pillow** | a drawn closed outline INFLATED like a balloon — the fattest part is the tallest, thin necks stay low, no creases | **no params**: the relief comes from the outline itself (+ `transform.scale`). Supports holes. A Sphere converts to this |
+| **Pillow** | a drawn closed outline INFLATED like a balloon — the fattest part is the tallest, thin necks stay low, no creases | `inflate` (how far in the profile saturates), `extent` (*fixed* = wide shapes get a flat top; *middle* = the sides join at the shape's fattest point), `profile`. Supports holes. A Sphere converts to this |
 
-## Effects
+## Adjustment layers
 
-**Gradient** is the first *effect layer*: adding one drops a region covering the whole image that
-contributes a directional height ramp (`angle`, `depth`) — a directional emboss across the region in
-the normal map. Resize/reshape the region with the vertex tool; the ramp re-normalises to its extent.
+**Adjustment** (Effects palette) is a *filter* layer: a closed region (full-canvas by default —
+reshape it with the vertex tool, holes supported) hosting an ordered list of height transforms
+applied to everything below it. Every entry has a **blend** slider (mix between untouched and
+transformed). Kinds:
+
+| Kind | What it does |
+|---|---|
+| **Raise / Lower** | adds a height offset |
+| **Multiply** | scales heights |
+| **Clamp** | limits heights to a min/max band |
+| **Curve** | remaps heights through an ease curve |
+| **Ramp** | a directional height ramp across the region (`angle`, `depth`) |
+| **Emboss / Detail** | lifts detail out of the diffuse's own luminance: a tolerance-gated gradient extraction integrated into height. `radius` (feature size), `strength` (negative inverts to dark-high), `blur`, `tolerance` (denoise). Recomputes progressively off the UI thread — scrub freely |
 
 ## Mesh
 

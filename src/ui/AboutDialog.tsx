@@ -52,6 +52,18 @@ export function AboutDialog({ onClose }: { onClose: () => void }): React.JSX.Ele
           </tbody>
         </table>
         <div className="space-y-0.5 text-sm text-fg-mid">
+          <div>
+            Built for{" "}
+            <a
+              href="https://www.instagram.com/sketchy_pigeon/"
+              target="_blank"
+              rel="noreferrer"
+              className="text-link hover:underline"
+            >
+              Pigeon
+            </a>
+            , who also designed the logo.
+          </div>
           <div>Copyright © 2026 Archwyvern</div>
           <div className="font-mono">github.com/archwyvern/lambert</div>
         </div>
