@@ -41,6 +41,8 @@ export function buildMenuModel(opts: {
         { separator: true },
         { label: "Import Presets…", enabled: hasWorkspace, run: () => action("import-presets") },
         { label: "Export Presets…", enabled: hasWorkspace && hasPresets, run: () => action("export-presets") },
+        { separator: true },
+        { label: "Settings…", shortcut: "Ctrl+,", enabled: hasWorkspace, run: () => action("settings") },
       ],
     },
     {
