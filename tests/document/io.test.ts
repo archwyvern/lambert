@@ -4,7 +4,7 @@ import { encode } from "fast-png";
 import "../../src/field/objects";
 import { basename, dirname, joinPath } from "../../src/document/paths";
 import { buildNxExport } from "../../src/document/exports";
-import { DEFAULT_NORMAL_DIRS, emptyDoc, emptyProjectConfig, serializeDoc, serializeProjectConfig } from "../../src/document/schema";
+import { DEFAULT_NORMAL_DIRS, DEFAULT_OUTPUT, emptyDoc, emptyProjectConfig, serializeDoc, serializeProjectConfig } from "../../src/document/schema";
 import { addObject } from "../../src/document/docOps";
 import { flattenLayers } from "../../src/field/flatten";
 import { renderField } from "../../src/field/render";
@@ -190,11 +190,11 @@ test("openProjectFlow returns null when the folder dialog is cancelled", async (
 
 test("buildNxExport: nx bytes at the given out path + empty-mask warning", () => {
   let doc = emptyDoc("file:///art/hull.df.png", 32, 32);
-  const empty = buildNxExport(doc, renderField(flattenLayers(doc.layers), 32, 32, { supersample: 1 }), "/p/hull.nx.png", DEFAULT_NORMAL_DIRS);
+  const empty = buildNxExport(doc, renderField(flattenLayers(doc.layers), 32, 32, { supersample: 1 }), "/p/hull.nx.png", DEFAULT_NORMAL_DIRS, DEFAULT_OUTPUT);
   expect(empty.path).toBe("/p/hull.nx.png");
   expect(empty.warning).toMatch(/empty/);
   doc = addObject(doc, ObjectTypeId.Sphere, v2(16, 16));
-  const real = buildNxExport(doc, renderField(flattenLayers(doc.layers), 32, 32, { supersample: 1 }), "/p/hull.nx.png", DEFAULT_NORMAL_DIRS);
+  const real = buildNxExport(doc, renderField(flattenLayers(doc.layers), 32, 32, { supersample: 1 }), "/p/hull.nx.png", DEFAULT_NORMAL_DIRS, DEFAULT_OUTPUT);
   expect(real.warning).toBe(null);
   expect(real.bytes.length).toBeGreaterThan(0);
 });
@@ -202,5 +202,5 @@ test("buildNxExport: nx bytes at the given out path + empty-mask warning", () =>
 test("buildNxExport throws when the render dims don't match the doc (NX contract)", () => {
   const doc = emptyDoc("file:///art/hull.df.png", 32, 32);
   const wrongSize = renderField(flattenLayers(doc.layers), 16, 16, { supersample: 1 }); // 16x16 != doc 32x32
-  expect(() => buildNxExport(doc, wrongSize, "/p/hull.nx.png", DEFAULT_NORMAL_DIRS)).toThrow(/16x16.*32x32/);
+  expect(() => buildNxExport(doc, wrongSize, "/p/hull.nx.png", DEFAULT_NORMAL_DIRS, DEFAULT_OUTPUT)).toThrow(/16x16.*32x32/);
 });

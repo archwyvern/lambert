@@ -116,6 +116,40 @@ const normalDirsOverrideSchema = z.object({
   green: z.enum(["up", "down"]),
 });
 
+// --- NX output format (project-wide, per-document overridable) ---
+
+/** Which semantic channels the export writes. `rg` drops Z (the consumer reconstructs it);
+ *  `rga` is XY plus the alpha gate in the third slot. */
+export const OUTPUT_CHANNELS = ["rgba", "rgb", "rg", "rga"] as const;
+export type OutputChannels = (typeof OUTPUT_CHANNELS)[number];
+export const OUTPUT_FORMATS = ["png", "exr", "hdr"] as const;
+export type OutputFormat = (typeof OUTPUT_FORMATS)[number];
+
+export interface OutputSettings {
+  channels: OutputChannels;
+  /** PNG bit depth. EXR always writes float32; HDR is RGBE — both ignore this. */
+  depth: 8 | 16;
+  format: OutputFormat;
+}
+
+/** The historical NX contract: 16-bit RGBA PNG. */
+export const DEFAULT_OUTPUT: OutputSettings = { channels: "rgba", depth: 16, format: "png" };
+
+const outputSettingsSchema = z
+  .object({
+    channels: z.enum(OUTPUT_CHANNELS).default("rgba"),
+    depth: z.union([z.literal(8), z.literal(16)]).default(16),
+    format: z.enum(OUTPUT_FORMATS).default("png"),
+  })
+  .default(() => ({ ...DEFAULT_OUTPUT }));
+
+/** Per-document override: full object or absent (inherit), like normalDirs. */
+const outputOverrideSchema = z.object({
+  channels: z.enum(OUTPUT_CHANNELS),
+  depth: z.union([z.literal(8), z.literal(16)]),
+  format: z.enum(OUTPUT_FORMATS),
+});
+
 // --- project file (project.lambert): folder-level config ---
 
 /** The highest on-disk schema this build understands. Files above it were written by a newer Lambert. */
@@ -153,6 +187,8 @@ export const presetLibrarySchema = z.object({
 export const projectConfigSchema = z.object({
   schemaVersion: z.literal(1),
   normalDirs: normalDirsSchema,
+  /** NX output format (channel layout, bit depth, container). */
+  output: outputSettingsSchema,
   /** User-saved object presets (the palette's "Project" section). */
   presets: z.array(savedPresetSchema).optional(),
 });
@@ -160,7 +196,7 @@ export const projectConfigSchema = z.object({
 export type ProjectConfig = z.infer<typeof projectConfigSchema>;
 
 export function emptyProjectConfig(): ProjectConfig {
-  return { schemaVersion: 1, normalDirs: { ...DEFAULT_NORMAL_DIRS } };
+  return { schemaVersion: 1, normalDirs: { ...DEFAULT_NORMAL_DIRS }, output: { ...DEFAULT_OUTPUT } };
 }
 
 export function parseProjectConfig(json: string): ProjectConfig {
@@ -199,6 +235,8 @@ export const docSchema = z.object({
   canvas: canvasSchema.optional(),
   /** Per-document normal-channel override; absent = inherit the project's normalDirs. */
   normalDirs: normalDirsOverrideSchema.optional(),
+  /** Per-document output-format override; absent = inherit the project's output settings. */
+  output: outputOverrideSchema.optional(),
 });
 
 export type LambertDoc = Omit<z.infer<typeof docSchema>, "layers" | "canvas"> & {
@@ -295,6 +333,7 @@ export function hydrateDoc(raw: {
   layers?: unknown;
   canvas?: CanvasState;
   normalDirs?: NormalDirs;
+  output?: OutputSettings;
 }): LambertDoc {
   return {
     schemaVersion: raw.schemaVersion,
@@ -303,12 +342,18 @@ export function hydrateDoc(raw: {
     layers: dropUnknownLayers(normalizeLayers(((raw.layers ?? []) as unknown[]) as any[])),
     canvas: raw.canvas ?? defaultCanvas(raw.source.width, raw.source.height),
     normalDirs: raw.normalDirs,
+    output: raw.output,
   };
 }
 
 /** The dirs a document actually renders/exports with: its own override, else the project's. */
 export function effectiveNormalDirs(doc: Pick<LambertDoc, "normalDirs">, config: ProjectConfig): NormalDirs {
   return doc.normalDirs ?? config.normalDirs;
+}
+
+/** The output format a document actually exports with: its own override, else the project's. */
+export function effectiveOutput(doc: Pick<LambertDoc, "output">, config: ProjectConfig): OutputSettings {
+  return doc.output ?? config.output;
 }
 
 export function parseDoc(json: string): LambertDoc {

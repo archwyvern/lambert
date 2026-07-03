@@ -3,14 +3,15 @@ import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { decode } from "fast-png";
-import { parseDoc } from "../document/schema";
-import { resolveNormalDirs } from "../document/normalDirs";
+import { effectiveNormalDirs, effectiveOutput, parseDoc } from "../document/schema";
+import { nxExtension } from "../document/exports";
+import { resolveProjectConfig } from "../document/normalDirs";
 import { resolveDiffuse, type DiffuseHost } from "../document/diffuseSource";
 import { flattenLayers } from "../field/flatten";
 import { renderField } from "../field/render";
 import { encodeHeightmapPng } from "../exporters/heightmap";
 import { encodeNormalPng } from "../exporters/normalmap";
-import { diffuseOpacity, encodeNxPng } from "../exporters/nx";
+import { diffuseOpacity, encodeNx } from "../exporters/nx";
 import "../field/objects";
 
 // Headless diffuse resolver: file:// reads the local FS; http(s):// fetches + caches under a CLI-local
@@ -58,11 +59,13 @@ async function main(): Promise<void> {
   const r = renderField(flattenLayers(doc.layers), doc.source.width, doc.source.height, { supersample: 2 });
   if (r.mask.every((m) => m === 0)) console.warn("warning: authored mask is empty — NX would change nothing");
 
-  const normalDirs = doc.normalDirs ?? resolveNormalDirs(docDir); // per-doc override wins
+  const config = resolveProjectConfig(docDir);
+  const normalDirs = effectiveNormalDirs(doc, config); // per-doc override wins
+  const output = effectiveOutput(doc, config);
   const outDir = outDirArg ? path.resolve(outDirArg) : docDir;
   const stem = path.basename(docPath).replace(/\.lmb$/i, "");
-  const nxPath = path.join(outDir, `${stem}.nx.png`);
-  writeFileSync(nxPath, encodeNxPng(r.normals, r.mask, r.width, r.height, normalDirs, diffuseOpacity(source)));
+  const nxPath = path.join(outDir, `${stem}${nxExtension(output)}`);
+  writeFileSync(nxPath, encodeNx(r.normals, r.mask, r.width, r.height, normalDirs, diffuseOpacity(source), output));
   if (debug) {
     writeFileSync(path.join(outDir, `${stem}.height.png`), encodeHeightmapPng(r));
     writeFileSync(path.join(outDir, `${stem}.normal.png`), encodeNormalPng(r.normals, r.width, r.height, normalDirs));
