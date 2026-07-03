@@ -1,5 +1,5 @@
 import "./styles.css";
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { decode, encode } from "fast-png";
 import { DocumentStore } from "../document/store";
 import { addInstance, duplicateObject, removeObject, reorderObject, updateObject } from "../document/docOps";
@@ -19,8 +19,10 @@ import { buildSessionJson, parseSessionJson } from "../document/session";
 import { PROJECT_FILE, Tab, Workspace } from "../document/workspace";
 import { alignNodes, distributeNodes, type AlignMode } from "./alignOps";
 import { buildMenuModel } from "./menuModel";
+import { BindingOverrides, COMMANDS, effectiveKeys } from "./commands";
 import { useDemoBootstrap } from "./useDemoBootstrap";
-import { useEditorKeymap } from "./useEditorKeymap";
+import { parseEditorBindings, useEditorKeymap, type EditorBinding } from "./useEditorKeymap";
+import { CommandPalette, CommandProvider, createCommandRegistry } from "@carapace/shell";
 import { CanvasView } from "./CanvasView";
 import type { Viewport } from "./viewport";
 import { DEFAULT_ORBIT, type Orbit } from "../field/gpu/preview3d";
@@ -94,6 +96,29 @@ export function App(): React.JSX.Element {
   // so File > Settings reopens where you left off.
   const [settingsScreen, setSettingsScreen] = useState<string | null>(null);
   const [lastSettingsScreen, setLastSettingsScreen] = usePersistentState("settings:screen", "project-normals");
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  // Rebindable shortcuts: user overrides by command id (chord rebinds, null unbinds, absent = default).
+  const [bindingOverrides, setBindingOverrides] = usePersistentState<BindingOverrides>("keybindings", {});
+  const bindings = useMemo(
+    () => new Map(COMMANDS.map((c) => [c.id, effectiveKeys(c, bindingOverrides)])),
+    [bindingOverrides],
+  );
+  // editor-scope commands with parsed chords, consumed by the window keymap via a ref
+  const editorBindingsRef = useRef<EditorBinding[]>([]);
+  editorBindingsRef.current = useMemo(
+    () =>
+      parseEditorBindings(
+        COMMANDS.filter((c) => c.scope === "editor" && c.enable !== "never" && bindings.get(c.id))
+          .map((c) => [c.id, bindings.get(c.id)!]),
+      ),
+    [bindings],
+  );
+  // native menu accelerators track the effective bindings (main rebuilds the OS menu)
+  useEffect(() => {
+    const map: Record<string, string | null> = {};
+    for (const c of COMMANDS) if (c.scope === "global") map[c.id] = bindings.get(c.id) ?? null;
+    void getHost().setMenuAccelerators(map);
+  }, [bindings]);
   // New Document = name-first: the explorer's inline editor sets the path, then a modal picks the
   // diffuse source; the .lmb is written only if the source resolves. newDocPath holds that path.
   const [newDocPath, setNewDocPath] = useState<string | null>(null);
@@ -784,7 +809,15 @@ export function App(): React.JSX.Element {
         return setRulers((r) => !r);
       case "settings":
         return openSettings();
+      case "command-palette":
+        return setPaletteOpen(true);
+      case "view-cycle":
+        return setActiveView((s) => ({ ...s, mode: VIEW_MODES[(VIEW_MODES.indexOf(s.mode) + 1) % VIEW_MODES.length]! }));
+      case "view-swap":
+        return setSwapped((sw) => !sw);
     }
+    // canvas tools (palette / rebound keys route here; the keymap also dispatches tool-*)
+    if (action.startsWith("tool-")) setTool(action.slice("tool-".length) as ToolMode);
   };
   const runMenuActionRef = useRef(runMenuAction);
   runMenuActionRef.current = runMenuAction;
@@ -792,6 +825,50 @@ export function App(): React.JSX.Element {
     getHost().onMenuAction((a) => runMenuActionRef.current(a));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Command registry (the palette's backing store): every command, enablement mirrored from the
+  // menu capability flags via refs so the closures never go stale. Rebuilt only on rebind.
+  const registry = useMemo(
+    () =>
+      createCommandRegistry(
+        COMMANDS.filter((c) => c.enable !== "never").map((c) => ({
+          id: c.id,
+          label: c.label,
+          category: c.category,
+          keybinding: bindings.get(c.id) ?? undefined,
+          isEnabled: () => {
+            const ws = workspaceRef.current;
+            const t = ws?.active;
+            const n = t?.store.state.selectedIds.length ?? 0;
+            switch (c.enable) {
+              case "always":
+                return true;
+              case "workspace":
+                return !!ws;
+              case "active":
+                return !!t;
+              case "sel":
+                return n > 0;
+              case "align":
+                return n >= 2;
+              case "distribute":
+                return n >= 3;
+              case "undo":
+                return !!t?.store.canUndo;
+              case "redo":
+                return !!t?.store.canRedo;
+              case "presets":
+                return (ws?.config.presets?.length ?? 0) > 0;
+              default:
+                return false;
+            }
+          },
+          run: () => runMenuActionRef.current(c.id),
+        })),
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [bindings],
+  );
 
   // close guard: confirm when any tab is dirty, and flush the session stash before closing
   useEffect(() => {
@@ -941,9 +1018,9 @@ export function App(): React.JSX.Element {
   }, [workspace, active, views, viewports, orbits]);
 
   // ?demo capture bootstrap (fixtures -> in-memory project + readiness flag) — QC-CARRY-2 extraction
-  useDemoBootstrap({ setWorkspace, setViews, setSwapped, setNewDocPath, setSelVerts, setTool, openSettings, defaultView: DEFAULT_VIEW });
+  useDemoBootstrap({ setWorkspace, setViews, setSwapped, setNewDocPath, setSelVerts, setTool, openSettings, runAction: (id) => runMenuActionRef.current(id), defaultView: DEFAULT_VIEW });
   // the window-level editor keymap (tools, Esc, Delete, nudges, copy/paste, X/V) — QC-CARRY-2 extraction
-  useEditorKeymap({ workspaceRef, runMenuActionRef, selVertsRef, nudgeEndTimer, setSwapped, setSelVerts, setTool, setActiveView });
+  useEditorKeymap({ workspaceRef, runMenuActionRef, bindingsRef: editorBindingsRef, selVertsRef, nudgeEndTimer, setSwapped, setSelVerts, setTool, setActiveView });
   const tabInfos = workspace
     ? workspace.tabs.map((t) => ({
         id: t.id,
@@ -958,6 +1035,7 @@ export function App(): React.JSX.Element {
   const menuModel: MenuModel = buildMenuModel({
     action: runMenuAction,
     about: () => setShowAbout(true),
+    keys: (id) => bindings.get(id) ?? undefined,
     hasWorkspace: !!workspace,
     hasActive: !!active,
     hasSel,
@@ -982,12 +1060,17 @@ export function App(): React.JSX.Element {
         }
       />
       {showAbout ? <AboutDialog onClose={() => setShowAbout(false)} /> : null}
+      <CommandProvider registry={registry}>
+        <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      </CommandProvider>
       {settingsScreen !== null && workspace ? (
         <SettingsDialog
           config={workspace.config}
           onConfig={persistConfig}
           store={active?.store ?? null}
           state={state}
+          bindingOverrides={bindingOverrides}
+          onBindingOverrides={setBindingOverrides}
           initialScreen={settingsScreen}
           onScreenChange={setLastSettingsScreen}
           onClose={() => setSettingsScreen(null)}

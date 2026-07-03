@@ -356,62 +356,99 @@ app.whenReady().then(() => {
 
   setupAutoUpdate(win);
 
-  // application menu: file/edit actions route to the renderer as menu:action events;
-  // accelerators live here so they are real OS-level shortcuts
+  // Application menu: file/edit actions route to the renderer as menu:action events; accelerators
+  // live here so they are real OS-level shortcuts. The defaults below match src/ui/commands.ts; the
+  // renderer pushes the user's EFFECTIVE bindings on startup and on every rebind
+  // (menu:accelerators), and the menu is rebuilt so rebound shortcuts stay OS-level.
   const send = (action: string) => () => win.webContents.send("menu:action", action);
-  Menu.setApplicationMenu(
-    Menu.buildFromTemplate([
-      {
-        label: "File",
-        submenu: [
-          { label: "New Project…", accelerator: "CmdOrCtrl+Shift+N", click: send("new-project") },
-          { label: "Open Project…", accelerator: "CmdOrCtrl+O", click: send("open-project") },
-          { type: "separator" },
-          { label: "New Document…", accelerator: "CmdOrCtrl+N", click: send("new-document") },
-          { label: "Reload Diffuse", click: send("reload-diffuse") },
-          { type: "separator" },
-          { label: "Save", accelerator: "CmdOrCtrl+S", click: send("save") },
-          { label: "Save All", accelerator: "CmdOrCtrl+Shift+S", click: send("save-all") },
-          { type: "separator" },
-          { label: "Export NX", accelerator: "CmdOrCtrl+E", click: send("export-nx") },
-          { label: "Export All NX", accelerator: "CmdOrCtrl+Shift+E", click: send("export-all") },
-          { type: "separator" },
-          { label: "Settings…", accelerator: "CmdOrCtrl+,", click: send("settings") },
-          { type: "separator" },
-          { role: "quit" },
-        ],
-      },
-      {
-        label: "Edit",
-        submenu: [
-          { label: "Undo", accelerator: "CmdOrCtrl+Z", click: send("undo") },
-          { label: "Redo", accelerator: "CmdOrCtrl+Y", click: send("redo") },
-          { type: "separator" },
-          { label: "Duplicate", accelerator: "CmdOrCtrl+D", click: send("duplicate") },
-          { label: "Delete", click: send("delete") }, // no accelerator: Del must stay safe in inputs
-          { type: "separator" },
-          { label: "Group", accelerator: "CmdOrCtrl+G", click: send("group") },
-          { label: "Ungroup", accelerator: "CmdOrCtrl+Shift+G", click: send("ungroup") },
-        ],
-      },
-      {
-        label: "View",
-        submenu: [
-          { label: "Fit", accelerator: "CmdOrCtrl+0", click: send("zoom-fit") },
-          { label: "Fit Selection", accelerator: "CmdOrCtrl+Shift+0", click: send("zoom-fit-selection") },
-          { label: "100%", accelerator: "CmdOrCtrl+1", click: send("zoom-100") },
-          { type: "separator" },
-          { label: "Rulers", accelerator: "CmdOrCtrl+R", click: send("toggle-rulers") },
-          { type: "separator" },
-          { role: "toggleDevTools" },
-        ],
-      },
-      {
-        label: "Help",
-        submenu: [{ label: "Check for Updates…", click: send("check-updates") }],
-      },
-    ]),
-  );
+  const DEFAULT_ACCELERATORS: Record<string, string | null> = {
+    "new-project": "Ctrl+Shift+N",
+    "open-project": "Ctrl+O",
+    "new-document": "Ctrl+N",
+    save: "Ctrl+S",
+    "save-all": "Ctrl+Shift+S",
+    "export-nx": "Ctrl+E",
+    "export-all": "Ctrl+Shift+E",
+    settings: "Ctrl+,",
+    undo: "Ctrl+Z",
+    redo: "Ctrl+Y",
+    duplicate: "Ctrl+D",
+    group: "Ctrl+G",
+    ungroup: "Ctrl+Shift+G",
+    "zoom-fit": "Ctrl+0",
+    "zoom-fit-selection": "Ctrl+Shift+0",
+    "zoom-100": "Ctrl+1",
+    "toggle-rulers": "Ctrl+R",
+    "command-palette": "Ctrl+Shift+P",
+  };
+  const installAppMenu = (accelerators: Record<string, string | null>): void => {
+    // renderer chords say "Ctrl"; make them portable OS accelerators
+    const acc = (id: string): string | undefined => {
+      const keys = id in accelerators ? accelerators[id] : DEFAULT_ACCELERATORS[id];
+      return keys ? keys.replace(/(^|\+)Ctrl(\+|$)/, "$1CmdOrCtrl$2") : undefined;
+    };
+    const item = (label: string, id: string): Electron.MenuItemConstructorOptions => ({
+      label,
+      accelerator: acc(id),
+      click: send(id),
+    });
+    Menu.setApplicationMenu(
+      Menu.buildFromTemplate([
+        {
+          label: "File",
+          submenu: [
+            item("New Project…", "new-project"),
+            item("Open Project…", "open-project"),
+            { type: "separator" },
+            item("New Document…", "new-document"),
+            item("Reload Diffuse", "reload-diffuse"),
+            { type: "separator" },
+            item("Save", "save"),
+            item("Save All", "save-all"),
+            { type: "separator" },
+            item("Export NX", "export-nx"),
+            item("Export All NX", "export-all"),
+            { type: "separator" },
+            item("Settings…", "settings"),
+            { type: "separator" },
+            { role: "quit" },
+          ],
+        },
+        {
+          label: "Edit",
+          submenu: [
+            item("Undo", "undo"),
+            item("Redo", "redo"),
+            { type: "separator" },
+            item("Duplicate", "duplicate"),
+            { label: "Delete", click: send("delete") }, // no accelerator: Del must stay safe in inputs
+            { type: "separator" },
+            item("Group", "group"),
+            item("Ungroup", "ungroup"),
+          ],
+        },
+        {
+          label: "View",
+          submenu: [
+            item("Fit", "zoom-fit"),
+            item("Fit Selection", "zoom-fit-selection"),
+            item("100%", "zoom-100"),
+            { type: "separator" },
+            item("Rulers", "toggle-rulers"),
+            item("Command Palette…", "command-palette"),
+            { type: "separator" },
+            { role: "toggleDevTools" },
+          ],
+        },
+        {
+          label: "Help",
+          submenu: [item("Check for Updates…", "check-updates")],
+        },
+      ]),
+    );
+  };
+  installAppMenu({});
+  ipcMain.handle("menu:accelerators", (_e, map: Record<string, string | null>) => installAppMenu(map));
   // The menu is rendered in-window (carapace MenuBar in the toolbar). Keep the native menu set so its
   // accelerators stay live, but hide the native bar so it isn't shown twice (autoHideMenuBar stays
   // false, so it won't reappear on Alt either).
