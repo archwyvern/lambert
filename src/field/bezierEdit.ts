@@ -1,6 +1,33 @@
 import { Vector2 } from "@carapace/primitives";
-import { BezierAnchor, bezierAnchor } from "./bezier";
+import { bakeMaskLoop, bakeRings, bakeRingsUniform, BezierAnchor, bezierAnchor } from "./bezier";
+import { getObjectType, ObjectTypeId } from "./registry";
+import type { ObjectInstance } from "./types";
 import { v2 } from "./vec";
+
+/**
+ * Apply an edited Bézier path to an object, REBAKING the derived controlPoints where the type
+ * needs them: rings objects loft/CSG their baked rings (Mesa lofts -> uniform bake for equal
+ * counts; Surface just CSGs -> the optimized bake), polygon fills bake the closed loop, analytic
+ * strokes carry no baked points. Every path edit — gizmo drags, context-menu ops, AND keyboard
+ * nudges — must go through this, or the rendered field silently lags the gizmo.
+ */
+export function applyBezierEdit(
+  sh: ObjectInstance,
+  next: BezierAnchor[],
+  starts?: { subpathStarts: number[] | undefined },
+): ObjectInstance {
+  const withPath = { ...sh, bezier: next, subpathStarts: starts ? starts.subpathStarts : sh.subpathStarts };
+  const kind = getObjectType(sh.typeId).controlPoints.kind;
+  if (kind === "rings") {
+    const r =
+      sh.typeId === ObjectTypeId.PlateauVector
+        ? bakeRingsUniform(next, withPath.subpathStarts)
+        : bakeRings(next, withPath.subpathStarts);
+    return { ...withPath, controlPoints: r.controlPoints, ringSplit: r.ringSplit, contourCounts: r.contourCounts };
+  }
+  if (kind === "polygon") return { ...withPath, controlPoints: bakeMaskLoop(next) };
+  return withPath; // analytic stroke: no baked controlPoints
+}
 
 /** Move anchor i to localPt. Plain move keeps it smooth (tangents re-derive); breakSymmetric pulls
  *  out symmetric manual tangents from the cursor (Alt-drag). */
