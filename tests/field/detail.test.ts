@@ -18,7 +18,7 @@ function stripes(noise = 0): { data: Uint8Array; width: number; height: number; 
     for (let x = 0; x < w; x++) {
       const bright = x >= 20 && x < 28;
       let v = bright ? 230 : 50;
-      if (noise > 0) v += (x % 2 === 0 ? 1 : -1) * noise; // 1px vertical jitter stripes (strong Sobel-x)
+      if (noise > 0) v += (Math.floor(x / 3) % 2 === 0 ? 1 : -1) * noise; // period-6 jitter stripes (below Nyquist, so the FC solve preserves them when ungated)
       const i = (y * w + x) * 4;
       data[i] = v;
       data[i + 1] = v;
@@ -157,4 +157,34 @@ test("alpha scales luminance: half-transparent white reads as mid-gray", () => {
   const opaqueSide = sampleDetail(field, 12, 24)[0];
   const fadedSide = sampleDetail(field, 36, 24)[0];
   expect(opaqueSide).toBeGreaterThan(fadedSide + 0.5); // the faded half is LOWER (darker)
+});
+
+test("silhouette rim: no opposite-tilt fringe, no Nyquist ringing", () => {
+  // an ANTIALIASED diagonal silhouette on transparency — the artwork case that fringed: the old
+  // zero-clipped transparent texels put a step-up valley outside the rim (opposite normals under
+  // supersampling), and the sin-form FC operator rang a +-checkerboard across the whole field
+  const w = 48;
+  const data = new Uint8Array(w * w * 4);
+  for (let y = 0; y < w; y++) {
+    for (let x = 0; x < w; x++) {
+      const t = x - y + 16;
+      const a = t >= 10 && t < 26 ? 255 : (t >= 9 && t < 10) || (t >= 26 && t < 27) ? 128 : 0;
+      const i = (y * w + x) * 4;
+      data[i] = 200;
+      data[i + 1] = 200;
+      data[i + 2] = 200;
+      data[i + 3] = a;
+    }
+  }
+  const field = computeDetailField({ data, width: w, height: w, channels: 4 }, { radius: 1, blur: 1, tolerance: 0.05 });
+  const row = 24;
+  const at = (x: number): number => field.data[(row * w + x) * 4]!;
+  // rim is MONOTONIC from outside to plateau: no valley, so no opposite slope exists to derive
+  for (let x = 16; x < 21; x++) expect(at(x + 1)).toBeGreaterThan(at(x) - 1e-3);
+  // the transparent far field sits near 0 (rebased), smooth: no +-checkerboard ringing
+  for (let x = 4; x < 12; x++) expect(Math.abs(at(x))).toBeLessThan(0.4);
+  // the interior plateau is flat to ~1% of its height (the sin-operator jitter was ~+-3%)
+  const plateau = [at(22), at(23), at(24), at(25), at(26)];
+  const mean = plateau.reduce((a, b) => a + b) / plateau.length;
+  for (const v of plateau) expect(Math.abs(v - mean)).toBeLessThan(mean * 0.01);
 });

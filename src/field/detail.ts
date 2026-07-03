@@ -155,11 +155,13 @@ function integrateGradient(dhdx: Float32Array, dhdy: Float32Array, w: number, h:
   const hRe = new Float64Array(W * H);
   const hIm = new Float64Array(W * H);
   for (let v = 0; v < H; v++) {
-    // discrete frequency operators (sin form matches the finite-difference gradient best)
-    const wy = Math.sin((2 * Math.PI * (v < H / 2 ? v : v - H)) / H);
+    // LINEAR frequency operators (2·pi·k/N), NOT the sin form: sin vanishes near Nyquist, so the
+    // division amplified near-Nyquist noise into a +-checkerboard ring across the whole field.
+    // The Sobel can't observe those frequencies anyway — the linear operator suppresses them.
+    const wy = (2 * Math.PI * (v < H / 2 ? v : v - H)) / H;
     const vn = v === 0 ? 0 : H - v; // -k row
     for (let u = 0; u < W; u++) {
-      const wx = Math.sin((2 * Math.PI * (u < W / 2 ? u : u - W)) / W);
+      const wx = (2 * Math.PI * (u < W / 2 ? u : u - W)) / W;
       const denom = wx * wx + wy * wy;
       if (denom < 1e-12) continue; // DC: height mean is arbitrary, leave 0
       const i = v * W + u;
@@ -392,8 +394,22 @@ export function computeDetailField(
   // 4. integrate to height (Frankot–Chellappa)
   const height = integrateGradient(sgx, sgy, w, h);
 
+  // Re-base so the TRANSPARENT far-field sits at ~0, and store the smooth solution EVERYWHERE.
+  // Clipping transparent texels to 0 (the old behaviour) put a 1px step-UP just outside the
+  // silhouette (the continuation there is negative) — supersampled exports derived an
+  // opposite-tilt fringe from that artificial valley. The smooth field has no step; the export's
+  // diffuse-alpha gate keeps anything outside the silhouette from shipping.
+  let outsideSum = 0;
+  let outsideN = 0;
+  for (let i = 0; i < w * h; i++) {
+    if (!opaque[i]) {
+      outsideSum += height[i]!;
+      outsideN++;
+    }
+  }
+  const shift = outsideN > 0 ? outsideSum / outsideN : 0;
   const data = new Float32Array(w * h * 4);
-  for (let i = 0; i < w * h; i++) data[i * 4] = opaque[i] ? height[i]! : 0;
+  for (let i = 0; i < w * h; i++) data[i * 4] = height[i]! - shift;
   return { data, width: w, height: h, scale: fieldScale };
 }
 
