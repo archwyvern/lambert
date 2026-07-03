@@ -3,6 +3,7 @@ import "../../src/field/objects";
 import { createObjectInstance, ObjectTypeId } from "../../src/field/registry";
 import {
   effectiveNormalDirs,
+  effectiveOutput,
   emptyDoc,
   emptyProjectConfig,
   hydrateObjectRaw,
@@ -14,14 +15,28 @@ import {
 } from "../../src/document/schema";
 import { v2 } from "../../src/field/vec";
 
-test("project config round-trips with default normal dirs", () => {
+test("project config round-trips with default normal dirs + output format", () => {
   const config = emptyProjectConfig();
-  expect(config).toEqual({ schemaVersion: 1, normalDirs: { red: "right", green: "up" } });
+  expect(config).toEqual({
+    schemaVersion: 1,
+    normalDirs: { red: "right", green: "up" },
+    output: { channels: "rgba", depth: 16, format: "png" },
+  });
   expect(parseProjectConfig(serializeProjectConfig(config))).toEqual(config);
 });
 
-test("project config applies normalDirs defaults when absent", () => {
+test("project config applies normalDirs + output defaults when absent (pre-output files)", () => {
   expect(parseProjectConfig(JSON.stringify({ schemaVersion: 1 }))).toEqual(emptyProjectConfig());
+});
+
+test("doc-level output is an optional override: absent inherits the project, present wins", () => {
+  const doc = emptyDoc("hull.df.png", 64, 64);
+  expect(doc.output).toBeUndefined();
+  const config = emptyProjectConfig();
+  expect(effectiveOutput(doc, config)).toEqual({ channels: "rgba", depth: 16, format: "png" });
+  const overridden = { ...(doc as Record<string, unknown>), output: { channels: "rg", depth: 8, format: "png" } };
+  const back = parseDoc(JSON.stringify(overridden));
+  expect(effectiveOutput(back, config)).toEqual({ channels: "rg", depth: 8, format: "png" });
 });
 
 test("default normalDirs are independent per parse (no shared-constant mutation hazard)", () => {

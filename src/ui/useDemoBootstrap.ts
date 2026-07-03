@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { DocumentStore } from "../document/store";
-import { emptyDoc } from "../document/schema";
+import { emptyDoc, emptyProjectConfig } from "../document/schema";
 import { findNode } from "../document/layerOps";
 import { Tab, Workspace } from "../document/workspace";
 import type { ViewState } from "./App";
@@ -42,7 +42,7 @@ export function useDemoBootstrap(opts: {
         }
         const objects = q.has("stress") ? stressFieldObjects(w, q.has("overlap")) : q.has("masked") ? maskedObjects() : q.has("mesh") ? meshObjects() : q.has("paths") ? [...pipeObjects(), ...vectorFillObjects()] : goldenObjects();
         const doc = { ...emptyDoc("file:///demo/demo.df.png", w, h), layers: objects };
-        const ws = new Workspace("/demo", { schemaVersion: 1, normalDirs: { red: "right", green: "up" } });
+        const ws = new Workspace("/demo", emptyProjectConfig());
         const tab: Tab = {
           id: crypto.randomUUID(),
           docPath: null,

@@ -3,6 +3,7 @@ import type { Host } from "../ui/host";
 import { DocumentStore } from "./store";
 import { type LambertDoc,
   effectiveNormalDirs,
+  effectiveOutput,
   emptyProjectConfig,
   parseDoc,
   parseProjectConfig,
@@ -127,7 +128,7 @@ export async function exportDocNx(host: Host, doc: LambertDoc, label: string, co
         `${doc.source.width}x${doc.source.height} — the NX contract requires an exact match`,
     );
   }
-  const file = buildNxExport(doc, render, outPath, effectiveNormalDirs(doc, config), diffuseOpacity(diffuse));
+  const file = buildNxExport(doc, render, outPath, effectiveNormalDirs(doc, config), effectiveOutput(doc, config), diffuseOpacity(diffuse));
   await host.writeFile(file.path, file.bytes);
   return file.warning ? `${file.path} written — WARNING: ${file.warning}` : `wrote ${file.path}`;
 }

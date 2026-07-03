@@ -1,7 +1,14 @@
-import { FormToggle, SettingsModal, SpinSlider } from "@carapace/shell";
+import { FormToggle, Segmented, SettingsModal, SpinSlider } from "@carapace/shell";
 import type { SettingsScreen } from "@carapace/shell";
 import type { DocumentStore, EditorState } from "../document/store";
-import { DEFAULT_NORMAL_DIRS, type NormalDirs, type ProjectConfig } from "../document/schema";
+import {
+  DEFAULT_NORMAL_DIRS,
+  type NormalDirs,
+  type OutputChannels,
+  type OutputFormat,
+  type OutputSettings,
+  type ProjectConfig,
+} from "../document/schema";
 import { NormalDirsEditor } from "./NormalDirsEditor";
 import { Button } from "./kit";
 
@@ -17,6 +24,71 @@ function Row(props: { label: string; children: React.ReactNode }): React.JSX.Ele
 
 function Blurb(props: { children: React.ReactNode }): React.JSX.Element {
   return <p className="mb-3 max-w-lg text-base leading-snug text-fg-mid">{props.children}</p>;
+}
+
+const CHANNEL_OPTIONS: Array<{ value: OutputChannels; label: string }> = [
+  { value: "rgba", label: "RGBA" },
+  { value: "rgb", label: "RGB" },
+  { value: "rg", label: "RG" },
+  { value: "rga", label: "RGA" },
+];
+
+const CHANNEL_HINTS: Record<OutputChannels, string> = {
+  rgba: "X, Y, Z and the alpha gate — the full contract.",
+  rgb: "X, Y, Z; no alpha gate (the consumer applies the override everywhere).",
+  rg: "X and Y only; the consumer reconstructs Z. No alpha gate.",
+  rga: "X, Y, and the alpha gate in the third slot; the consumer reconstructs Z.",
+};
+
+/** The channels/depth/format triple, shared by the project screen and the per-doc override. */
+function OutputFormatEditor(props: { value: OutputSettings; onChange: (o: OutputSettings) => void }): React.JSX.Element {
+  const { value, onChange } = props;
+  const setFormat = (format: OutputFormat): void =>
+    // RGBE has no alpha and exactly three mantissas — entering hdr coerces the layout to rgb
+    onChange(format === "hdr" ? { ...value, format, channels: "rgb" } : { ...value, format });
+  return (
+    <div>
+      <Row label="File format">
+        <Segmented
+          label="File format"
+          options={[
+            { value: "png", label: "PNG" },
+            { value: "exr", label: "EXR" },
+            { value: "hdr", label: "HDR" },
+          ]}
+          value={value.format}
+          onChange={setFormat}
+        />
+      </Row>
+      <Row label="Channels">
+        {value.format === "hdr" ? (
+          <span className="text-base text-fg-mid">RGB — Radiance RGBE has no alpha channel</span>
+        ) : (
+          <Segmented label="Channels" options={CHANNEL_OPTIONS} value={value.channels} onChange={(channels) => onChange({ ...value, channels })} />
+        )}
+      </Row>
+      {value.format !== "hdr" ? (
+        <p className="mb-1 ml-[9.75rem] max-w-md text-sm leading-snug text-fg-mid">{CHANNEL_HINTS[value.channels]}</p>
+      ) : null}
+      <Row label="Bit depth">
+        {value.format === "png" ? (
+          <Segmented
+            label="Bit depth"
+            options={[
+              { value: "8", label: "8-bit" },
+              { value: "16", label: "16-bit" },
+            ]}
+            value={String(value.depth) as "8" | "16"}
+            onChange={(d) => onChange({ ...value, depth: d === "8" ? 8 : 16 })}
+          />
+        ) : (
+          <span className="text-base text-fg-mid">
+            {value.format === "exr" ? "float32 scanlines (uncompressed)" : "RGBE — 8-bit mantissas + shared exponent"}
+          </span>
+        )}
+      </Row>
+    </div>
+  );
 }
 
 /**
@@ -51,6 +123,21 @@ export function SettingsDialog(props: {
         </div>
       ),
     },
+    {
+      id: "project-output",
+      label: "Output Format",
+      group: "Project",
+      render: () => (
+        <div>
+          <Blurb>
+            What Export NX writes: channel layout, bit depth, and file container. Project-wide, stored
+            in project.lambert so exports are reproducible; a document can override it (Document ›
+            Output Format). The default — 16-bit RGBA PNG — is the Skyrat NX contract.
+          </Blurb>
+          <OutputFormatEditor value={config.output} onChange={(output) => onConfig({ ...config, output })} />
+        </div>
+      ),
+    },
   ];
 
   if (store && state) {
@@ -61,6 +148,10 @@ export function SettingsDialog(props: {
     };
     const setDocDirs = (dirs: NormalDirs | undefined): void => {
       store.update((d) => ({ ...d, normalDirs: dirs }));
+      store.endGesture();
+    };
+    const setDocOutput = (output: OutputSettings | undefined): void => {
+      store.update((d) => ({ ...d, output }));
       store.endGesture();
     };
     screens.push(
@@ -120,6 +211,35 @@ export function SettingsDialog(props: {
               disabled={doc.normalDirs === undefined}
               onChange={(d) => setDocDirs(d)}
             />
+          </div>
+        ),
+      },
+      {
+        id: "doc-output",
+        label: "Output Format",
+        group: "Document",
+        render: () => (
+          <div>
+            <Blurb>
+              Override the project's output format for this document only. Stored in the .lmb, so it
+              travels with the file.
+            </Blurb>
+            <div className="mb-3">
+              <FormToggle
+                label="Override project setting"
+                value={doc.output !== undefined}
+                onChange={(on) => setDocOutput(on ? { ...(doc.output ?? config.output) } : undefined)}
+              />
+            </div>
+            {doc.output !== undefined ? (
+              <OutputFormatEditor value={doc.output} onChange={(o) => setDocOutput(o)} />
+            ) : (
+              <p className="max-w-lg text-base text-fg-mid">
+                Using the project setting: {config.output.channels.toUpperCase()},{" "}
+                {config.output.format === "png" ? `${config.output.depth}-bit ` : ""}
+                {config.output.format.toUpperCase()}.
+              </p>
+            )}
           </div>
         ),
       },

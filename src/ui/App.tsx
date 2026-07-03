@@ -8,9 +8,10 @@ import { addNode, cloneNode, findNode, ungroup, updateNode, wrapInGroup } from "
 import { flattenLayers } from "../field/flatten";
 import { isGroup, isObject, type LayerNode, type ObjectInstance } from "../field/types";
 import { Vector2, Vector3 } from "@carapace/primitives";
-import { effectiveNormalDirs, emptyDoc, hydrateObjectRaw, parseDoc, parseProjectConfig, presetLibrarySchema, ProjectConfig, serializeDoc, serializeProjectConfig, type SavedPreset } from "../document/schema";
+import { effectiveNormalDirs, effectiveOutput, emptyDoc, hydrateObjectRaw, parseDoc, parseProjectConfig, presetLibrarySchema, ProjectConfig, serializeDoc, serializeProjectConfig, type SavedPreset } from "../document/schema";
 import { getObjectType, ObjectTypeId } from "../field/registry";
 import { exportDocNx, exportTabNx, newProjectFlow, openDocTab, openProjectByPath, openProjectFlow, saveTab, type OpenedProject } from "../document/io";
+import { nxExtension } from "../document/exports";
 import { resolveDiffuse } from "../document/diffuseSource";
 import { basename, dirname, joinPath } from "../document/paths";
 import { pushRecent, removeRecent, type RecentProject } from "../document/recents";
@@ -435,12 +436,13 @@ export function App(): React.JSX.Element {
     }
     // OS save dialog defaulting into <project>/.exports/ (created on demand); null = cancelled
     void (async () => {
+      const output = effectiveOutput(t.store.state.doc, ws.config);
       const exportsDir = joinPath(ws.projectPath, ".exports");
       await getHost().mkdir(exportsDir).catch(() => {});
       const out = await getHost().saveDialog({
         title: "Export NX",
-        defaultPath: joinPath(exportsDir, basename(t.docPath!).replace(/\.lmb$/i, "") + ".nx.png"),
-        filters: [{ name: "NX normal map", extensions: ["png"] }],
+        defaultPath: joinPath(exportsDir, basename(t.docPath!).replace(/\.lmb$/i, "") + nxExtension(output)),
+        filters: [{ name: "NX normal map", extensions: [output.format] }],
       });
       if (!out) return;
       run(exportTabNx(getHost(), t, ws.config, out).then((r) => { refreshGitStatus(); return r; }));
@@ -477,7 +479,8 @@ export function App(): React.JSX.Element {
         Promise.allSettled(
           lmbs.map(async (lmb) => {
             const doc = liveDocs.get(lmb) ?? parseDoc(new TextDecoder().decode(await getHost().readFile(lmb)));
-            return exportDocNx(getHost(), doc, lmb, ws.config, joinPath(dir, basename(lmb).replace(/\.lmb$/i, "") + ".nx.png"));
+            const ext = nxExtension(effectiveOutput(doc, ws.config)); // per-doc override may change the container
+            return exportDocNx(getHost(), doc, lmb, ws.config, joinPath(dir, basename(lmb).replace(/\.lmb$/i, "") + ext));
           }),
         ).then((results) => {
           refreshGitStatus();
