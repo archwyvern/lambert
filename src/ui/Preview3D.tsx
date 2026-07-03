@@ -1,4 +1,4 @@
-import { AddRegular, ArrowResetRegular, ArrowSwapRegular, SubtractRegular } from "@fluentui/react-icons";
+import { AddRegular, ArrowResetRegular, ArrowSwapRegular, PowerRegular, SubtractRegular } from "@fluentui/react-icons";
 import { useEffect, useRef, useState } from "react";
 import { ShortcutGuide } from "@carapace/shell";
 import { DEFAULT_ORBIT } from "../field/gpu/preview3d";
@@ -20,6 +20,8 @@ export function Preview3D(props: {
   docW: number;
   docH: number;
   enabled: boolean;
+  /** Toggle the 3D preview on/off (off skips the displaced-grid pass entirely). */
+  onToggle: () => void;
   /** Called after the 3D canvas resizes so the renderer re-renders at the new resolution. */
   onResize: () => void;
   /** Occupying the big slot — show the navigation guide (the small corner is too tight for it). */
@@ -30,7 +32,7 @@ export function Preview3D(props: {
   lightDir: [number, number, number];
   onLightChange: (dir: [number, number, number]) => void;
 }): React.JSX.Element {
-  const { cam, canvasRef, docW, docH, enabled, onResize, big, onSwap, lightDir, onLightChange } = props;
+  const { cam, canvasRef, docW, docH, enabled, onToggle, onResize, big, onSwap, lightDir, onLightChange } = props;
   const hostRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 1, h: 1 });
 
@@ -77,23 +79,39 @@ export function Preview3D(props: {
         }}
         onContextMenu={(e) => e.preventDefault()}
       />
+      {!enabled ? (
+        // solid cover: hides the stale last frame AND blocks orbit gestures; one click enables
+        <button
+          className="absolute inset-0 grid cursor-pointer place-items-center bg-[var(--color-viewport-bg)] text-sm text-fg-mid hover:text-fg"
+          onClick={onToggle}
+        >
+          3D preview off — click to enable
+        </button>
+      ) : null}
       <div className="pointer-events-none absolute inset-x-0 top-0 flex h-[22px] items-center px-2">
         <span className="text-sm font-semibold uppercase tracking-wide text-fg-mid">3D</span>
       </div>
       <div className="pointer-events-none absolute top-2 right-3 flex items-start gap-2">
         <div className="pointer-events-auto flex items-center gap-0.5">
-          <button aria-label={big ? "Swap to corner" : "Swap to big view"} title={big ? "Swap to corner" : "Swap to big view"} className={iconBtn} onClick={onSwap}>
+          <button aria-label={big ? "Swap to corner" : "Swap to big view"} title={big ? "Swap to corner (X)" : "Swap to big view (X)"} className={iconBtn} onClick={onSwap}>
             <ArrowSwapRegular style={{ fontSize: ICON.xs }} />
           </button>
-          <button aria-label="Reset view" title="Reset view" className={iconBtn} onClick={() => cam.setOrbit({ ...DEFAULT_ORBIT })}>
-            <ArrowResetRegular style={{ fontSize: ICON.xs }} />
-          </button>
-          <button aria-label="Zoom out" title="Zoom out" className={iconBtn} onClick={() => cam.zoomBy(1.25)}>
-            <SubtractRegular style={{ fontSize: ICON.xs }} />
-          </button>
-          <button aria-label="Zoom in" title="Zoom in" className={iconBtn} onClick={() => cam.zoomBy(0.8)}>
-            <AddRegular style={{ fontSize: ICON.xs }} />
-          </button>
+          {enabled ? (
+            <>
+              <button aria-label="Reset view" title="Reset view" className={iconBtn} onClick={() => cam.setOrbit({ ...DEFAULT_ORBIT })}>
+                <ArrowResetRegular style={{ fontSize: ICON.xs }} />
+              </button>
+              <button aria-label="Zoom out" title="Zoom out" className={iconBtn} onClick={() => cam.zoomBy(1.25)}>
+                <SubtractRegular style={{ fontSize: ICON.xs }} />
+              </button>
+              <button aria-label="Zoom in" title="Zoom in" className={iconBtn} onClick={() => cam.zoomBy(0.8)}>
+                <AddRegular style={{ fontSize: ICON.xs }} />
+              </button>
+              <button aria-label="Turn 3D preview off" title="Turn 3D preview off" className={iconBtn} onClick={onToggle}>
+                <PowerRegular style={{ fontSize: ICON.xs }} />
+              </button>
+            </>
+          ) : null}
         </div>
         {enabled && big ? (
           <div
@@ -151,9 +169,6 @@ export function Preview3D(props: {
             </g>
           ) : null}
         </svg>
-      ) : null}
-      {!enabled ? (
-        <div className="absolute inset-0 grid place-items-center text-sm text-fg-mid">3D preview</div>
       ) : null}
       {enabled && big ? <ShortcutGuide position="absolute" storageKey="lambert.guide3d.open" sections={GUIDE_3D} /> : null}
     </div>

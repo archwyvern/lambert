@@ -98,7 +98,8 @@ export function CanvasView(props: {
   onLightChange: (dir: [number, number, number]) => void;
   onEnergyChange: (energy: number) => void;
   canvas3dRef: React.RefObject<HTMLCanvasElement | null>;
-  orbit3d: Orbit;
+  /** Null = the 3D preview is disabled; the pass is skipped entirely. */
+  orbit3d: Orbit | null;
   /** EFFECTIVE normal-channel convention (doc override, else project), for the normal-view encode. */
   normalDirs: NormalDirs;
   /** The doc overrides the project convention (the tint widget labels itself accordingly). */
