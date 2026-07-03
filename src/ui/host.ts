@@ -15,7 +15,17 @@ export type UpdateEvent =
   | { type: "downloaded"; version: string }
   | { type: "error"; message: string };
 
+export interface DiagnosticsInfo {
+  electron: string;
+  chromium: string;
+  node: string;
+  v8: string;
+  os: string;
+}
+
 export interface Host {
+  /** Runtime versions + OS string for the About dialog (synchronous — read in the preload). */
+  diagnostics(): DiagnosticsInfo;
   openDialog(opts: { title: string; filters: FileFilter[] }): Promise<string | null>;
   saveDialog(opts: { title: string; defaultPath?: string; filters: FileFilter[] }): Promise<string | null>;
   /** Folder picker (project open/new); defaultPath reopens the dialog at the last-used directory. */

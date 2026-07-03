@@ -1,7 +1,16 @@
 import { contextBridge, ipcRenderer } from "electron";
+import os from "node:os";
 import { exposeFs, exposeOs } from "@carapace/shell/ipc";
 
 contextBridge.exposeInMainWorld("lambertHost", {
+  // runtime versions + OS for the About dialog's diagnostics block (preload has process access)
+  diagnostics: () => ({
+    electron: process.versions.electron ?? "?",
+    chromium: process.versions.chrome ?? "?",
+    node: process.versions.node ?? "?",
+    v8: process.versions.v8 ?? "?",
+    os: `${os.type()} ${os.release()} (${process.arch})`,
+  }),
   sendSelftestResult: (report: unknown) => ipcRenderer.send("selftest-result", report),
   openDialog: (opts: unknown) => ipcRenderer.invoke("dialog:open", opts),
   saveDialog: (opts: unknown) => ipcRenderer.invoke("dialog:save", opts),

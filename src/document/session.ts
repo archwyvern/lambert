@@ -8,7 +8,7 @@ import { docSchema, hydrateDoc, LambertDoc } from "./schema";
  * launch. Doubles as crash recovery: stashed (debounced) on every edit, so unsaved work survives a crash.
  */
 const viewSchema = z.object({
-  mode: z.enum(["diffuse", "normal", "lit"]).catch("lit"), // old "height" sessions fall back to lit
+  mode: z.enum(["diffuse", "normal", "lit", "coverage"]).catch("lit"), // unknown/legacy modes fall back to lit
   opacity: z.number().min(0).max(1),
   lightDir: z.tuple([z.number(), z.number(), z.number()]),
   // a legacy `raster` field from before the vector/raster toggle was removed is simply ignored on load

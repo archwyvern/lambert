@@ -115,11 +115,13 @@ export function CanvasView(props: {
   snap: boolean;
   /** Show the top/left rulers (insets the canvas area). */
   rulers: boolean;
+  /** Pixel grid overlay at high zoom (View > Pixel Grid). */
+  pixelGrid: boolean;
 }): React.JSX.Element {
   const { store, state, view, tool, diffuseBytes, selVerts, setSelVerts, onLightChange, onEnergyChange, canvas3dRef, orbit3d, normalDirs, swapped } =
     props;
   const { tabId, savedViewport, onViewportChange, setTool, snap, rulers, resolvePaletteObject, maskFocus } = props;
-  const { overridesNormalDirs, openSettings } = props;
+  const { overridesNormalDirs, openSettings, pixelGrid } = props;
   const inset = rulers ? RULER : 0;
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -815,6 +817,24 @@ export function CanvasView(props: {
             message="Open a diffuse image (or an existing project) from the File menu to start."
           />
         </div>
+      ) : null}
+      {/* pixel grid: Aseprite-style faint 1px-cell lines fading in past ~800% zoom (CSS gradients
+          sized to the zoom — no per-cell elements), clipped to the doc rect */}
+      {diffuseBytes && pixelGrid && viewport.zoom >= 8 ? (
+        <div
+          className="pointer-events-none absolute"
+          style={{
+            left: viewport.panX,
+            top: viewport.panY,
+            width: doc.source.width * viewport.zoom,
+            height: doc.source.height * viewport.zoom,
+            opacity: Math.min(0.3, ((viewport.zoom - 8) / 8) * 0.3),
+            backgroundImage:
+              "linear-gradient(to right, rgba(255,255,255,0.7) 1px, transparent 1px)," +
+              "linear-gradient(to bottom, rgba(255,255,255,0.7) 1px, transparent 1px)",
+            backgroundSize: `${viewport.zoom}px ${viewport.zoom}px`,
+          }}
+        />
       ) : null}
       {/* guides: teal full-extent lines; when unlocked, a fat invisible hit-line drags / right-clicks each */}
       {diffuseBytes ? (

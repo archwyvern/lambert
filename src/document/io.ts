@@ -138,3 +138,14 @@ export async function exportTabNx(host: Host, tab: Tab, config: ProjectConfig, o
   if (!tab.docPath) throw new Error("Save the document before exporting its NX");
   return exportDocNx(host, tab.store.state.doc, tab.docPath, config, outPath);
 }
+
+/** Export the active tab's height field as 16-bit grayscale PNG (heights normalized min->0,
+ *  max->65535). Same ss2 render as the NX; no diffuse involvement (the height field is authored). */
+export async function exportTabHeightmap(host: Host, tab: Tab, outPath: string): Promise<string> {
+  if (!tab.docPath) throw new Error("Save the document before exporting its height map");
+  const { gpuExportRender } = await import("../ui/exportRender");
+  const render = await gpuExportRender(tab.store.state.doc);
+  const { encodeHeightmapPng } = await import("../exporters/heightmap");
+  await host.writeFile(outPath, encodeHeightmapPng(render));
+  return `wrote ${outPath}`;
+}

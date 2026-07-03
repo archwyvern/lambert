@@ -1,4 +1,4 @@
-import { CircleHalfFillRegular, GridRegular, ImageRegular, LightbulbRegular, LockClosedRegular, LockOpenRegular, RulerRegular } from "@fluentui/react-icons";
+import { CircleHalfFillRegular, ColorFillRegular, GridRegular, ImageRegular, LightbulbRegular, LockClosedRegular, LockOpenRegular, RulerRegular } from "@fluentui/react-icons";
 import { IconButton, SpinSlider } from "@carapace/shell";
 import type { DocumentStore, EditorState } from "../document/store";
 import type { ViewState } from "./App";
@@ -8,6 +8,7 @@ const MODE_META: Record<ViewMode, { icon: React.JSX.Element; label: string }> = 
   diffuse: { icon: <ImageRegular />, label: "Diffuse — the source texture" },
   normal: { icon: <CircleHalfFillRegular />, label: "Normal — the derived normal map" },
   lit: { icon: <LightbulbRegular />, label: "Lit — the normal map under the scene light" },
+  coverage: { icon: <ColorFillRegular />, label: "Coverage — red where the diffuse is opaque but no normal is authored" },
 };
 
 /**
