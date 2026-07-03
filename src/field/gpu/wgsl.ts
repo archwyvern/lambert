@@ -121,6 +121,39 @@ fn plateau_tri(p: vec2f, a: vec2f, b: vec2f, c: vec2f, ha: f32, hb: f32, hc: f32
   return vec2f(ha + u * (hb - ha) + v * (hc - ha), 1.0);
 }
 
+// Exact per-segment ∫ ds/d⁴ of the soft-boundary integral (mirrors segmentInv4 in field/softDist.ts
+// — see the derivation there). Shared by Pillow (interior inflation) and Mesa (two-ring slope).
+fn soft_seg_inv(p: vec2f, a: vec2f, b: vec2f) -> f32 {
+  let e = b - a;
+  let len = length(e);
+  if (len < 1e-6) { return 0.0; }
+  let w = p - a;
+  let proj = dot(w, e) / len;
+  let h2 = max(dot(w, w) - proj * proj, 0.0) + 0.25;
+  let h = sqrt(h2);
+  let u1 = len - proj;
+  let u0 = -proj;
+  let f1 = u1 / (2.0 * h2 * (u1 * u1 + h2)) + atan(u1 / h) / (2.0 * h2 * h);
+  let f0 = u0 / (2.0 * h2 * (u0 * u0 + h2)) + atan(u0 / h) / (2.0 * h2 * h);
+  return f1 - f0;
+}
+
+// ∮ over one closed ring of baked points.
+fn soft_ring_inv(p: vec2f, start: u32, count: u32) -> f32 {
+  var inv = 0.0;
+  for (var j = 0u; j < count; j = j + 1u) {
+    let a = points[start + j];
+    let b = points[start + select(j + 1u, 0u, j + 1u >= count)];
+    inv = inv + soft_seg_inv(p, a, b);
+  }
+  return inv;
+}
+
+// The C-inf soft distance to one ring: (∮ ds/d⁴)^(-1/3).
+fn soft_ring_dist(p: vec2f, start: u32, count: u32) -> f32 {
+  return pow(soft_ring_inv(p, start, count), -0.33333333);
+}
+
 fn sd_segment(p: vec2f, a: vec2f, b: vec2f) -> f32 {
   let pa = p - a;
   let ba = b - a;
