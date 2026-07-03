@@ -103,7 +103,7 @@ export function renderField(
   opts: RenderOptions,
 ): RenderResult {
   const f = opts.supersample;
-  const ctx = opts.detail ? { detail: { field: opts.detail, scale: 1 / f } } : undefined;
+  const ctx = opts.detail ? { detail: { field: opts.detail, scale: opts.detail.scale / f } } : undefined;
   if (f === 1) {
     const field = evaluateField(resolved, width, height, ctx);
     return { ...field, normals: deriveNormals(field.heightMap, width, height) };
