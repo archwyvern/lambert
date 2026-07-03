@@ -91,3 +91,30 @@ test("fold: the detail adjustment embosses via strength; negative strength inver
   const noCtx = evaluateField(resolveObjects([slab, adj]), 48, 48);
   expect(noCtx.heightMap[24 * 48 + 24]!).toBeCloseTo(10, 4);
 });
+
+test("box-blur path (sigma > 2) tracks the exact gaussian closely", () => {
+  // straddle the switchover: 2.0 = exact kernel, 2.01 = 3-box normalized convolution
+  const exact = computeDetailField(stripes(), { radius: 1, blur: 2.0, tolerance: 0.05 });
+  const boxed = computeDetailField(stripes(), { radius: 1, blur: 2.01, tolerance: 0.05 });
+  let maxAbs = 0;
+  let maxDiff = 0;
+  for (let i = 0; i < exact.data.length; i += 4) {
+    maxAbs = Math.max(maxAbs, Math.abs(exact.data[i]!));
+    maxDiff = Math.max(maxDiff, Math.abs(exact.data[i]! - boxed.data[i]!));
+  }
+  expect(maxDiff).toBeLessThan(maxAbs * 0.1); // same relief, within 10% of peak
+});
+
+test("preview pass: a downsampled field carries its scale and approximates full res", () => {
+  const full = computeDetailField(stripes(), { radius: 1, blur: 1, tolerance: 0.05 });
+  const half = computeDetailField(stripes(), { radius: 1, blur: 1, tolerance: 0.05 }, 0.5);
+  expect(full.scale).toBe(1);
+  expect(half.width).toBe(24);
+  expect(half.scale).toBeCloseTo(0.5, 5);
+  // sampled in doc space via the scale, the preview lands near the full-res relief
+  const fullOn = sampleDetail(full, 24.5, 24.5)[0];
+  const halfOn = sampleDetail(half, 24.5 * half.scale, 24.5 * half.scale)[0];
+  const fullOff = sampleDetail(full, 8.5, 24.5)[0];
+  const halfOff = sampleDetail(half, 8.5 * half.scale, 24.5 * half.scale)[0];
+  expect(halfOn - halfOff).toBeGreaterThan((fullOn - fullOff) * 0.4); // same raised stripe, preview-quality
+});

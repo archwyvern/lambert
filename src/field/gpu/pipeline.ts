@@ -28,7 +28,9 @@ export const detailBuffer = (d: GPUDevice, detail: DetailField | null | undefine
   const data = new Float32Array(4 + detail.data.length);
   data[0] = detail.width;
   data[1] = detail.height;
-  data[2] = scale;
+  // header scale = eval-space -> texel: the caller's eval scale composed with the field's own
+  // doc-px -> texel scale (1 full res, <1 for a progressive preview field)
+  data[2] = scale * detail.scale;
   data.set(detail.data, 4);
   return storageBuffer(d, data);
 };
