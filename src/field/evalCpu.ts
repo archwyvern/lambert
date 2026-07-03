@@ -27,6 +27,10 @@ export interface EvalContext {
   detail?: { field: DetailField; scale: number };
 }
 
+/** Height change (px) at which an adjustment counts as FULLY authoring a pixel (mask ramps up to
+ *  it) — any perceptible change gates the NX alpha on; a no-op stays un-authored. GPU lockstep. */
+export const ADJUST_MASK_EPS = 0.05;
+
 export function evaluateField(resolved: ResolvedObject[], width: number, height: number, ctx?: EvalContext): FieldResult {
   const adjustCtx: AdjustContext = ctx?.detail
     ? {
@@ -72,10 +76,16 @@ export function evaluateField(resolved: ResolvedObject[], width: number, height:
         let inf = (rs.object.aa ? influence(sd) : sd < 0 ? 1 : 0) * alpha;
         if (rs.masks.length > 0) inf *= maskCoverage(rs.masks, baked, rs.invAffine, rs.scaleHint, p);
         if (inf <= 0) continue;
-        // adjustment layer: transform the ACCUMULATED height inside its region (coverage-gated blend);
-        // contributes no height or mask of its own. WGSL fold_at op == 3u mirrors this.
+        // Adjustment layer: transform the ACCUMULATED height inside its region (coverage-gated
+        // blend). It writes mask coverage only where it actually CHANGED the surface — so an
+        // emboss shows in the normal view and exports its NX alpha, while a no-op transform over
+        // bare ground never un-gates the override. WGSL fold_at op == 3u mirrors this.
         if (op === "adjust") {
-          if (rs.object.adjustments?.length) H = applyAdjustments(H, rs.object.adjustments, local, p, rs.object, inf, adjustCtx);
+          if (rs.object.adjustments?.length) {
+            const before = H;
+            H = applyAdjustments(H, rs.object.adjustments, local, p, rs.object, inf, adjustCtx);
+            M = Math.max(M, inf * Math.min(1, Math.abs(H - before) / ADJUST_MASK_EPS));
+          }
           continue;
         }
         const h = rs.elevationZ + sample.height * rs.tallnessZ; // composed elevation + extrude
