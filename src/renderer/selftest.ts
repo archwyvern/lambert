@@ -1,7 +1,10 @@
 import { compareRenders, DriftReport } from "../field/compare";
+import { computeDetailField, type DetailField } from "../field/detail";
 import { flattenLayers, resolveObjects, type ResolvedObject } from "../field/flatten";
 import {
   bermObjects,
+  detailDiffuse,
+  detailObjects,
   pipeObjects,
   GOLDEN_H,
   GOLDEN_W,
@@ -36,9 +39,10 @@ async function runCase(
   resolved: ResolvedObject[],
   supersample: 1 | 2,
   tileSize?: number,
+  detail?: DetailField | null,
 ): Promise<CaseResult> {
-  const cpuResult = renderField(resolved, GOLDEN_W, GOLDEN_H, { supersample });
-  const gpuResult = await gpu.evaluate(resolved, GOLDEN_W, GOLDEN_H, { supersample, tileSize });
+  const cpuResult = renderField(resolved, GOLDEN_W, GOLDEN_H, { supersample, detail });
+  const gpuResult = await gpu.evaluate(resolved, GOLDEN_W, GOLDEN_H, { supersample, tileSize, detail });
   return { name, ...compareRenders(cpuResult, gpuResult) };
 }
 
@@ -69,6 +73,9 @@ export async function runSelftest(): Promise<void> {
     report.cases.push(await runCase(gpu, "pipe ss2 tiled-48", resolveObjects(pipeObjects()), 2, 48));
     report.cases.push(await runCase(gpu, "berm ss1", resolveObjects(bermObjects()), 1));
     report.cases.push(await runCase(gpu, "berm ss2 tiled-48", resolveObjects(bermObjects()), 2, 48));
+    const detail = computeDetailField(detailDiffuse());
+    report.cases.push(await runCase(gpu, "detail ss1", resolveObjects(detailObjects()), 1, undefined, detail));
+    report.cases.push(await runCase(gpu, "detail ss2 tiled-48", resolveObjects(detailObjects()), 2, 48, detail));
     report.cases.push(await runCase(gpu, "vector-fill ss1", resolveObjects(vectorFillObjects()), 1));
     report.cases.push(await runCase(gpu, "vector-fill ss2 tiled-48", resolveObjects(vectorFillObjects()), 2, 48));
     report.cases.push(await runCase(gpu, "masked ss1", resolveObjects(maskedObjects()), 1));

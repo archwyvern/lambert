@@ -1,5 +1,6 @@
 import { affineInvert, affineApply } from "./affine";
-import { applyAdjustments } from "./adjustments";
+import { applyAdjustments, type AdjustContext } from "./adjustments";
+import { sampleDetail, type DetailField } from "./detail";
 import { combineHeight, influence, objectCombineOp } from "./combine";
 import type { ResolvedObject } from "./flatten";
 import { bakeMasks, maskCoverage } from "./maskOps";
@@ -20,7 +21,18 @@ export interface FieldResult {
 /** Evaluate the ordered object fold at every pixel center. The CPU reference implementation. Takes
  *  the flattened, world-resolved object list (see flattenLayers) — group composition + visibility
  *  are already applied. */
-export function evaluateField(resolved: ResolvedObject[], width: number, height: number): FieldResult {
+/** Optional document-level inputs (the detail field, sampled by texture-driven adjustments).
+ *  `scale` maps the CURRENT eval space to detail texels (1 at doc res, 1/f under supersample). */
+export interface EvalContext {
+  detail?: { field: DetailField; scale: number };
+}
+
+export function evaluateField(resolved: ResolvedObject[], width: number, height: number, ctx?: EvalContext): FieldResult {
+  const adjustCtx: AdjustContext = ctx?.detail
+    ? {
+        sampleDetail: (pw) => sampleDetail(ctx.detail!.field, pw.x * ctx.detail!.scale, pw.y * ctx.detail!.scale),
+      }
+    : {};
   const heightMap = new Float32Array(width * height);
   const mask = new Float32Array(width * height);
   const items = resolved.map((rs) => {
@@ -63,7 +75,7 @@ export function evaluateField(resolved: ResolvedObject[], width: number, height:
         // adjustment layer: transform the ACCUMULATED height inside its region (coverage-gated blend);
         // contributes no height or mask of its own. WGSL fold_at op == 3u mirrors this.
         if (op === "adjust") {
-          if (rs.object.adjustments?.length) H = applyAdjustments(H, rs.object.adjustments, local, rs.object, inf);
+          if (rs.object.adjustments?.length) H = applyAdjustments(H, rs.object.adjustments, local, p, rs.object, inf, adjustCtx);
           continue;
         }
         const h = rs.elevationZ + sample.height * rs.tallnessZ; // composed elevation + extrude

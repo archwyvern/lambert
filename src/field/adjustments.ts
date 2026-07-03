@@ -22,13 +22,20 @@ export interface AdjustmentParamSpec {
   float?: boolean;
 }
 
+/** Document-level inputs some kinds sample (threaded through the fold, absent when unused). */
+export interface AdjustContext {
+  /** Bilinear detail-band sample at a WORLD point (fine, medium, large) — see field/detail.ts. */
+  sampleDetail?: (pw: Vector2) => [number, number, number];
+}
+
 export interface AdjustmentKindDef {
   id: string;
   name: string;
   params: Record<string, AdjustmentParamSpec>;
   /** f(H): `p` reads a param by key (instance value, else default); `pl` is the REGION-local point
-   *  (positional kinds like ramp); `region` is the hosting adjustment layer. */
-  apply(H: number, p: (key: string) => number, pl: Vector2, region: ObjectInstance): number;
+   *  (positional kinds like ramp); `pw` the world/doc point (texture-sampling kinds); `region` the
+   *  hosting adjustment layer. */
+  apply(H: number, p: (key: string) => number, pl: Vector2, pw: Vector2, region: ObjectInstance, ctx: AdjustContext): number;
 }
 
 export const ADJUSTMENT_KINDS: AdjustmentKindDef[] = [
@@ -68,7 +75,7 @@ export const ADJUSTMENT_KINDS: AdjustmentKindDef[] = [
     // the re-keyed Gradient effect: a directional height add, 0 -> depth across the region's own
     // extent along `angle` (region-local frame, so the region's transform rotates the ramp too)
     params: { angle: { default: 90, min: 0, max: 360, float: true }, depth: { default: 12, float: true } },
-    apply: (H, p, pl, region) => {
+    apply: (H, p, pl, _pw, region) => {
       const a = (p("angle") * Math.PI) / 180;
       const dx = Math.cos(a);
       const dy = Math.sin(a);
@@ -83,6 +90,24 @@ export const ADJUSTMENT_KINDS: AdjustmentKindDef[] = [
       }
       const t = clamp((pl.x * dx + pl.y * dy - minP) / Math.max(maxP - minP, 1e-6), 0, 1);
       return H + p("depth") * t;
+    },
+  },
+  {
+    id: "detail",
+    name: "Emboss / Detail",
+    // Diffuse-luminance surface detail (the skyrat "Gradient" sense): adds the precomputed
+    // multi-band detail field (field/detail.ts), weighted per band. amount is the height amplitude
+    // in px — NEGATIVE inverts (dark-high instead of bright-high).
+    params: {
+      amount: { default: 6, float: true },
+      fine: { default: 1, min: 0, float: true },
+      medium: { default: 0.4, min: 0, float: true },
+      large: { default: 0.15, min: 0, float: true },
+    },
+    apply: (H, p, _pl, pw, _region, ctx) => {
+      if (!ctx.sampleDetail) return H;
+      const [f, m, l] = ctx.sampleDetail(pw);
+      return H + p("amount") * (f * p("fine") + m * p("medium") + l * p("large"));
     },
   },
 ];
@@ -120,8 +145,10 @@ export function applyAdjustments(
   H: number,
   adjustments: Adjustment[],
   pl: Vector2,
+  pw: Vector2,
   region: ObjectInstance,
   cover: number,
+  ctx: AdjustContext = {},
 ): number {
   let out = H;
   for (const a of adjustments) {
@@ -132,7 +159,21 @@ export function applyAdjustments(
       const v = a.params[key];
       return typeof v === "number" ? v : (kind.params[key]?.default ?? 0);
     };
-    out = out + (kind.apply(out, p, pl, region) - out) * clamp(a.strength, 0, 1) * cover;
+    out = out + (kind.apply(out, p, pl, pw, region, ctx) - out) * clamp(a.strength, 0, 1) * cover;
   }
   return out;
+}
+
+/** Whether any (visible) adjustment layer in the tree hosts a "detail" adjustment — gates the
+ *  detail-field precompute (the chain is skipped entirely for docs that never use it). */
+export function layersUseDetail(layers: import("./types").LayerNode[]): boolean {
+  for (const n of layers) {
+    if ("children" in n && Array.isArray(n.children)) {
+      if (!n.visible) continue;
+      if (layersUseDetail(n.children)) return true;
+    } else if ("adjustments" in n && n.visible) {
+      if (n.adjustments?.some((a) => a.kind === "detail" && a.visible !== false)) return true;
+    }
+  }
+  return false;
 }

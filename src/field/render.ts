@@ -1,3 +1,4 @@
+import type { DetailField } from "./detail";
 import { evaluateField, FieldResult } from "./evalCpu";
 import type { ResolvedObject } from "./flatten";
 import { deriveNormals } from "./normals";
@@ -15,6 +16,8 @@ export interface RenderResult {
 export interface RenderOptions {
   /** Integer supersampling factor; 2 = spec export quality. */
   supersample: 1 | 2;
+  /** The Emboss/Detail bands (doc-res), sampled by "detail" adjustments; absent = zeros. */
+  detail?: DetailField | null;
 }
 
 /**
@@ -100,11 +103,12 @@ export function renderField(
   opts: RenderOptions,
 ): RenderResult {
   const f = opts.supersample;
+  const ctx = opts.detail ? { detail: { field: opts.detail, scale: 1 / f } } : undefined;
   if (f === 1) {
-    const field = evaluateField(resolved, width, height);
+    const field = evaluateField(resolved, width, height, ctx);
     return { ...field, normals: deriveNormals(field.heightMap, width, height) };
   }
-  const hi = evaluateField(scaleResolvedForSupersample(resolved, f), width * f, height * f);
+  const hi = evaluateField(scaleResolvedForSupersample(resolved, f), width * f, height * f, ctx);
   const hiNormals = deriveNormals(hi.heightMap, hi.width, hi.height, f);
   return downsampleRender(hi, hiNormals, f);
 }

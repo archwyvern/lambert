@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { DocumentStore, EditorState } from "../document/store";
 import { addInstance, duplicateObject, moveObjectTo, removeObject, updateObject } from "../document/docOps";
 import { clearGuides, removeGuide } from "../document/canvasOps";
@@ -13,6 +13,8 @@ import { getObjectType, ObjectTypeId } from "../field/registry";
 import { editSnap } from "./snapPoint";
 import { fromLocal, toLocal } from "../field/transform";
 import type { ObjectInstance } from "../field/types";
+import { layersUseDetail } from "../field/adjustments";
+import { detailFieldForDiffuse } from "../field/detail";
 import { normalXform, type NormalDirs } from "../document/schema";
 import { NormalSphere } from "./NormalDirsEditor";
 import { Vector2, Vector3 } from "@carapace/primitives";
@@ -260,6 +262,13 @@ export function CanvasView(props: {
     }
   }, [ready, diffuseBytes, doc.source.width, doc.source.height]);
 
+  // Emboss/Detail bands: computed once per diffuse (parameter-free chain, cached on the byte
+  // buffer) — only when the doc actually hosts a detail adjustment
+  const detail = useMemo(() => {
+    if (!diffuseBytes || !layersUseDetail(doc.layers)) return null;
+    return detailFieldForDiffuse(diffuseBytes);
+  }, [diffuseBytes, doc.layers]);
+
   // render on any relevant change (rAF-coalesced inside the renderer)
   useEffect(() => {
     const r = rendererRef.current;
@@ -273,6 +282,7 @@ export function CanvasView(props: {
       lightEnergy: view.lightEnergy,
       normalXform: normalXform(normalDirs),
       orbit3d,
+      detail,
     });
   });
 

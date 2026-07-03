@@ -1,3 +1,4 @@
+import type { DetailField } from "../detail";
 import type { ResolvedObject } from "../flatten";
 import { downsampleRender, RenderResult, scaleResolvedForSupersample } from "../render";
 import { packObjects, type PackedObjects } from "./pack";
@@ -20,6 +21,18 @@ const storageBuffer = (d: GPUDevice, data: ArrayBufferView): GPUBuffer => {
   return buf;
 };
 
+/** The detail-band storage buffer: header vec4(w, h, scale, 0) + w*h band texels (or just a zero
+ *  header when there is no detail — the WGSL sampler returns 0 for a zero header). */
+export const detailBuffer = (d: GPUDevice, detail: DetailField | null | undefined, scale: number): GPUBuffer => {
+  if (!detail) return storageBuffer(d, new Float32Array(4));
+  const data = new Float32Array(4 + detail.data.length);
+  data[0] = detail.width;
+  data[1] = detail.height;
+  data[2] = scale;
+  data.set(detail.data, 4);
+  return storageBuffer(d, data);
+};
+
 /** Upload the packed object stream into the five fold storage buffers. */
 const uploadPacked = (d: GPUDevice, packed: PackedObjects): PackedBuffers => ({
   records: storageBuffer(d, packed.records),
@@ -30,7 +43,7 @@ const uploadPacked = (d: GPUDevice, packed: PackedObjects): PackedBuffers => ({
 });
 
 /** Fold compute-pass bind group: uniforms + the packed buffers + the field output texture. */
-const foldBindGroup = (d: GPUDevice, pipeline: GPUComputePipeline, uniforms: GPUBuffer, bufs: PackedBuffers, fieldTex: GPUTexture): GPUBindGroup =>
+const foldBindGroup = (d: GPUDevice, pipeline: GPUComputePipeline, uniforms: GPUBuffer, bufs: PackedBuffers, fieldTex: GPUTexture, detail: GPUBuffer): GPUBindGroup =>
   d.createBindGroup({
     layout: pipeline.getBindGroupLayout(0),
     entries: [
@@ -41,6 +54,7 @@ const foldBindGroup = (d: GPUDevice, pipeline: GPUComputePipeline, uniforms: GPU
       { binding: 4, resource: { buffer: bufs.mesh } },
       { binding: 6, resource: { buffer: bufs.maskLoops } },
       { binding: 7, resource: { buffer: bufs.maskVerts } },
+      { binding: 8, resource: { buffer: detail } },
     ],
   });
 
@@ -100,6 +114,8 @@ export interface GpuEvaluateOptions {
   supersample?: 1 | 2;
   /** Max tile edge in px for the hi-res evaluation. Small values exercise tiling in tests. */
   tileSize?: number;
+  /** The Emboss/Detail bands (doc-res); absent = a zero header (samples return 0). */
+  detail?: DetailField | null;
 }
 
 const APRON = 1; // normal pass needs 1px neighborhood; tiles overlap by this and drop it
@@ -139,6 +155,7 @@ export class GpuFieldRenderer {
     width: number,
     height: number,
     slopeScale: number,
+    detailBuf: GPUBuffer,
   ): Promise<RenderResult> {
     const d = this.device;
     const fieldTex = d.createTexture({
@@ -172,7 +189,7 @@ export class GpuFieldRenderer {
     new Float32Array(nu)[2] = slopeScale;
     d.queue.writeBuffer(normalUniforms, 0, nu);
 
-    const foldBind = foldBindGroup(d, this.foldPipeline, uniforms, bufs, fieldTex);
+    const foldBind = foldBindGroup(d, this.foldPipeline, uniforms, bufs, fieldTex, detailBuf);
     const normalBind = normalBindGroup(d, this.normalPipeline, normalUniforms, fieldTex, normalTex);
 
     const fieldRowBytes = padRowBytes(width * 8);
@@ -237,6 +254,8 @@ export class GpuFieldRenderer {
     const hiW = width * f;
     const hiH = height * f;
     const packed = packObjects(f === 1 ? resolved : scaleResolvedForSupersample(resolved, f));
+    // the detail bands sample in DOC space: scale maps the hi-res eval space back to detail texels
+    const detailBuf = detailBuffer(this.device, opts.detail, 1 / f);
 
     // Guard the transient hi-res heap before allocating: hiHeight + hiMask + hiNormals = 5 floats/px ×
     // 4 B = 20 B/px. An 8192² source at ss2 is 16384² ≈ 268M px ≈ 5.4 GB and OOM-crashes the renderer
@@ -264,7 +283,7 @@ export class GpuFieldRenderer {
         const ay = Math.max(0, ty - APRON);
         const aw = Math.min(hiW, tx + tw + APRON) - ax;
         const ah = Math.min(hiH, ty + th + APRON) - ay;
-        const tile = await this.evaluateTile(packed, ax, ay, aw, ah, f);
+        const tile = await this.evaluateTile(packed, ax, ay, aw, ah, f, detailBuf);
         // copy the interior (drop apron)
         const ox = tx - ax;
         const oy = ty - ay;
@@ -282,6 +301,7 @@ export class GpuFieldRenderer {
       }
     }
 
+    detailBuf.destroy();
     if (f === 1) return { width, height, heightMap: hiHeight, mask: hiMask, normals: hiNormals };
     return downsampleRender({ width: hiW, height: hiH, heightMap: hiHeight, mask: hiMask }, hiNormals, f);
   }

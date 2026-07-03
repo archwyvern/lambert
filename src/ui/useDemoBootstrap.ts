@@ -32,17 +32,18 @@ export function useDemoBootstrap(opts: {
     const q = new URLSearchParams(location.search);
     if (!q.has("demo")) return;
     void Promise.all([import("fast-png"), import("../field/fixtures")])
-      .then(([{ encode }, { goldenObjects, maskedObjects, meshObjects, pipeObjects, surfaceObjects, vectorFillObjects, stressFieldObjects }]) => {
-        const w = Number(q.get("size")) || 96;
+      .then(([{ encode }, { detailDiffuse, detailObjects, goldenObjects, maskedObjects, meshObjects, pipeObjects, surfaceObjects, vectorFillObjects, stressFieldObjects }]) => {
+        const w = q.has("detail") ? 96 : Number(q.get("size")) || 96;
         const h = w;
-        const data = new Uint8Array(w * h * 4);
+        let data = new Uint8Array(w * h * 4);
         for (let i = 0; i < w * h; i++) {
           data[i * 4] = 96;
           data[i * 4 + 1] = 104;
           data[i * 4 + 2] = 118;
           data[i * 4 + 3] = 255;
         }
-        const objects = q.has("stress") ? stressFieldObjects(w, q.has("overlap")) : q.has("masked") ? maskedObjects() : q.has("mesh") ? meshObjects() : q.has("paths") ? [...pipeObjects(), ...vectorFillObjects()] : q.has("fx") ? surfaceObjects() : goldenObjects();
+        if (q.has("detail")) data = new Uint8Array(detailDiffuse().data); // patterned diffuse: the emboss source
+        const objects = q.has("stress") ? stressFieldObjects(w, q.has("overlap")) : q.has("masked") ? maskedObjects() : q.has("mesh") ? meshObjects() : q.has("paths") ? [...pipeObjects(), ...vectorFillObjects()] : q.has("fx") ? surfaceObjects() : q.has("detail") ? detailObjects() : goldenObjects();
         const doc = { ...emptyDoc("file:///demo/demo.df.png", w, h), layers: objects };
         const ws = new Workspace("/demo", emptyProjectConfig());
         const tab: Tab = {
