@@ -118,3 +118,43 @@ test("preview pass: a downsampled field carries its scale and approximates full 
   const halfOff = sampleDetail(half, 8.5 * half.scale, 24.5 * half.scale)[0];
   expect(halfOn - halfOff).toBeGreaterThan((fullOn - fullOff) * 0.4); // same raised stripe, preview-quality
 });
+
+test("transparency reads as dark: a bright shape on transparent ground gets a rim response", () => {
+  // bright opaque square centred on a fully transparent canvas
+  const w = 48;
+  const data = new Uint8Array(w * w * 4);
+  for (let y = 16; y < 32; y++) {
+    for (let x = 16; x < 32; x++) {
+      const i = (y * w + x) * 4;
+      data[i] = 220;
+      data[i + 1] = 220;
+      data[i + 2] = 220;
+      data[i + 3] = 255;
+    }
+  }
+  const field = computeDetailField({ data, width: w, height: w, channels: 4 }, { radius: 1, blur: 1, tolerance: 0.05 });
+  const centre = sampleDetail(field, 24, 24)[0];
+  const rim = sampleDetail(field, 16.5, 24)[0]; // just inside the silhouette
+  // the square integrates to a raised plateau against the dark (transparent) surround
+  expect(centre).toBeGreaterThan(0.5);
+  expect(rim).toBeGreaterThan(0); // raised at the rim too, not gated to flat
+});
+
+test("alpha scales luminance: half-transparent white reads as mid-gray", () => {
+  // left half opaque white, right half 50%-alpha white -> a real luminance edge at the seam
+  const w = 48;
+  const data = new Uint8Array(w * w * 4);
+  for (let y = 0; y < w; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      data[i] = 255;
+      data[i + 1] = 255;
+      data[i + 2] = 255;
+      data[i + 3] = x < 24 ? 255 : 128;
+    }
+  }
+  const field = computeDetailField({ data, width: w, height: w, channels: 4 }, { radius: 1, blur: 1, tolerance: 0.05 });
+  const opaqueSide = sampleDetail(field, 12, 24)[0];
+  const fadedSide = sampleDetail(field, 36, 24)[0];
+  expect(opaqueSide).toBeGreaterThan(fadedSide + 0.5); // the faded half is LOWER (darker)
+});

@@ -7,11 +7,14 @@ import { clamp } from "./vec";
  * opaque-masked gaussian smoothing), integrated into HEIGHT via Frankot–Chellappa so the fold's
  * normal derivation reproduces skyrat's gradient add. Chain, in order:
  *
- *   1. grayscale = r·0.2126 + g·0.7152 + b·a on opaque (A > 0) pixels — the skyrat formula
- *      verbatim, quirks included (blue weighted by alpha).
+ *   1. grayscale = (0.299·r + 0.587·g + 0.114·b) · a — the C# reference's Rec.601 luma, SCALED
+ *      BY ALPHA: transparency reads as DARK, so silhouette rims and semi-transparent interior
+ *      detail emboss like any other luminance edge. (The Go port's b·a formula is a port bug —
+ *      the C# reference is the ground truth here.)
  *   2. tolerance-gated Sobel at ±radius offsets: neighbours within `tolerance` of the centre (or
- *      transparent / out of bounds) count AS the centre — the skyrat denoise. radius 1 = skyrat
- *      exact; larger samples further out for broader features.
+ *      out of bounds) count AS the centre — the skyrat denoise. Transparent neighbours read as
+ *      luminance 0 (dark), NOT as the centre. radius 1 = the reference stencil; larger samples
+ *      further out for broader features.
  *   3. opaque-masked smoothing of the gradient field, sigma = `blur` (skyrat fixes 1). Small
  *      sigmas use skyrat's exact renormalized gaussian; past BOX_BLUR_SIGMA it switches to a
  *      3-pass box normalized convolution — O(pixels) regardless of sigma, so the blur slider
@@ -302,17 +305,18 @@ export function computeDetailField(
   for (let i = 0; i < sw * sh * cn; i++) peak = Math.max(peak, Number(img.data[i]));
   const norm = peak > 255 ? 65535 : 255;
 
-  // 1. skyrat Prepare: opacity + grayscale (their formula verbatim: r·0.2126 + g·0.7152 + b·a)
+  // 1. opacity + grayscale: the C# reference's Rec.601 luma, scaled by alpha so transparency
+  // reads as dark — a fully transparent pixel is luminance 0, a half-transparent white is mid-gray
   let gray = new Float32Array(sw * sh);
   let opaque = new Uint8Array(sw * sh);
   for (let i = 0; i < sw * sh; i++) {
     const a = cn === 4 || cn === 2 ? Number(img.data[i * cn + (cn - 1)]) / norm : 1;
-    if (a <= 0) continue;
+    if (a <= 0) continue; // gray stays 0: dark
     opaque[i] = 1;
     const r = Number(img.data[i * cn]) / norm;
     const g = cn >= 3 ? Number(img.data[i * cn + 1]) / norm : r;
     const b = cn >= 3 ? Number(img.data[i * cn + 2]) / norm : r;
-    gray[i] = r * 0.2126 + g * 0.7152 + b * a;
+    gray[i] = (r * 0.299 + g * 0.587 + b * 0.114) * a;
   }
 
   // preview pass: box-downsample gray + opacity, run the identical chain on the small grid
@@ -354,8 +358,10 @@ export function computeDetailField(
   const tol = Math.max(0, params.tolerance);
   const dhdx = new Float32Array(w * h);
   const dhdy = new Float32Array(w * h);
+  // out of bounds clamps to the centre; a transparent neighbour reads its gray of 0 (dark), so a
+  // bright shape against transparency gets a real rim gradient instead of a gated-out edge
   const adj = (center: number, x: number, y: number): number => {
-    if (x < 0 || x >= w || y < 0 || y >= h || !opaque[y * w + x]) return center;
+    if (x < 0 || x >= w || y < 0 || y >= h) return center;
     const v = gray[y * w + x]!;
     return Math.abs(center - v) < tol ? center : v;
   };
