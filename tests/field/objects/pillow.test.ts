@@ -80,3 +80,37 @@ test("Gradient effect: a directional ramp normalised across its region", () => {
   expect(t.eval(v2(30, 0), g).height).toBeCloseTo(6, 3); // constant across the perpendicular
   expect(t.eval(v2(0, 60), g).sd).toBeGreaterThan(0); // outside the region
 });
+
+test('extent "middle": no fixed-distance plateau — the surface keeps rising to the fattest point', () => {
+  // a big slab: with inflate=10 the FIXED profile saturates ~10px in (flat top);
+  // MIDDLE spans the whole half-width, so an intermediate point sits well below the peak
+  const slab = (): ReturnType<typeof pillowFrom> => pillowFrom([[-100, -100], [100, -100], [100, 100], [-100, 100]]);
+  const fixed = slab();
+  fixed.params.inflate = 10;
+  const middle = slab();
+  middle.params.inflate = 10;
+  middle.params.extent = "middle";
+  middle.params.profile = "linear"; // h = 10·D/Dmax — makes the no-plateau shape easy to assert
+  const mid = v2(0, 0);
+  const between = v2(60, 0); // ~40px from the rim: fixed is long saturated here
+  expect(pillow.eval(between, fixed).height).toBeCloseTo(10, 1); // plateau
+  expect(pillow.eval(mid, fixed).height).toBeCloseTo(10, 1);
+  const mBetween = pillow.eval(between, middle).height;
+  const mMid = pillow.eval(mid, middle).height;
+  expect(mBetween).toBeLessThan(8); // still rising — no plateau
+  expect(mMid).toBeGreaterThan(mBetween); // joins at the middle
+  expect(mMid).toBeCloseTo(10, 0); // amplitude reached at the fattest point
+  // outside + rim behaviour unchanged
+  expect(pillow.eval(v2(120, 0), middle).height).toBe(0);
+});
+
+test('extent "middle" packs as a negative inflate + the max distance in TRI_START', async () => {
+  const { packObjects } = await import("../../../src/field/gpu/pack");
+  const { resolveObjects } = await import("../../../src/field/flatten");
+  const { PARAMS_OFFSET, RECORD_SLOT } = await import("../../../src/field/gpu/wgsl");
+  const inst = pillowFrom([[-40, -40], [40, -40], [40, 40], [-40, 40]]);
+  inst.params.extent = "middle";
+  const packed = packObjects(resolveObjects([inst]));
+  expect(packed.records[PARAMS_OFFSET]!).toBeLessThan(0); // sign = mode
+  expect(packed.records[RECORD_SLOT.TRI_START]!).toBeGreaterThan(10); // the shape's own max soft distance
+});

@@ -13,6 +13,8 @@ export interface DriftReport {
   maxHeight: number;
   maxNormal: number;
   maxMask: number;
+  /** Where the worst height drift sits + both values there — the first thing you want when a case fails. */
+  heightAt?: { x: number; y: number; a: number; b: number };
 }
 
 /** Max-abs-diff comparison between two renders (GPU vs CPU reference). */
@@ -27,8 +29,13 @@ export function compareRenders(
   let maxHeight = 0;
   let maxMask = 0;
   let maxNormal = 0;
+  let hi = 0;
   for (let i = 0; i < a.heightMap.length; i++) {
-    maxHeight = Math.max(maxHeight, Math.abs(a.heightMap[i]! - b.heightMap[i]!));
+    const dh = Math.abs(a.heightMap[i]! - b.heightMap[i]!);
+    if (dh > maxHeight) {
+      maxHeight = dh;
+      hi = i;
+    }
     maxMask = Math.max(maxMask, Math.abs(a.mask[i]! - b.mask[i]!));
   }
   for (let i = 0; i < a.normals.length; i++) {
@@ -39,5 +46,6 @@ export function compareRenders(
     maxHeight,
     maxNormal,
     maxMask,
+    heightAt: { x: hi % a.width, y: Math.floor(hi / a.width), a: a.heightMap[hi]!, b: b.heightMap[hi]! },
   };
 }

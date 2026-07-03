@@ -232,7 +232,15 @@ export function vectorFillObjects(): ObjectInstance[] {
   cushion.controlPoints = cb.controlPoints;
   cushion.ringSplit = cb.ringSplit;
   cushion.contourCounts = cb.contourCounts;
-  return [frame, mesa, cushion];
+  // a "middle"-extent pillow: exercises the sign-encoded mode + the TRI_START max-distance slot
+  // (the join-at-the-middle profile range) GPU==CPU
+  const bun = createObjectInstance(ObjectTypeId.Pillow, v2(71.3, 20.7));
+  bun.id = "v-bun";
+  bun.transform.rotation = 0.2; // off the sample grid: an axis-aligned rim lands sd == 0 EXACTLY on
+  bun.transform.scale = new Vector3(0.37, 0.26, 1); // ss2 hi samples, and f32-vs-f64 flips the side
+  bun.params.extent = "middle";
+  bun.params.inflate = 12;
+  return [frame, mesa, cushion, bun];
 }
 
 /** A rotated, non-uniformly scaled plateau with a local KEEP mask (one smooth anchor) and a world
