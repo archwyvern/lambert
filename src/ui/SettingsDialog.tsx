@@ -126,6 +126,7 @@ export function SettingsDialog(props: {
       id: "project-normals",
       label: "Normal Directions",
       group: "Project",
+      keywords: ["red", "green", "rotation", "opengl", "directx", "channels", "convention"],
       render: () => (
         <div>
           <Blurb>
@@ -140,6 +141,7 @@ export function SettingsDialog(props: {
       id: "project-output",
       label: "Output Format",
       group: "Project",
+      keywords: ["export", "png", "exr", "hdr", "bit depth", "channels", "rgba"],
       render: () => (
         <div>
           <Blurb>
@@ -155,6 +157,7 @@ export function SettingsDialog(props: {
       id: "app-shortcuts",
       label: "Shortcuts",
       group: "Application",
+      keywords: ["keyboard", "keybinding", "hotkey", "commands", "mouse"],
       render: () => (
         <div>
           <Blurb>
@@ -206,6 +209,7 @@ export function SettingsDialog(props: {
         id: "doc-canvas",
         label: "Canvas",
         group: "Document",
+        keywords: ["origin", "centre", "position"],
         render: () => (
           <div>
             <Blurb>
@@ -240,6 +244,7 @@ export function SettingsDialog(props: {
         id: "doc-normals",
         label: "Normal Directions",
         group: "Document",
+        keywords: ["red", "green", "rotation", "override"],
         render: () => (
           <div>
             <Blurb>
@@ -265,6 +270,7 @@ export function SettingsDialog(props: {
         id: "doc-output",
         label: "Output Format",
         group: "Document",
+        keywords: ["export", "png", "exr", "hdr", "bit depth", "override"],
         render: () => (
           <div>
             <Blurb>
