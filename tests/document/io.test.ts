@@ -45,6 +45,7 @@ function fakeHost(files: Record<string, Uint8Array>): Host {
     openDialog: () => Promise.resolve(null),
     saveDialog: () => Promise.resolve(null),
     openFolderDialog: () => Promise.resolve(null),
+    setMenuAccelerators: () => Promise.resolve(),
     readFile: (p) => {
       const f = files[p];
       return f ? Promise.resolve(f) : Promise.reject(new Error(`ENOENT ${p}`));

@@ -6,8 +6,8 @@ import type { LambertDoc } from "../document/schema";
 import { affineApply } from "../field/affine";
 
 import { insertVertex } from "../field/controlPoints";
-import { bakeMaskLoop, bakeRings, bakeRingsUniform, bezierAnchor, BezierAnchor, bezierSpine, insertOnPath, nearestOnPath, resolvePath, splitSubpaths } from "../field/bezier";
-import { dragHandle, isCornerAnchor as isCorner, movePoint, toggleMode } from "../field/bezierEdit";
+import { bakeRings, bezierAnchor, BezierAnchor, bezierSpine, insertOnPath, nearestOnPath, resolvePath, splitSubpaths } from "../field/bezier";
+import { applyBezierEdit, dragHandle, isCornerAnchor as isCorner, movePoint, toggleMode } from "../field/bezierEdit";
 import {
   alignVertToPlane,
   connectVerts,
@@ -437,23 +437,8 @@ function GizmosInner(props: {
   // baked fills (Contour, kind "polygon"). Fills bake their closed path to controlPoints on edit
   // so the polygon-fill field stays in sync; strokes are sampled analytically (no controlPoints).
   const isPath = !!object.bezier;
-  const cpKind = getObjectType(object.typeId).controlPoints.kind;
   const commitBezier = (next: BezierAnchor[], coalesce: string, starts?: { subpathStarts: number[] | undefined }): void => {
-    store.update(
-      (d) =>
-        updateObject(d, object.id, (sh) => {
-          const withPath = { ...sh, bezier: next, subpathStarts: starts ? starts.subpathStarts : sh.subpathStarts };
-          if (cpKind === "rings") {
-            // Mesa lofts its rings -> needs equal dense counts (uniform bake); Surface
-            // (Vector) just CSGs its outer/hole contours -> the optimized bake is fine.
-            const r = object.typeId === ObjectTypeId.PlateauVector ? bakeRingsUniform(next, withPath.subpathStarts) : bakeRings(next, withPath.subpathStarts);
-            return { ...withPath, controlPoints: r.controlPoints, ringSplit: r.ringSplit, contourCounts: r.contourCounts };
-          }
-          if (cpKind === "polygon") return { ...withPath, controlPoints: bakeMaskLoop(next) };
-          return withPath; // analytic stroke: no baked controlPoints
-        }),
-      { coalesce },
-    );
+    store.update((d) => updateObject(d, object.id, (sh) => applyBezierEdit(sh, next, starts)), { coalesce });
   };
   // toggle smooth<->corner: going manual bakes the current resolved tangents (no visual jump);
   // going smooth clears them so resolveHandles takes over again

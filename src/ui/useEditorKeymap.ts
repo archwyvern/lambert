@@ -2,7 +2,8 @@ import { useEffect } from "react";
 import { matchEvent, parseChord } from "@carapace/shell";
 import type { Chord } from "@carapace/shell";
 import { removeObject, removeObjectVertices, updateObject } from "../document/docOps";
-import { findNode } from "../document/layerOps";
+import { findNode, updateNode } from "../document/layerOps";
+import { applyBezierEdit } from "../field/bezierEdit";
 import { isObject } from "../field/types";
 import { v2 } from "../field/vec";
 import type { Workspace } from "../document/workspace";
@@ -147,13 +148,16 @@ export function useEditorKeymap(opts: {
         const object = node && isObject(node) ? node : null;
         const verts = selVertsRef.current;
         if (object?.bezier && verts.length > 0) {
-          // nudge selected cable anchors (move the point; handles are offsets and follow)
+          // nudge selected path anchors (handles are offsets and follow) — through applyBezierEdit
+          // so rings/polygon objects rebake their controlPoints (else the field lags the gizmo)
           store.update(
             (d) =>
-              updateObject(d, id, (s) => ({
-                ...s,
-                bezier: s.bezier?.map((a, i) => (verts.includes(i) ? { ...a, p: v2(a.p.x + dx, a.p.y + dy) } : a)),
-              })),
+              updateObject(d, id, (s) =>
+                applyBezierEdit(
+                  s,
+                  s.bezier!.map((a, i) => (verts.includes(i) ? { ...a, p: v2(a.p.x + dx, a.p.y + dy) } : a)),
+                ),
+              ),
             { coalesce: `vnudge:${id}` },
           );
         } else if (object && verts.length > 0 && object.controlPoints.length > 0) {
@@ -167,12 +171,16 @@ export function useEditorKeymap(opts: {
             { coalesce: `vnudge:${id}` },
           );
         } else {
+          // updateNode, not updateObject: the selected node may be a GROUP (updateObject only
+          // patches objects, so a group nudge silently no-oped)
           store.update(
-            (d) =>
-              updateObject(d, id, (s) => ({
-                ...s,
-                transform: { ...s.transform, pos: s.transform.pos.withX(s.transform.pos.x + dx).withY(s.transform.pos.y + dy) },
+            (d) => ({
+              ...d,
+              layers: updateNode(d.layers, id, (n) => ({
+                ...n,
+                transform: { ...n.transform, pos: n.transform.pos.withX(n.transform.pos.x + dx).withY(n.transform.pos.y + dy) },
               })),
+            }),
             { coalesce: `nudge:${id}` },
           );
         }
