@@ -343,6 +343,18 @@ export function Inspector(props: {
         onChange: (v) => live((s) => ({ ...s, opacity: v >= 100 ? undefined : Math.max(0, v) / 100 }), "opacity"),
         onCommit: commit,
       }),
+      {
+        kind: "bool",
+        key: "aa",
+        label: "edge AA",
+        group: "Transform",
+        value: object.aa ?? false,
+        // OFF is stored as ABSENT (the default — crisp sprite silhouettes); on = box-filter coverage
+        onChange: (v) => {
+          live((s) => ({ ...s, aa: v || undefined }), "aa");
+          commit();
+        },
+      },
     );
   }
 

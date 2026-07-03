@@ -74,7 +74,8 @@ export function packObjects(resolved: ResolvedObject[]): PackedObjects {
     records[base + RECORD_SLOT.SCALE] = rs.scaleHint;
     records[base + RECORD_SLOT.CP_START] = cpStart;
     records[base + RECORD_SLOT.CP_COUNT] = analytic(s) ? s.bezier!.length : s.controlPoints.length;
-    records[base + RECORD_SLOT.CLOSED] = s.closed ? 1 : 0; // analytic path is a closed loop (wrap last->first)
+    // bitfield (the record is exactly 32 f32 — no new slot): bit0 = closed loop, bit1 = edge AA
+    records[base + RECORD_SLOT.CLOSED] = (s.closed ? 1 : 0) + (s.aa ? 2 : 0);
     records[base + RECORD_SLOT.OPACITY] = Math.min(1, Math.max(0, s.opacity ?? 1)); // fold-contribution weight
     // world footprint AABB = the object's local bounds' corners through the FORWARD affine (the
     // inverse of invAffine), padded 1.5px so the influence AA ramp (sd < 0.5) is never culled

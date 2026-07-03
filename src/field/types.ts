@@ -92,6 +92,9 @@ export interface ObjectInstance {
   /** Fold-contribution weight 0..1: 1/absent = full effect, 0 = inert. Lerps the object's height step
    *  into the accumulated surface and scales its mask influence (meaningful for carve/replace too). */
   opacity?: number;
+  /** true = anti-aliased edge (box-filter coverage ramp on the NX mask); absent/false = HARD step at
+   *  sd < 0 — the default, matching crisp sprite silhouettes. */
+  aa?: boolean;
   visible: boolean;
   locked: boolean;
 }

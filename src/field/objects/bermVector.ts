@@ -38,7 +38,7 @@ fn shape_ridge(p: vec2f, base: u32) -> vec2f {
   let slope = rec(base, SLOT_PARAM1);
   let H = rec(base, SLOT_PARAM2);
   let flatCap = rec(base, SLOT_PARAM3) > 0.5;
-  let closed = rec(base, SLOT_CLOSED) > 0.5 && ac >= 3u;
+  let closed = (u32(rec(base, SLOT_CLOSED)) & 1u) == 1u && ac >= 3u; // bit0 (bit1 = edge AA)
   let segs = select(ac - 1u, ac, closed);
   // per-anchor scale tapers the WHOLE cross-section (width+slope+height) as a unit, mixed along each
   // segment like the pipe's radius — track the sd-nearest segment's scale

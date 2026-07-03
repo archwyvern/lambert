@@ -41,7 +41,7 @@ fn shape_cable(p: vec2f, base: u32) -> vec2f {
   let ac = u32(rec(base, SLOT_CP_COUNT));
   let prof = u32(rec(base, SLOT_PARAM1));
   let flatCap = rec(base, SLOT_PARAM2) > 0.5;
-  let closed = rec(base, SLOT_CLOSED) > 0.5 && ac >= 3u;
+  let closed = (u32(rec(base, SLOT_CLOSED)) & 1u) == 1u && ac >= 3u; // bit0 (bit1 = edge AA)
   let segs = select(ac - 1u, ac, closed);
   var minSd = 1e30;
   var bestR = rec(base, SLOT_PARAM0);

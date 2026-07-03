@@ -52,8 +52,10 @@ export function evaluateField(resolved: ResolvedObject[], width: number, height:
         if (p.x < aabb.minX || p.x > aabb.maxX || p.y < aabb.minY || p.y > aabb.maxY) continue;
         const sample = type.eval(affineApply(rs.invAffine, p), s);
         const sd = sample.sd * rs.scaleHint;
-        // per-object opacity scales the whole contribution: the mask influence AND the height step below
-        let inf = influence(sd) * alpha;
+        // per-object opacity scales the whole contribution: the mask influence AND the height step
+        // below. Edge coverage: AA objects get the box-filter ramp; the default is a HARD step at
+        // sd < 0 (crisp sprite silhouettes) — WGSL fold_at mirrors this.
+        let inf = (rs.object.aa ? influence(sd) : sd < 0 ? 1 : 0) * alpha;
         if (rs.masks.length > 0) inf *= maskCoverage(rs.masks, baked, rs.invAffine, rs.scaleHint, p);
         if (inf <= 0) continue;
         const h = rs.elevationZ + sample.height * rs.tallnessZ; // composed elevation + extrude
