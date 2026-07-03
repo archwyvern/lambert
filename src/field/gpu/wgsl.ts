@@ -72,6 +72,11 @@ const FIELD_LIB = /* wgsl */ `
 // baked closed polygon (vec2, local if follow else world).
 @group(0) @binding(6) var<storage, read> maskLoops: array<vec4f>;
 @group(0) @binding(7) var<storage, read> maskVerts: array<vec2f>;
+// The Emboss/Detail bands (field/detail.ts): header texel vec4(width, height, scale, 0) then
+// width*height texels of (fine, medium, large, 0). scale maps the CURRENT eval space to detail
+// texels (1 at doc res, 1/f under supersample) — it travels WITH the buffer so the shared lib
+// needs no pipeline-specific uniforms. A zero header = no detail (samples return 0).
+@group(0) @binding(8) var<storage, read> detail: array<vec4f>;
 
 const RECORD: u32 = ${RECORD_F32}u;
 ${SLOT_CONSTS_WGSL}
@@ -154,10 +159,28 @@ fn soft_ring_dist(p: vec2f, start: u32, count: u32) -> f32 {
   return pow(soft_ring_inv(p, start, count), -0.33333333);
 }
 
+// Bilinear detail-band sample at a world point (mirrors sampleDetail in field/detail.ts).
+fn detail_sample(pw: vec2f) -> vec3f {
+  let hdr = detail[0];
+  let dw = i32(hdr.x);
+  let dh = i32(hdr.y);
+  if (dw <= 0 || dh <= 0) { return vec3f(0.0); }
+  let f = clamp(pw * hdr.z - vec2f(0.5, 0.5), vec2f(0.0), vec2f(f32(dw) - 1.0, f32(dh) - 1.0));
+  let i0 = vec2i(floor(f));
+  let i1 = min(i0 + vec2i(1, 1), vec2i(dw - 1, dh - 1));
+  let t = f - floor(f);
+  let v00 = detail[1 + i0.y * dw + i0.x].xyz;
+  let v10 = detail[1 + i0.y * dw + i1.x].xyz;
+  let v01 = detail[1 + i1.y * dw + i0.x].xyz;
+  let v11 = detail[1 + i1.y * dw + i1.x].xyz;
+  return mix(mix(v00, v10, t.x), mix(v01, v11, t.x), t.y);
+}
+
 // One adjustment-layer transform f(H). Kind indices MUST match ADJUSTMENT_KINDS in adjustments.ts
-// (add=0, multiply=1, clamp=2, curve=3, ramp=4) — pack.ts derives them via the array order. Params
-// arrive as two packed vec2s ((p0,p1), (p2,p3)); pl is the REGION-local point for positional kinds.
-fn adjust_apply(kind: u32, H: f32, a: vec2f, b: vec2f, pl: vec2f, base: u32) -> f32 {
+// (add=0, multiply=1, clamp=2, curve=3, ramp=4, detail=5) — pack.ts derives them via the array
+// order. Params arrive as two packed vec2s ((p0,p1), (p2,p3)); pl is the REGION-local point for
+// positional kinds, pw the world point for texture-sampling kinds.
+fn adjust_apply(kind: u32, H: f32, a: vec2f, b: vec2f, pl: vec2f, pw: vec2f, base: u32) -> f32 {
   switch kind {
     case 0u: { return H + a.x; }             // add (raise / lower)
     case 1u: { return H * a.x; }             // multiply
@@ -167,7 +190,7 @@ fn adjust_apply(kind: u32, H: f32, a: vec2f, b: vec2f, pl: vec2f, base: u32) -> 
       let t = clamp((H - a.x) / span, 0.0, 1.0);
       return a.x + span * pow(t, max(b.x, 1e-3));
     }
-    default: {                                // ramp: 0 -> depth across the region along angle
+    case 4u: {                                // ramp: 0 -> depth across the region along angle
       let ang = a.x * 0.017453292519943295;
       let dir = vec2f(cos(ang), sin(ang));
       let cs = u32(rec(base, SLOT_CP_START));
@@ -181,6 +204,10 @@ fn adjust_apply(kind: u32, H: f32, a: vec2f, b: vec2f, pl: vec2f, base: u32) -> 
       }
       let t = clamp((dot(pl, dir) - minP) / max(maxP - minP, 1e-6), 0.0, 1.0);
       return H + a.y * t;
+    }
+    default: {                                // detail: amount * (fine, medium, large) · bands(pw)
+      let bands = detail_sample(pw);
+      return H + a.x * dot(bands, vec3f(a.y, b.x, b.y));
     }
   }
 }
@@ -400,7 +427,7 @@ fn fold_at(p: vec2f, count: u32) -> vec2f {
       var ai = u32(rec(base, SLOT_TRI_START));
       for (var k = 0u; k < n; k = k + 1u) {
         let head = points[ai];
-        bigH = mix(bigH, adjust_apply(u32(head.x), bigH, points[ai + 1u], points[ai + 2u], pl, base), head.y * inf);
+        bigH = mix(bigH, adjust_apply(u32(head.x), bigH, points[ai + 1u], points[ai + 2u], pl, p, base), head.y * inf);
         ai = ai + 3u;
       }
       continue;

@@ -86,6 +86,48 @@ export function surfaceObjects(): ObjectInstance[] {
   return [plane, adj];
 }
 
+/** A slab + a rotated full-ish detail Adjustment — the Emboss/Detail GPU==CPU drift scene. The
+ *  matching procedural diffuse lives in detailDiffuse() (the drift harness computes the band field
+ *  from it and threads it to BOTH sides). */
+export function detailObjects(): ObjectInstance[] {
+  const slab = createObjectInstance(ObjectTypeId.Plateau, v2(48, 48));
+  slab.id = "d-slab";
+  slab.controlPoints = [v2(-40, -40), v2(40, -40), v2(40, 40), v2(-40, 40), v2(-40, -40), v2(40, -40), v2(40, 40), v2(-40, 40)];
+  slab.ringSplit = 4;
+  const adj = createObjectInstance(ObjectTypeId.Adjust, v2(47.3, 48.7));
+  adj.id = "d-adjust";
+  adj.transform.rotation = 0.15; // off the sample grid (knife-edge rims flip sides under f32)
+  adj.transform.scale = new Vector3(0.9, 0.85, 1);
+  adj.adjustments = [
+    { id: "d-detail", kind: "detail", strength: 0.8, params: { amount: 6, fine: 1, medium: 0.5, large: 0.25 } },
+  ];
+  return [slab, adj];
+}
+
+/** Procedural 96x96 RGBA with luminance features at several scales (stripes + blobs + checker) —
+ *  the detail chain's drift-test input. */
+export function detailDiffuse(): { data: Uint8Array; width: number; height: number; channels: number } {
+  const w = 96;
+  const h = 96;
+  const data = new Uint8Array(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let v = 110;
+      if (((x >> 2) + (y >> 2)) % 2 === 0) v += 25; // fine checker
+      if (x % 24 < 4) v += 60; // medium stripes
+      const dx = x - 64;
+      const dy = y - 30;
+      if (dx * dx + dy * dy < 400) v += 80; // a large blob
+      const i = (y * w + x) * 4;
+      data[i] = Math.min(255, v);
+      data[i + 1] = Math.min(255, v);
+      data[i + 2] = Math.min(255, v);
+      data[i + 3] = 255;
+    }
+  }
+  return { data, width: w, height: h, channels: 4 };
+}
+
 /** One of each parametric primitive (cone/pyramid/torus/wedge/fillet) with scale + rotation,
  *  for the GPU-vs-CPU drift selftest. */
 export function primitivesObjects(): ObjectInstance[] {

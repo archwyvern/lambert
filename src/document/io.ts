@@ -132,8 +132,12 @@ export async function saveTab(host: Host, tab: Tab, projectPath: string): Promis
  */
 export async function exportDocNx(host: Host, doc: LambertDoc, label: string, config: ProjectConfig, outPath: string): Promise<string> {
   const { gpuExportRender } = await import("../ui/exportRender");
-  const render = await gpuExportRender(doc);
-  const diffuse = decode(await resolveDiffuse(host, doc.source.uri));
+  const bytes = await resolveDiffuse(host, doc.source.uri);
+  const { layersUseDetail } = await import("../field/adjustments");
+  const { detailFieldForDiffuse } = await import("../field/detail");
+  const detail = layersUseDetail(doc.layers) ? detailFieldForDiffuse(bytes) : null;
+  const render = await gpuExportRender(doc, detail);
+  const diffuse = decode(bytes);
   // Re-validate dims before the alpha gate: if the diffuse changed size since the doc was opened, its
   // opacity[] would be the wrong length and encodeNxPng would index out of range → corrupt NX alpha.
   // openDocTab checks on open, but the file can change underneath us before an export.
@@ -159,7 +163,11 @@ export async function exportTabNx(host: Host, tab: Tab, config: ProjectConfig, o
 export async function exportTabHeightmap(host: Host, tab: Tab, outPath: string): Promise<string> {
   if (!tab.docPath) throw new Error("Save the document before exporting its height map");
   const { gpuExportRender } = await import("../ui/exportRender");
-  const render = await gpuExportRender(tab.store.state.doc);
+  const doc = tab.store.state.doc;
+  const { layersUseDetail } = await import("../field/adjustments");
+  const { detailFieldForDiffuse } = await import("../field/detail");
+  const detail = layersUseDetail(doc.layers) ? detailFieldForDiffuse(tab.diffuse.bytes) : null;
+  const render = await gpuExportRender(doc, detail);
   const { encodeHeightmapPng } = await import("../exporters/heightmap");
   await host.writeFile(outPath, encodeHeightmapPng(render));
   return `wrote ${outPath}`;

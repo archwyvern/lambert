@@ -13,7 +13,7 @@ test("kinds: add / multiply / clamp / curve transform H pointwise", () => {
   const at = v2(0, 0);
   const one = (kind: string, params: Record<string, number>, H: number): number => {
     const a = { ...createAdjustment(kind), params: { ...createAdjustment(kind).params, ...params } };
-    return applyAdjustments(H, [a], at, r, 1);
+    return applyAdjustments(H, [a], at, at, r, 1);
   };
   expect(one("add", { amount: 5 }, 10)).toBe(15);
   expect(one("multiply", { factor: 2 }, 10)).toBe(20);
@@ -26,21 +26,21 @@ test("strength lerps: out = mix(H, f(H), strength); hidden entries are skipped; 
   const r = region();
   const at = v2(0, 0);
   const add10 = { ...createAdjustment("add"), params: { amount: 10 } };
-  expect(applyAdjustments(0, [{ ...add10, strength: 0.5 }], at, r, 1)).toBe(5);
-  expect(applyAdjustments(0, [{ ...add10, visible: false }], at, r, 1)).toBe(0);
+  expect(applyAdjustments(0, [{ ...add10, strength: 0.5 }], at, at, r, 1)).toBe(5);
+  expect(applyAdjustments(0, [{ ...add10, visible: false }], at, at, r, 1)).toBe(0);
   // chained in order: (0 + 10) * 2 = 20, not (0 * 2) + 10
   const mul2 = { ...createAdjustment("multiply"), params: { factor: 2 } };
-  expect(applyAdjustments(0, [add10, mul2], at, r, 1)).toBe(20);
+  expect(applyAdjustments(0, [add10, mul2], at, at, r, 1)).toBe(20);
   // coverage gates the whole blend
-  expect(applyAdjustments(0, [add10], at, r, 0.25)).toBe(2.5);
+  expect(applyAdjustments(0, [add10], at, at, r, 0.25)).toBe(2.5);
 });
 
 test("ramp: 0 -> depth across the region along the angle, region-local", () => {
   const r = region(); // box ±48
   const ramp = { ...createAdjustment("ramp"), params: { angle: 0, depth: 12 } }; // along +x
-  expect(applyAdjustments(0, [ramp], v2(-48, 0), r, 1)).toBeCloseTo(0, 4);
-  expect(applyAdjustments(0, [ramp], v2(0, 0), r, 1)).toBeCloseTo(6, 4);
-  expect(applyAdjustments(0, [ramp], v2(48, 0), r, 1)).toBeCloseTo(12, 4);
+  expect(applyAdjustments(0, [ramp], v2(-48, 0), v2(-48, 0), r, 1)).toBeCloseTo(0, 4);
+  expect(applyAdjustments(0, [ramp], v2(0, 0), v2(0, 0), r, 1)).toBeCloseTo(6, 4);
+  expect(applyAdjustments(0, [ramp], v2(48, 0), v2(48, 0), r, 1)).toBeCloseTo(12, 4);
 });
 
 test("fold integration: an adjustment layer transforms the surface below, inside its region only", () => {

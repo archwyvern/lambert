@@ -7,6 +7,8 @@ import { effectiveNormalDirs, effectiveOutput, parseDoc } from "../document/sche
 import { nxExtension } from "../document/exports";
 import { resolveProjectConfig } from "../document/normalDirs";
 import { resolveDiffuse, type DiffuseHost } from "../document/diffuseSource";
+import { layersUseDetail } from "../field/adjustments";
+import { computeDetailField } from "../field/detail";
 import { flattenLayers } from "../field/flatten";
 import { renderField } from "../field/render";
 import { encodeHeightmapPng } from "../exporters/heightmap";
@@ -56,7 +58,8 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const r = renderField(flattenLayers(doc.layers), doc.source.width, doc.source.height, { supersample: 2 });
+  const detail = layersUseDetail(doc.layers) ? computeDetailField(source) : null;
+  const r = renderField(flattenLayers(doc.layers), doc.source.width, doc.source.height, { supersample: 2, detail });
   if (r.mask.every((m) => m === 0)) console.warn("warning: authored mask is empty — NX would change nothing");
 
   const config = resolveProjectConfig(docDir);

@@ -1,6 +1,8 @@
 import { decode } from "fast-png";
 import { flattenLayers, type ResolvedObject } from "../field/flatten";
+import type { DetailField } from "../field/detail";
 import { buildCompositeWgsl } from "../field/gpu/composite";
+import { detailBuffer } from "../field/gpu/pipeline";
 import { packObjects } from "../field/gpu/pack";
 import { GpuFieldRenderer } from "../field/gpu/pipeline";
 import { buildPreview3dWgsl, GRID3D_WGSL, Orbit, orbitMvp } from "../field/gpu/preview3d";
@@ -28,6 +30,8 @@ export interface PreviewParams {
   normalXform: { xx: number; xy: number; yx: number; yy: number };
   /** Orbit camera for the attached 3D inspection canvas; null/undefined skips the pass. */
   orbit3d?: Orbit | null;
+  /** The Emboss/Detail bands for this doc (null when no detail adjustment exists). */
+  detail?: DetailField | null;
 }
 
 /** Owns the WebGPU canvas: the analytic 2D composite + the 3D inspection pass (both evaluate the
@@ -54,6 +58,8 @@ export class PreviewRenderer {
   private meshBuf: GPUBuffer | null = null;
   private maskLoopsBuf: GPUBuffer | null = null;
   private maskVertsBuf: GPUBuffer | null = null;
+  private detailBuf: GPUBuffer | null = null;
+  private lastDetail: DetailField | null | undefined = undefined; // sentinel: never uploaded
   private shapeCount = 0;
   private lastShapes2d: LayerNode[] | null = null;
   private frame: number | null = null;
@@ -201,6 +207,7 @@ export class PreviewRenderer {
         { binding: 4, resource: { buffer: this.meshBuf! } },
         { binding: 6, resource: { buffer: this.maskLoopsBuf! } },
         { binding: 7, resource: { buffer: this.maskVertsBuf! } },
+        { binding: 8, resource: { buffer: this.detailBuf! } },
       ],
     });
     const gridBind = this.device.createBindGroup({
@@ -340,6 +347,12 @@ export class PreviewRenderer {
     f[15] = p.lightEnergy;
     this.device.queue.writeBuffer(this.uniforms, 0, ub);
 
+    // detail bands: (re)upload only when the field object changes (per diffuse+doc, cached upstream)
+    if (this.lastDetail !== (p.detail ?? null)) {
+      this.detailBuf?.destroy();
+      this.detailBuf = detailBuffer(this.device, p.detail ?? null, 1); // composite p is doc-space
+      this.lastDetail = p.detail ?? null;
+    }
     const bind = this.device.createBindGroup({
       layout: this.compositePipeline.getBindGroupLayout(0),
       entries: [
@@ -350,6 +363,7 @@ export class PreviewRenderer {
         { binding: 5, resource: this.diffuseTex.createView() },
         { binding: 6, resource: { buffer: this.maskLoopsBuf! } },
         { binding: 7, resource: { buffer: this.maskVertsBuf! } },
+        { binding: 8, resource: { buffer: this.detailBuf! } },
       ],
     });
     const enc = this.device.createCommandEncoder();
