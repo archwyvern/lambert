@@ -205,9 +205,10 @@ fn adjust_apply(kind: u32, H: f32, a: vec2f, b: vec2f, pl: vec2f, pw: vec2f, bas
       let t = clamp((dot(pl, dir) - minP) / max(maxP - minP, 1e-6), 0.0, 1.0);
       return H + a.y * t;
     }
-    default: {                                // detail: amount * (fine, medium, large) · bands(pw)
-      let bands = detail_sample(pw);
-      return H + a.x * dot(bands, vec3f(a.y, b.x, b.y));
+    default: {                                // detail: strength × the integrated skyrat field
+      // params pack (radius, strength) + (blur, tolerance); only strength acts here — the rest
+      // are CHAIN params baked into the precomputed field (field/detail.ts)
+      return H + a.y * detail_sample(pw).x;
     }
   }
 }
