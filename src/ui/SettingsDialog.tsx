@@ -1,6 +1,7 @@
-import { FormToggle, Segmented, SettingsModal, SpinSlider } from "@carapace/shell";
-import type { SettingsScreen } from "@carapace/shell";
+import { FormToggle, Segmented, SettingsModal, ShortcutEditor, SpinSlider } from "@carapace/shell";
+import type { SettingsScreen, ShortcutRow } from "@carapace/shell";
 import type { DocumentStore, EditorState } from "../document/store";
+import { BindingOverrides, COMMANDS, effectiveKeys } from "./commands";
 import {
   DEFAULT_NORMAL_DIRS,
   type NormalDirs,
@@ -102,11 +103,23 @@ export function SettingsDialog(props: {
   /** Active document, or null when no tab is open (Document screens hidden). */
   store: DocumentStore | null;
   state: EditorState | null;
+  /** User keybinding overrides (app-level, not per-project). */
+  bindingOverrides: BindingOverrides;
+  onBindingOverrides: (fn: (prev: BindingOverrides) => BindingOverrides) => void;
   initialScreen?: string;
   onScreenChange?: (id: string) => void;
   onClose: () => void;
 }): React.JSX.Element {
-  const { config, onConfig, store, state, initialScreen, onScreenChange, onClose } = props;
+  const { config, onConfig, store, state, bindingOverrides, onBindingOverrides, initialScreen, onScreenChange, onClose } = props;
+
+  const shortcutRows: ShortcutRow[] = COMMANDS.map((c) => ({
+    id: c.id,
+    command: `${c.category}: ${c.label.replace(/…$/, "")}`,
+    keys: effectiveKeys(c, bindingOverrides),
+    when: c.scope === "editor" ? "editor" : undefined,
+    source: c.id in bindingOverrides ? "user" : "default",
+    mouse: c.mouse,
+  }));
 
   const screens: SettingsScreen[] = [
     {
@@ -135,6 +148,40 @@ export function SettingsDialog(props: {
             Output Format). The default — 16-bit RGBA PNG — is the Skyrat NX contract.
           </Blurb>
           <OutputFormatEditor value={config.output} onChange={(output) => onConfig({ ...config, output })} />
+        </div>
+      ),
+    },
+    {
+      id: "app-shortcuts",
+      label: "Shortcuts",
+      group: "Application",
+      render: () => (
+        <div>
+          <Blurb>
+            Every command and its binding. Click a row's edit action to record a new chord ("editor"
+            commands need an open document and fire only when focus is outside a text field). Stored
+            per-machine, not in the project.
+          </Blurb>
+          <ShortcutEditor
+            rows={shortcutRows}
+            onChange={(id, keys) =>
+              onBindingOverrides((prev) => {
+                const def = COMMANDS.find((c) => c.id === id)?.keys ?? null;
+                if (keys === def) {
+                  // rebinding back to the default = no override
+                  const { [id]: _drop, ...rest } = prev;
+                  return rest;
+                }
+                return { ...prev, [id]: keys };
+              })
+            }
+            onReset={(id) =>
+              onBindingOverrides((prev) => {
+                const { [id]: _drop, ...rest } = prev;
+                return rest;
+              })
+            }
+          />
         </div>
       ),
     },

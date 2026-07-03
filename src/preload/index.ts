@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld("lambertHost", {
   saveSession: (json: string) => ipcRenderer.invoke("session:save", json),
   onMenuAction: (cb: (action: string) => void) =>
     ipcRenderer.on("menu:action", (_e, action: string) => cb(action)),
+  setMenuAccelerators: (map: Record<string, string | null>) => ipcRenderer.invoke("menu:accelerators", map),
   notifyProjectOpened: () => ipcRenderer.send("window:enter-project"),
   onOpenProjectPath: (cb: (dir: string) => void) =>
     ipcRenderer.on("open-project-path", (_e, dir: string) => cb(dir)),

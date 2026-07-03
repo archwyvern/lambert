@@ -41,6 +41,8 @@ export interface Host {
   saveSession(json: string): Promise<void>;
   /** Application-menu actions (open-image/save/export-nx/undo/zoom-fit/...). */
   onMenuAction(cb: (action: string) => void): void;
+  /** Push the effective command bindings; main rebuilds the native menu so accelerators track rebinds. */
+  setMenuAccelerators(map: Record<string, string | null>): Promise<void>;
   /** Tell main a project opened, so it can grow the compact welcome window to the remembered editor size. */
   notifyProjectOpened(): void;
   /** A project folder the OS asked us to open while running (double-clicked project.lambert). */

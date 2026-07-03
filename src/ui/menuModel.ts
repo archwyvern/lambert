@@ -10,6 +10,8 @@ import type { MenuModel } from "@carapace/shell";
 export function buildMenuModel(opts: {
   action: (id: string) => void;
   about: () => void;
+  /** Effective shortcut for a command id (rebind-aware) — display only; dispatch stays elsewhere. */
+  keys: (id: string) => string | undefined;
   /** A project is open. */
   hasWorkspace: boolean;
   /** A document tab is active. */
@@ -22,44 +24,44 @@ export function buildMenuModel(opts: {
   hasPresets: boolean;
   rulers: boolean;
 }): MenuModel {
-  const { action, about, hasWorkspace, hasActive, hasSel, canAlign, canDistribute, canUndo, canRedo, hasPresets, rulers } = opts;
+  const { action, about, keys, hasWorkspace, hasActive, hasSel, canAlign, canDistribute, canUndo, canRedo, hasPresets, rulers } = opts;
   return [
     {
       label: "&&File",
       items: [
-        { label: "New Project…", shortcut: "Ctrl+Shift+N", run: () => action("new-project") },
-        { label: "Open Project…", shortcut: "Ctrl+O", run: () => action("open-project") },
+        { label: "New Project…", shortcut: keys("new-project"), run: () => action("new-project") },
+        { label: "Open Project…", shortcut: keys("open-project"), run: () => action("open-project") },
         { separator: true },
-        { label: "New Document…", shortcut: "Ctrl+N", enabled: hasWorkspace, run: () => action("new-document") },
+        { label: "New Document…", shortcut: keys("new-document"), enabled: hasWorkspace, run: () => action("new-document") },
         { label: "Reload Diffuse", enabled: hasActive, run: () => action("reload-diffuse") },
         { separator: true },
-        { label: "Save", shortcut: "Ctrl+S", enabled: hasActive, run: () => action("save") },
-        { label: "Save All", shortcut: "Ctrl+Shift+S", enabled: hasWorkspace, run: () => action("save-all") },
+        { label: "Save", shortcut: keys("save"), enabled: hasActive, run: () => action("save") },
+        { label: "Save All", shortcut: keys("save-all"), enabled: hasWorkspace, run: () => action("save-all") },
         { separator: true },
-        { label: "Export NX", shortcut: "Ctrl+E", enabled: hasActive, run: () => action("export-nx") },
-        { label: "Export All NX", shortcut: "Ctrl+Shift+E", enabled: hasWorkspace, run: () => action("export-all") },
+        { label: "Export NX", shortcut: keys("export-nx"), enabled: hasActive, run: () => action("export-nx") },
+        { label: "Export All NX", shortcut: keys("export-all"), enabled: hasWorkspace, run: () => action("export-all") },
         { separator: true },
         { label: "Import Presets…", enabled: hasWorkspace, run: () => action("import-presets") },
         { label: "Export Presets…", enabled: hasWorkspace && hasPresets, run: () => action("export-presets") },
         { separator: true },
-        { label: "Settings…", shortcut: "Ctrl+,", enabled: hasWorkspace, run: () => action("settings") },
+        { label: "Settings…", shortcut: keys("settings"), enabled: hasWorkspace, run: () => action("settings") },
       ],
     },
     {
       label: "&&Edit",
       items: [
-        { label: "Undo", shortcut: "Ctrl+Z", enabled: canUndo, run: () => action("undo") },
-        { label: "Redo", shortcut: "Ctrl+Y", enabled: canRedo, run: () => action("redo") },
+        { label: "Undo", shortcut: keys("undo"), enabled: canUndo, run: () => action("undo") },
+        { label: "Redo", shortcut: keys("redo"), enabled: canRedo, run: () => action("redo") },
         { separator: true },
-        { label: "Copy", shortcut: "Ctrl+C", enabled: hasSel, run: () => action("copy") },
-        { label: "Paste", shortcut: "Ctrl+V", enabled: hasActive, run: () => action("paste") },
+        { label: "Copy", shortcut: keys("copy"), enabled: hasSel, run: () => action("copy") },
+        { label: "Paste", shortcut: keys("paste"), enabled: hasActive, run: () => action("paste") },
         { separator: true },
-        { label: "Duplicate", shortcut: "Ctrl+D", enabled: hasSel, run: () => action("duplicate") },
+        { label: "Duplicate", shortcut: keys("duplicate"), enabled: hasSel, run: () => action("duplicate") },
         { label: "Save as Preset", enabled: hasSel, run: () => action("save-preset") },
         { label: "Delete", enabled: hasSel, run: () => action("delete") },
         { separator: true },
-        { label: "Group", shortcut: "Ctrl+G", enabled: hasSel, run: () => action("group") },
-        { label: "Ungroup", shortcut: "Ctrl+Shift+G", enabled: hasSel, run: () => action("ungroup") },
+        { label: "Group", shortcut: keys("group"), enabled: hasSel, run: () => action("group") },
+        { label: "Ungroup", shortcut: keys("ungroup"), enabled: hasSel, run: () => action("ungroup") },
       ],
     },
     {
@@ -86,11 +88,13 @@ export function buildMenuModel(opts: {
     {
       label: "&&View",
       items: [
-        { label: "Fit", shortcut: "Ctrl+0", enabled: hasActive, run: () => action("zoom-fit") },
-        { label: "Fit Selection", shortcut: "Ctrl+Shift+0", enabled: hasSel, run: () => action("zoom-fit-selection") },
-        { label: "100%", shortcut: "Ctrl+1", enabled: hasActive, run: () => action("zoom-100") },
+        { label: "Fit", shortcut: keys("zoom-fit"), enabled: hasActive, run: () => action("zoom-fit") },
+        { label: "Fit Selection", shortcut: keys("zoom-fit-selection"), enabled: hasSel, run: () => action("zoom-fit-selection") },
+        { label: "100%", shortcut: keys("zoom-100"), enabled: hasActive, run: () => action("zoom-100") },
         { separator: true },
-        { label: "Rulers", shortcut: "Ctrl+R", enabled: hasActive, role: "checkbox", checked: rulers, keepOpen: true, run: () => action("toggle-rulers") },
+        { label: "Rulers", shortcut: keys("toggle-rulers"), enabled: hasActive, role: "checkbox", checked: rulers, keepOpen: true, run: () => action("toggle-rulers") },
+        { separator: true },
+        { label: "Command Palette…", shortcut: keys("command-palette"), run: () => action("command-palette") },
       ],
     },
     {
