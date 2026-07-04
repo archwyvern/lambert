@@ -26,11 +26,18 @@ if (isAutomation) {
   app.setPath("userData", profileDir ?? mkdtempSync(path.join(os.tmpdir(), "lambert-automation-")));
 }
 
-// WebGPU is default-on for Windows/macOS Chromium but flag-gated on Linux; we own the
-// flags, so force it everywhere. Must run before app is ready.
+// WebGPU is default-on for Windows/macOS Chromium but flag-gated on Linux. `enable-unsafe-webgpu`
+// is backend-neutral and safe everywhere (relaxes limits / exposes experimental bits). The Vulkan
+// switches are LINUX-ONLY: Dawn has no D3D/Metal backend there, so it needs Vulkan + ANGLE-on-Vulkan
+// explicitly. Forcing them on Windows (ANGLE default d3d11) / macOS (metal) steers the whole GPU
+// stack onto Vulkan — and on any box where Chromium blocklists Vulkan (common on Windows: old Intel
+// drivers, VMs, RDP), the GPU process falls back to software and requestAdapter() returns null.
+// Must run before app is ready.
 app.commandLine.appendSwitch("enable-unsafe-webgpu");
-app.commandLine.appendSwitch("enable-features", "Vulkan,VulkanFromANGLE");
-app.commandLine.appendSwitch("use-angle", "vulkan");
+if (process.platform === "linux") {
+  app.commandLine.appendSwitch("enable-features", "Vulkan,VulkanFromANGLE");
+  app.commandLine.appendSwitch("use-angle", "vulkan");
+}
 
 // Dev only: never serve the renderer from Electron's on-disk HTTP cache. It can pin a stale build of
 // the UI (e.g. an old toolbar logo) even after the Vite dev server already serves the new code — so
