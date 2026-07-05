@@ -165,7 +165,7 @@ export interface FieldSample {
 export interface ObjectType {
   id: string;
   name: string;
-  /** Library palette group: "Shapes", "Paths", or "Mesh". Absent = ungrouped/hidden. */
+  /** Library palette group: "Shapes", "Paths", or "Special". Absent = ungrouped/hidden. */
   category?: string;
   params: Record<string, ParamSpec>;
   controlPoints: ControlPointSpec;

@@ -1,5 +1,6 @@
 // Importing this module registers every built-in object type (side effect imports).
-// Registration order = library palette order: Primitives, then Vectors, then Meshes.
+// Registration order = library palette order: Primitives (Shapes), Vectors (Paths), then Special
+// (Mesh + the Adjustment filter — neither is a preset shape).
 
 // Primitives — parametric or straight-polygon footprints (no Bézier).
 export { Sphere } from "./sphere";
@@ -18,10 +19,9 @@ export { SurfaceVector } from "./surfaceVector";
 export { PlateauVector } from "./plateauVector";
 export { Pillow } from "./pillow";
 
-// Meshes — the free triangulated height field (per-vertex Z); flat primitives bake into it (convert.ts).
+// Special — not preset shapes: the free triangulated Mesh (per-vertex Z; flat primitives bake into it
+// via convert.ts) and the Adjustment FILTER layer (region-scoped transforms of the accumulated field).
 export { Mesh } from "./mesh";
-
-// Effects — the Adjustment FILTER layer (region-scoped transforms of the accumulated field).
 export { Adjust } from "./adjust";
 
 // Palette presets (familiar tiles backed by the parameterized types) — side-effect registration.
