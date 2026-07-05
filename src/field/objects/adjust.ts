@@ -37,7 +37,7 @@ export function adjustEval(p: Vector2, object: ObjectInstance): FieldSample {
 export const Adjust = defineObjectType({
   id: ObjectTypeId.Adjust,
   name: "Adjustment",
-  category: "Effects",
+  category: "Special",
   params: {}, // the adjustment list lives in `adjustments`, packed as its own stream
   defaultCombine: "adjust",
   nominalHeight: 0,

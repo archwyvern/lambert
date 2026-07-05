@@ -28,7 +28,7 @@ function seedQuad(object: ObjectInstance): void {
 export const Mesh = defineObjectType({
   id: ObjectTypeId.Mesh,
   name: "Mesh",
-  category: "Mesh",
+  category: "Special",
   params: { ...MESH_PARAMS },
   controlPoints: { kind: "mesh", default: [] },
   onCreate: seedQuad,

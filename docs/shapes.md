@@ -42,7 +42,7 @@ smooth at any zoom.
 
 ## Adjustment layers
 
-**Adjustment** (Effects palette) is a *filter* layer: a closed region (full-canvas by default —
+**Adjustment** (Special palette) is a *filter* layer: a closed region (full-canvas by default —
 reshape it with the vertex tool, holes supported) hosting an ordered list of height transforms
 applied to everything below it. Every entry has a **blend** slider (mix between untouched and
 transformed). Kinds:

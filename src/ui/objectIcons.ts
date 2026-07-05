@@ -2,7 +2,7 @@ import { ObjectTypeId } from "../field/objectTypeIds";
 import bermIcon from "./icons/berm.png";
 import cableIcon from "./icons/cable.png";
 import contourIcon from "./icons/contour.png";
-import adjustIcon from "./icons/gradient.png"; // reused clay render until a dedicated icon lands
+import adjustIcon from "./icons/adjust.svg"; // dedicated flat glyph — Adjustment is a filter, not clay geometry
 import mesaIcon from "./icons/mesa.png";
 import meshIcon from "./icons/mesh.png";
 import pillowIcon from "./icons/pillow.png";
@@ -32,8 +32,7 @@ export const OBJECT_ICONS: Record<string, string> = {
   [ObjectTypeId.SurfaceVector]: contourIcon,
   [ObjectTypeId.PlateauVector]: mesaIcon,
   [ObjectTypeId.Pillow]: pillowIcon,
-  // Effects
+  // Special (not shapes: the Adjustment filter + the free mesh)
   [ObjectTypeId.Adjust]: adjustIcon,
-  // Mesh
   [ObjectTypeId.Mesh]: meshIcon,
 };
