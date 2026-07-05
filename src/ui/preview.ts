@@ -10,12 +10,23 @@ import type { LayerNode } from "../field/types";
 import type { Viewport } from "./viewport";
 
 export type ViewMode = "diffuse" | "normal" | "lit" | "coverage";
-export const VIEW_MODES: ViewMode[] = ["diffuse", "normal", "lit", "coverage"];
+export const VIEW_MODES: ViewMode[] = ["diffuse", "normal", "coverage"]; // editor-selectable modes; "lit" now lives only in the 3D box preview
 const MODE_INDEX: Record<ViewMode, number> = { diffuse: 0, normal: 1, lit: 2, coverage: 3 };
 
 // 3D displaced-grid resolution cap: the grid is sized to the doc (1 cell ~= 1 doc px) so hard height
 // cliffs read crisply, clamped here so very large docs don't explode the vertex count (512^2*6 ~= 1.5M).
 const GRID_MAX = 512;
+
+/** A lit-preview point light. Position/height are fractions (0..1 of the doc / its larger dim) so they're
+ *  resolution-independent; the handles in the lit preview edit x/y, the widget edits the rest. */
+export interface PointLight {
+  on: boolean;
+  x: number;
+  y: number;
+  height: number;
+  intensity: number;
+  color: [number, number, number];
+}
 
 export interface PreviewParams {
   layers: LayerNode[];
@@ -26,6 +37,8 @@ export interface PreviewParams {
   lightDir: [number, number, number];
   /** Lit-mode light intensity multiplier (1 = default). */
   lightEnergy: number;
+  /** Lit-preview point lights (rendered in the box's Lit view; ignored by the diffuse/normal modes). */
+  pointLights?: PointLight[];
   /** The XY encode transform for the normal view (normalXform of the effective dirs). */
   normalXform: { xx: number; xy: number; yx: number; yy: number };
   /** Orbit camera for the attached 3D inspection canvas; null/undefined skips the pass. */
@@ -111,8 +124,8 @@ export class PreviewRenderer {
       vertex: { module, entryPoint: "vs" },
       fragment: { module, entryPoint: "fs", targets: [{ format }] },
     });
-    p.uniforms = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    p.boxUniforms = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    p.uniforms = device.createBuffer({ size: 128, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    p.boxUniforms = device.createBuffer({ size: 128, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     const module3d = device.createShaderModule({ code: buildPreview3dWgsl() });
     p.pipeline3d = await device.createRenderPipelineAsync({
       layout: "auto",
@@ -392,7 +405,7 @@ export class PreviewRenderer {
       panX = (boxW - docW * zoom) / 2;
       panY = (boxH - docH * zoom) / 2;
     }
-    const ub = new ArrayBuffer(64);
+    const ub = new ArrayBuffer(128); // 64 base + 64 point-light block
     const f = new Float32Array(ub);
     const u = new Uint32Array(ub);
     f[0] = zoom;
@@ -411,6 +424,21 @@ export class PreviewRenderer {
     f[13] = p.normalXform.yx;
     f[14] = p.normalXform.yy;
     f[15] = p.lightEnergy;
+    // point-light block at offset 64 (f[16]); 8 floats each. Fractions -> doc coords so lights scale with the doc.
+    const maxDim = Math.max(docW, docH);
+    for (let i = 0; i < 2; i++) {
+      const pl = p.pointLights?.[i];
+      if (!pl || !pl.on) continue; // leave the slot's 8 floats at 0 -> on=0 -> skipped in the shader
+      const b = 16 + i * 8;
+      f[b] = pl.x * docW;
+      f[b + 1] = pl.y * docH;
+      f[b + 2] = Math.max(1, pl.height * maxDim);
+      f[b + 3] = pl.intensity;
+      f[b + 4] = pl.color[0];
+      f[b + 5] = pl.color[1];
+      f[b + 6] = pl.color[2];
+      f[b + 7] = 1;
+    }
     this.device.queue.writeBuffer(this.boxUniforms, 0, ub);
     const bind = this.device.createBindGroup({
       layout: this.compositePipeline.getBindGroupLayout(0),
@@ -441,6 +469,9 @@ export class PreviewRenderer {
     pass.draw(3);
     pass.end();
     this.device.queue.submit([enc.finish()]);
+    // this pass overwrote the box canvas with the lit composite; invalidate the 3D cache so switching
+    // back to 3D re-renders immediately instead of leaving the stale lit frame up until the camera moves
+    this.last3d = null;
   }
 
   private renderNow(docW: number, docH: number, p: PreviewParams): void {
@@ -459,7 +490,7 @@ export class PreviewRenderer {
     }
 
     const dpr = this.canvas.width / (this.canvas.getBoundingClientRect().width || this.canvas.width) || 1;
-    const ub = new ArrayBuffer(64);
+    const ub = new ArrayBuffer(128); // 64 base + 64 point-light block (zero here — the editor never renders lit)
     const f = new Float32Array(ub);
     const u = new Uint32Array(ub);
     f[0] = p.viewport.zoom * dpr;

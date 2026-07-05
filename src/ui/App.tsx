@@ -50,7 +50,7 @@ import { LaunchScreen } from "./LaunchScreen";
 import { NewDocumentDialog } from "./NewDocumentDialog";
 import { AboutDialog } from "./AboutDialog";
 import { SettingsDialog } from "./SettingsDialog";
-import type { ViewMode } from "./preview";
+import type { ViewMode, PointLight } from "./preview";
 import { VIEW_MODES } from "./preview";
 import { TOOL_KEYS, ToolMode } from "./tools";
 import { v2 } from "../field/vec";
@@ -77,12 +77,24 @@ export interface ViewState {
   lightDir: [number, number, number];
   /** Lit view: light intensity multiplier (1 = default). */
   lightEnergy: number;
+  /** Lit-preview point lights (2). Preview-only (never exported); transient like lightEnergy. */
+  pointLights: PointLight[];
   /** The mode active before the current one — target of the "toggle last view" command (Shift+V).
    *  Transient, like lightEnergy: not in the session schema, backfilled from DEFAULT_VIEW per session. */
   prevMode?: ViewMode;
 }
 
-const DEFAULT_VIEW: ViewState = { mode: "lit", opacity: 1, lightDir: [-0.5, -0.5, 0.7], lightEnergy: 1, prevMode: "normal" };
+const DEFAULT_VIEW: ViewState = {
+  mode: "normal",
+  opacity: 1,
+  lightDir: [-0.5, -0.5, 0.7],
+  lightEnergy: 1,
+  prevMode: "diffuse",
+  pointLights: [
+    { on: false, x: 0.35, y: 0.4, height: 0.5, intensity: 0.8, color: [1.0, 0.85, 0.65] }, // warm key
+    { on: false, x: 0.65, y: 0.6, height: 0.5, intensity: 0.8, color: [0.6, 0.78, 1.0] }, // cool fill
+  ],
+};
 
 /** In-app object clipboard (Copy/Paste), module-level so it survives across tabs — an artist can copy a
  *  tuned object from one .lmb tab and paste it into another. Snapshots node refs (the store's immutable
@@ -152,7 +164,7 @@ export function App(): React.JSX.Element {
   // it only runs when the user opts in (click the pane to enable; the power button disables)
   // (the `3d` query flag pre-enables it for capture/demo shots — automation profiles are fresh)
   const [preview3dOn, setPreview3dOn] = usePersistentState("panel:3d:enabled", new URLSearchParams(location.search).has("3d"));
-  const [boxMode, setBoxMode] = usePersistentState<"3d" | "lit">("panel:3d:mode", "3d"); // 3D inspection box: orbit vs lit composite
+  const [boxMode, setBoxMode] = usePersistentState<"3d" | "lit">("panel:3d:mode", "lit"); // inspection box: lit composite (default) vs orbit 3D
   const [boxLitViewport, setBoxLitViewport] = useState<Viewport | null>(null); // the box's independent lit camera (in-memory, driven by Preview3D)
   const [cornerHeight, setCornerHeight] = usePersistentState("panel:3d:corner", 300);
   const [, bumpRender] = useReducer((x: number) => x + 1, 0);
@@ -964,7 +976,7 @@ export function App(): React.JSX.Element {
         return setActiveView((s) => ({ ...s, mode: VIEW_MODES[(VIEW_MODES.indexOf(s.mode) + 1) % VIEW_MODES.length]!, prevMode: s.mode }));
       case "view-toggle-last":
         return setActiveView((s) => {
-          const back = s.prevMode ?? (s.mode === "lit" ? "normal" : "lit");
+          const back = s.prevMode ?? (s.mode === "normal" ? "diffuse" : "normal");
           return back === s.mode ? s : { ...s, mode: back, prevMode: s.mode };
         });
       case "view-swap":
@@ -1121,7 +1133,8 @@ export function App(): React.JSX.Element {
           if (ts.selectedId && findNode(doc.layers, ts.selectedId)) store.select(ts.selectedId);
           const tab: Tab = { id: ts.id, docPath: ts.docPath, store, diffuse: { bytes, unresolved } };
           ws.openTab(tab);
-          restoredViews[ts.id] = { ...DEFAULT_VIEW, ...ts.view }; // backfill fields added since the session was saved
+          // backfill fields added since the session was saved; migrate the retired editor "lit" mode to normal
+          restoredViews[ts.id] = { ...DEFAULT_VIEW, ...ts.view, mode: ts.view.mode === "lit" ? "normal" : ts.view.mode };
           if (ts.viewport) restoredViewports[ts.id] = ts.viewport;
           if (ts.orbit) restoredOrbits[ts.id] = ts.orbit;
         }
@@ -1402,6 +1415,8 @@ export function App(): React.JSX.Element {
                   onLitViewport={setBoxLitViewport}
                   lightDir={activeView.lightDir}
                   onLightChange={(d) => setActiveView((v) => ({ ...v, lightDir: d }))}
+                  pointLights={activeView.pointLights}
+                  onPointLightsChange={(pls) => setActiveView((v) => ({ ...v, pointLights: pls }))}
                 />
               </div>
             </div>

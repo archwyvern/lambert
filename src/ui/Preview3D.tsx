@@ -1,13 +1,23 @@
-import { AddRegular, ArrowResetRegular, ArrowSwapRegular, PowerRegular, SubtractRegular } from "@fluentui/react-icons";
+import { AddRegular, ArrowResetRegular, ArrowSwapRegular, LightbulbRegular, PowerRegular, SubtractRegular } from "@fluentui/react-icons";
 import { useEffect, useRef, useState } from "react";
 import { ShortcutGuide } from "@carapace/shell";
 import { DEFAULT_ORBIT } from "../field/gpu/preview3d";
 import { v2 } from "../field/vec";
-import { fitViewport, zoomAt, type Viewport } from "./viewport";
+import { canvasToScreen, fitViewport, screenToCanvas, zoomAt, type Viewport } from "./viewport";
+import type { PointLight } from "./preview";
 import { GUIDE_3D } from "./keymap";
 import { LightPad } from "./LightPad";
 import { ICON } from "./kit";
 import type { use3DCamera } from "./use3DCamera";
+
+const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));
+const chan = (c: number): string => Math.max(0, Math.min(255, Math.round(c * 255))).toString(16).padStart(2, "0");
+const rgbToHex = (c: [number, number, number]): string => `#${chan(c[0])}${chan(c[1])}${chan(c[2])}`;
+const hexToRgb = (hex: string): [number, number, number] => [
+  parseInt(hex.slice(1, 3), 16) / 255,
+  parseInt(hex.slice(3, 5), 16) / 255,
+  parseInt(hex.slice(5, 7), 16) / 255,
+];
 
 /**
  * The 3D inspection view. Always mounted (App swaps it between the big centre slot and the
@@ -38,8 +48,11 @@ export function Preview3D(props: {
   onModeChange: (m: "3d" | "lit") => void;
   /** Report the box's lit-mode 2D camera up so the renderer draws with it. */
   onLitViewport: (vp: Viewport) => void;
+  /** Lit-preview point lights + setter — widgets and draggable handles, shown only in fullscreen Lit. */
+  pointLights: PointLight[];
+  onPointLightsChange: (pls: PointLight[]) => void;
 }): React.JSX.Element {
-  const { cam, canvasRef, docW, docH, enabled, onToggle, onResize, big, onSwap, lightDir, onLightChange, mode, onModeChange, onLitViewport } = props;
+  const { cam, canvasRef, docW, docH, enabled, onToggle, onResize, big, onSwap, lightDir, onLightChange, mode, onModeChange, onLitViewport, pointLights, onPointLightsChange } = props;
   const hostRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 1, h: 1 });
 
@@ -126,6 +139,27 @@ export function Preview3D(props: {
   const ground = proj ? proj([t.x, 0, t.z]) : null;
   const iconBtn = "flex h-control-xs w-control-xs items-center justify-center text-fg-mid hover:text-fg";
 
+  // point lights: widgets + draggable handles appear only in fullscreen Lit (per design)
+  const litLightsUI = enabled && mode === "lit" && big;
+  const setLight = (i: number, patch: Partial<PointLight>): void =>
+    onPointLightsChange(pointLights.map((pl, j) => (j === i ? { ...pl, ...patch } : pl)));
+  // drag a point-light handle across the lit preview -> its doc-fraction position (through the box's lit camera)
+  const lightDrag = (i: number) => (e: React.PointerEvent): void => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    const rect = canvasRef.current!.getBoundingClientRect();
+    const move = (ev: PointerEvent): void => {
+      const c = screenToCanvas(effLitVp, v2(ev.clientX - rect.left, ev.clientY - rect.top));
+      setLight(i, { x: clamp01(c.x / docW), y: clamp01(c.y / docH) });
+    };
+    const up = (): void => {
+      document.removeEventListener("pointermove", move, true);
+      document.removeEventListener("pointerup", up, true);
+    };
+    document.addEventListener("pointermove", move, true);
+    document.addEventListener("pointerup", up, true);
+  };
+
   return (
     <div ref={hostRef} className="absolute inset-0 overflow-hidden">
       <canvas
@@ -148,10 +182,16 @@ export function Preview3D(props: {
           Preview off — click to enable
         </button>
       ) : null}
-      <div className="absolute inset-x-0 top-0 flex h-[22px] items-center px-2">
-        <div className="pointer-events-auto flex items-center gap-1 text-sm font-semibold uppercase tracking-wide">
-          {(["3d", "lit"] as const).map((m) => (
-            <button key={m} className={mode === m ? "text-fg" : "text-fg-mid hover:text-fg"} onClick={() => onModeChange(m)}>
+      <div className="absolute inset-x-0 top-0 flex items-start px-2 pt-2">
+        <div className="pointer-events-auto flex items-center overflow-hidden rounded border border-border-light text-sm font-semibold uppercase tracking-wide">
+          {(["3d", "lit"] as const).map((m, i) => (
+            <button
+              key={m}
+              className={`px-2 py-0.5 ${i === 0 ? "border-r border-border-light" : ""} ${
+                mode === m ? "bg-accent/30 text-fg" : "bg-surface2/60 text-fg-mid hover:bg-surface2 hover:text-fg"
+              }`}
+              onClick={() => onModeChange(m)}
+            >
               {m === "3d" ? "3D" : "Lit"}
             </button>
           ))}
@@ -188,7 +228,56 @@ export function Preview3D(props: {
             <span className="text-sm uppercase tracking-wide text-fg-mid">light</span>
           </div>
         ) : null}
+        {litLightsUI
+          ? pointLights.map((pl, i) => (
+              <div
+                key={i}
+                className="pointer-events-auto flex flex-col items-center gap-1.5 border border-border bg-surface2/90 p-2"
+                onPointerDown={(e) => e.stopPropagation()}
+              >
+                <button
+                  className="grid h-6 w-6 place-items-center rounded hover:bg-surface"
+                  title={pl.on ? `Point light ${i + 1} — on (drag its handle in the preview to move)` : `Point light ${i + 1} — off`}
+                  onClick={() => setLight(i, { on: !pl.on })}
+                >
+                  <LightbulbRegular style={{ fontSize: ICON.xs, color: pl.on ? rgbToHex(pl.color) : "var(--color-fg-dark)" }} />
+                </button>
+                <input
+                  type="color"
+                  value={rgbToHex(pl.color)}
+                  onChange={(e) => setLight(i, { color: hexToRgb(e.target.value) })}
+                  className="h-5 w-6 cursor-pointer rounded border border-border bg-transparent p-0"
+                  title="Colour"
+                />
+                <input
+                  type="range"
+                  min={0}
+                  max={300}
+                  value={Math.round(pl.intensity * 100)}
+                  onChange={(e) => setLight(i, { intensity: Number(e.target.value) / 100 })}
+                  className="w-14"
+                  title="Brightness"
+                />
+                <span className="text-sm uppercase tracking-wide text-fg-mid">P{i + 1}</span>
+              </div>
+            ))
+          : null}
       </div>
+      {litLightsUI ? (
+        <svg className="pointer-events-none absolute top-0 left-0" width={size.w} height={size.h} style={{ overflow: "visible" }}>
+          {pointLights.map((pl, i) => {
+            if (!pl.on) return null;
+            const s = canvasToScreen(effLitVp, v2(pl.x * docW, pl.y * docH));
+            return (
+              <g key={i} className="pointer-events-auto cursor-grab" onPointerDown={lightDrag(i)}>
+                <circle cx={s.x} cy={s.y} r={10} fill={rgbToHex(pl.color)} stroke="#000000" strokeWidth={3} strokeOpacity={0.55} />
+                <circle cx={s.x} cy={s.y} r={10} fill="none" stroke="#ffffff" strokeWidth={1.5} />
+                <circle cx={s.x} cy={s.y} r={2.5} fill="#000000" fillOpacity={0.5} />
+              </g>
+            );
+          })}
+        </svg>
+      ) : null}
       {inView(focal) || showAid ? (
         <svg
           className="pointer-events-none absolute top-0 left-0"

@@ -2,7 +2,7 @@ import { CircleHalfFillRegular, ColorFillRegular, GridRegular, ImageRegular, Lig
 import { IconButton, SpinSlider } from "@carapace/shell";
 import type { DocumentStore, EditorState } from "../document/store";
 import type { ViewState } from "./App";
-import type { ViewMode } from "./preview";
+import { VIEW_MODES, type ViewMode } from "./preview";
 
 const MODE_META: Record<ViewMode, { icon: React.JSX.Element; label: string }> = {
   diffuse: { icon: <ImageRegular />, label: "Diffuse — the source texture" },
@@ -75,7 +75,7 @@ export function ViewControls(props: {
       ) : null}
       <div className="mx-1 h-4 w-px bg-border" />
       <div role="group" aria-label="View mode" className="flex items-center gap-1">
-        {(Object.keys(MODE_META) as ViewMode[]).map((m) => (
+        {VIEW_MODES.map((m) => (
           <IconButton
             key={m}
             tooltip={`${MODE_META[m].label} (V cycles)`}
