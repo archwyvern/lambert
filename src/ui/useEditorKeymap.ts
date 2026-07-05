@@ -75,7 +75,7 @@ export function useEditorKeymap(opts: {
       if (id.startsWith("tool-")) {
         setTool(id.slice("tool-".length) as ToolMode);
       } else if (id === "view-cycle") {
-        setActiveView((s) => ({ ...s, mode: VIEW_MODES[(VIEW_MODES.indexOf(s.mode) + 1) % VIEW_MODES.length]! }));
+        setActiveView((s) => ({ ...s, mode: VIEW_MODES[(VIEW_MODES.indexOf(s.mode) + 1) % VIEW_MODES.length]!, prevMode: s.mode }));
       } else if (id === "view-swap") {
         setSwapped((sw) => !sw);
       } else if (id === "delete") {

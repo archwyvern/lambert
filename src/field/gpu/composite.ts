@@ -94,13 +94,14 @@ fn fs(@builtin(position) fragPos: vec4f) -> @location(0) vec4f {
     );
     return vec4f(mix(base, enc, mask * cu.opacity * select(1.0, 0.0, gated)), 1.0);
   }
-  // lit: light only the diffuse itself, gated by its alpha. Transparent pixels (alpha 0) keep the white
-  // backdrop and are never touched by the light, no matter what object/normal sits under them — in 2D the
-  // only thing that gets lit is the visible artwork.
+  // lit: light only the diffuse itself, gated by its alpha. Transparent pixels (alpha 0) show the dark
+  // viewport background (matching outside-the-doc) instead of a white box, and are never touched by the
+  // light, no matter what object/normal sits under them — in 2D the only thing that gets lit is the
+  // visible artwork.
   let l = normalize(vec3f(cu.lightX, cu.lightY, cu.lightZ));
   let lambert = max(dot(n, l), 0.0);
   let shade = 0.25 + 0.75 * cu.lightEnergy * lambert;
-  return vec4f(mix(vec3f(1.0, 1.0, 1.0), diffuse.rgb * shade, diffuse.a), 1.0);
+  return vec4f(mix(vec3f(0.024, 0.024, 0.047), diffuse.rgb * shade, diffuse.a), 1.0);
 }
 `;
 

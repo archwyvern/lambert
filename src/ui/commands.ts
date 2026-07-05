@@ -71,6 +71,7 @@ export const COMMANDS: CommandSpec[] = [
   { id: "toggle-rulers", label: "Rulers", category: "View", keys: "Ctrl+R", scope: "global", enable: "active" },
   { id: "toggle-pixel-grid", label: "Pixel Grid", category: "View", keys: null, scope: "global", enable: "active" },
   { id: "view-cycle", label: "Cycle View Mode", category: "View", keys: "V", scope: "editor", enable: "active" },
+  { id: "view-toggle-last", label: "Toggle Last View Mode", category: "View", keys: "Shift+V", scope: "editor", enable: "active" },
   { id: "view-swap", label: "Swap 2D / 3D Panes", category: "View", keys: "X", scope: "editor", enable: "active" },
   { id: "command-palette", label: "Command Palette…", category: "View", keys: "Ctrl+Shift+P", scope: "global", enable: "always" },
 

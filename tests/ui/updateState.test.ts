@@ -45,6 +45,26 @@ describe("reduceUpdate", () => {
     expect(s.phase).toBe("error");
   });
 
+  it("clicking Download shows a pending state before any progress arrives", () => {
+    const s = after({ type: "available", version: "1.2.0" }, { type: "download" });
+    expect(s.phase).toBe("downloading");
+    expect(s.percent).toBe(0);
+    expect(s.version).toBe("1.2.0");
+  });
+
+  it("a download that fails before any progress still surfaces (auto-detected update, the 404 bug)", () => {
+    // Regression: an AUTO check (manual:false) found an update; the user clicks Download; the download
+    // 404s before a single progress event. Without the "download" action pinning phase=downloading, the
+    // error case fell through to idle and the banner vanished ("clicked Download, nothing happened").
+    const s = after(
+      { type: "available", version: "1.2.0" },
+      { type: "download" },
+      { type: "error", message: "404" },
+    );
+    expect(s.phase).toBe("error");
+    expect(s.message).toBe("404");
+  });
+
   it("dismiss returns to idle", () => {
     expect(after({ type: "check", manual: true }, { type: "not-available" }, { type: "dismiss" }).phase).toBe("idle");
   });

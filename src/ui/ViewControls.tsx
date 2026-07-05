@@ -82,7 +82,7 @@ export function ViewControls(props: {
             label={MODE_META[m].label}
             active={view.mode === m}
             icon={MODE_META[m].icon}
-            onClick={() => setView((v) => ({ ...v, mode: m }))}
+            onClick={() => setView((v) => (m === v.mode ? v : { ...v, mode: m, prevMode: v.mode }))}
           />
         ))}
       </div>

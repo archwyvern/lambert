@@ -48,3 +48,8 @@ nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
   perMachine: false
+  # Space-free artifact name. The default (`${productName} Setup ${version}.exe`) has SPACES, which
+  # GitHub rewrites to dots on upload (Lambert.Setup.x.exe) while electron-updater's latest.yml uses
+  # hyphens (Lambert-Setup-x.exe) — the names never match, so every Windows auto-update download 404s.
+  # A hyphenated, space-free name is byte-identical on disk, on the GitHub asset, and in latest.yml.
+  artifactName: ${productName}-Setup-${version}.${ext}
