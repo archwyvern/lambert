@@ -146,7 +146,15 @@ function setupAutoUpdate(win: BrowserWindow) {
     }
   });
   ipcMain.handle("update:download", async () => {
-    if (app.isPackaged) await autoUpdater.downloadUpdate();
+    if (!app.isPackaged) return;
+    // downloadUpdate() can reject (a 404 on the asset, sha512 mismatch, network drop) WITHOUT always
+    // emitting the "error" event, which would leave the renderer's invoke() rejecting into the void and
+    // the banner stuck. Mirror update:check: catch and report it as an update error event.
+    try {
+      await autoUpdater.downloadUpdate();
+    } catch (err) {
+      send({ type: "error", message: String((err as Error)?.message ?? err) });
+    }
   });
   ipcMain.handle("update:install", async () => {
     if (app.isPackaged) {
@@ -163,11 +171,9 @@ function setupAutoUpdate(win: BrowserWindow) {
   autoUpdater.on("download-progress", (p) => send({ type: "progress", percent: p.percent }));
   autoUpdater.on("update-downloaded", (info) => send({ type: "downloaded", version: info.version }));
   autoUpdater.on("error", (err) => send({ type: "error", message: String(err?.message ?? err) }));
-
-  // Quiet check shortly after launch (auto checks never surface "up to date").
-  win.webContents.once("did-finish-load", () => {
-    setTimeout(() => void autoUpdater.checkForUpdates().catch(() => {}), 4000);
-  });
+  // The quiet startup check is triggered by the renderer (UpdateNotice), gated on the
+  // "Check for updates automatically" setting — the setting lives in renderer localStorage, which the
+  // main process can't read, so the renderer owns the trigger. Main just services the update:check IPC.
 }
 
 app.whenReady().then(() => {

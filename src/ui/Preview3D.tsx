@@ -2,6 +2,8 @@ import { AddRegular, ArrowResetRegular, ArrowSwapRegular, PowerRegular, Subtract
 import { useEffect, useRef, useState } from "react";
 import { ShortcutGuide } from "@carapace/shell";
 import { DEFAULT_ORBIT } from "../field/gpu/preview3d";
+import { v2 } from "../field/vec";
+import { fitViewport, zoomAt, type Viewport } from "./viewport";
 import { GUIDE_3D } from "./keymap";
 import { LightPad } from "./LightPad";
 import { ICON } from "./kit";
@@ -31,8 +33,13 @@ export function Preview3D(props: {
   /** Scene light direction (shared with the 2D lit view) + its setter, for the in-view light pad. */
   lightDir: [number, number, number];
   onLightChange: (dir: [number, number, number]) => void;
+  /** What the box shows: the 3D orbit view or the lit composite (both fed by the same renderer). */
+  mode: "3d" | "lit";
+  onModeChange: (m: "3d" | "lit") => void;
+  /** Report the box's lit-mode 2D camera up so the renderer draws with it. */
+  onLitViewport: (vp: Viewport) => void;
 }): React.JSX.Element {
-  const { cam, canvasRef, docW, docH, enabled, onToggle, onResize, big, onSwap, lightDir, onLightChange } = props;
+  const { cam, canvasRef, docW, docH, enabled, onToggle, onResize, big, onSwap, lightDir, onLightChange, mode, onModeChange, onLitViewport } = props;
   const hostRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 1, h: 1 });
 
@@ -56,13 +63,65 @@ export function Preview3D(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const focal = enabled ? cam.focal(docW, docH, size.w, size.h) : null;
+  // The box's own 2D lit camera (independent of the main viewport, in the box's CSS px). Null = auto-fit;
+  // it re-fits as the doc/box size changes until the user pans/zooms, then follows the gesture.
+  const BOX_MARGIN = 12;
+  const [litVp, setLitVp] = useState<Viewport | null>(null);
+  const litAdjusted = useRef(false);
+  useEffect(() => {
+    litAdjusted.current = false; // a new document re-fits the lit view
+  }, [docW, docH]);
+  useEffect(() => {
+    if (!litAdjusted.current && size.w > 1 && size.h > 1) setLitVp(fitViewport(docW, docH, size.w, size.h, BOX_MARGIN));
+  }, [docW, docH, size.w, size.h]);
+  const litFit = fitViewport(docW, docH, Math.max(1, size.w), Math.max(1, size.h), BOX_MARGIN);
+  const effLitVp = litVp ?? litFit;
+  useEffect(() => {
+    onLitViewport(effLitVp);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effLitVp.zoom, effLitVp.panX, effLitVp.panY]);
+
+  // lit-mode gestures: left-drag pans, wheel zooms toward the cursor (document listeners so the drag
+  // survives the panel's stopPropagation, mirroring the orbit camera)
+  const litPanStart = (e: React.PointerEvent): void => {
+    if (e.buttons === 0) return;
+    e.stopPropagation();
+    litAdjusted.current = true;
+    const onMove = (ev: PointerEvent): void =>
+      setLitVp((v) => {
+        const b = v ?? litFit;
+        return { ...b, panX: b.panX + ev.movementX, panY: b.panY + ev.movementY };
+      });
+    const onUp = (): void => {
+      document.removeEventListener("pointermove", onMove, true);
+      document.removeEventListener("pointerup", onUp, true);
+    };
+    document.addEventListener("pointermove", onMove, true);
+    document.addEventListener("pointerup", onUp, true);
+  };
+  const litWheel = (e: React.WheelEvent): void => {
+    litAdjusted.current = true;
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setLitVp((v) => zoomAt(v ?? litFit, v2(e.clientX - rect.left, e.clientY - rect.top), e.deltaY < 0 ? 1.15 : 1 / 1.15));
+  };
+  const litReset = (): void => {
+    litAdjusted.current = false;
+    setLitVp(fitViewport(docW, docH, Math.max(1, size.w), Math.max(1, size.h), BOX_MARGIN));
+  };
+  const litZoomBtn = (factor: number): void => {
+    litAdjusted.current = true;
+    setLitVp((v) => zoomAt(v ?? litFit, v2(size.w / 2, size.h / 2), factor));
+  };
+
+  // orbit interaction + its overlays exist only in 3D mode
+  const is3d = enabled && mode === "3d";
+  const focal = is3d ? cam.focal(docW, docH, size.w, size.h) : null;
   const inView = (p: { x: number; y: number } | null): p is { x: number; y: number } =>
     !!p && p.x >= 0 && p.x <= size.w && p.y >= 0 && p.y <= size.h;
   // focal-height aid, shown only while a focal-translation gesture is live: a dashed line straight
   // down from the focal to its point on the floor (the ringed end), so the focal's height reads clearly.
   const t = cam.orbit.target;
-  const showAid = enabled && cam.translating;
+  const showAid = is3d && cam.translating;
   const proj = showAid ? cam.project(docW, docH, size.w, size.h) : null;
   const ground = proj ? proj([t.x, 0, t.z]) : null;
   const iconBtn = "flex h-control-xs w-control-xs items-center justify-center text-fg-mid hover:text-fg";
@@ -72,10 +131,11 @@ export function Preview3D(props: {
       <canvas
         ref={canvasRef}
         className="absolute inset-0 h-full w-full"
-        onPointerDown={cam.onCanvasDown(docW, docH, size.h)}
+        onPointerDown={is3d ? cam.onCanvasDown(docW, docH, size.h) : enabled && mode === "lit" ? litPanStart : undefined}
         onWheel={(e) => {
           e.stopPropagation();
-          cam.onWheel(docW, docH)(e);
+          if (is3d) cam.onWheel(docW, docH)(e);
+          else if (enabled && mode === "lit") litWheel(e);
         }}
         onContextMenu={(e) => e.preventDefault()}
       />
@@ -85,11 +145,17 @@ export function Preview3D(props: {
           className="absolute inset-0 grid cursor-pointer place-items-center bg-[var(--color-viewport-bg)] text-sm text-fg-mid hover:text-fg"
           onClick={onToggle}
         >
-          3D preview off — click to enable
+          Preview off — click to enable
         </button>
       ) : null}
-      <div className="pointer-events-none absolute inset-x-0 top-0 flex h-[22px] items-center px-2">
-        <span className="text-sm font-semibold uppercase tracking-wide text-fg-mid">3D</span>
+      <div className="absolute inset-x-0 top-0 flex h-[22px] items-center px-2">
+        <div className="pointer-events-auto flex items-center gap-1 text-sm font-semibold uppercase tracking-wide">
+          {(["3d", "lit"] as const).map((m) => (
+            <button key={m} className={mode === m ? "text-fg" : "text-fg-mid hover:text-fg"} onClick={() => onModeChange(m)}>
+              {m === "3d" ? "3D" : "Lit"}
+            </button>
+          ))}
+        </div>
       </div>
       <div className="pointer-events-none absolute top-2 right-3 flex items-start gap-2">
         <div className="pointer-events-auto flex items-center gap-0.5">
@@ -98,27 +164,27 @@ export function Preview3D(props: {
           </button>
           {enabled ? (
             <>
-              <button aria-label="Reset view" title="Reset view" className={iconBtn} onClick={() => cam.setOrbit({ ...DEFAULT_ORBIT })}>
+              <button aria-label="Reset view" title="Reset view" className={iconBtn} onClick={mode === "3d" ? () => cam.setOrbit({ ...DEFAULT_ORBIT }) : litReset}>
                 <ArrowResetRegular style={{ fontSize: ICON.xs }} />
               </button>
-              <button aria-label="Zoom out" title="Zoom out" className={iconBtn} onClick={() => cam.zoomBy(1.25)}>
+              <button aria-label="Zoom out" title="Zoom out" className={iconBtn} onClick={mode === "3d" ? () => cam.zoomBy(1.25) : () => litZoomBtn(1 / 1.15)}>
                 <SubtractRegular style={{ fontSize: ICON.xs }} />
               </button>
-              <button aria-label="Zoom in" title="Zoom in" className={iconBtn} onClick={() => cam.zoomBy(0.8)}>
+              <button aria-label="Zoom in" title="Zoom in" className={iconBtn} onClick={mode === "3d" ? () => cam.zoomBy(0.8) : () => litZoomBtn(1.15)}>
                 <AddRegular style={{ fontSize: ICON.xs }} />
               </button>
-              <button aria-label="Turn 3D preview off" title="Turn 3D preview off" className={iconBtn} onClick={onToggle}>
+              <button aria-label="Turn preview off" title="Turn preview off" className={iconBtn} onClick={onToggle}>
                 <PowerRegular style={{ fontSize: ICON.xs }} />
               </button>
             </>
           ) : null}
         </div>
-        {enabled && big ? (
+        {enabled && (mode === "lit" || big) ? (
           <div
             className="pointer-events-auto flex flex-col items-center gap-1 border border-border bg-surface2/90 p-2"
             onPointerDown={(e) => e.stopPropagation()}
           >
-            <LightPad lightDir={lightDir} onChange={onLightChange} radius={34} />
+            <LightPad lightDir={lightDir} onChange={onLightChange} radius={big ? 34 : 28} />
             <span className="text-sm uppercase tracking-wide text-fg-mid">light</span>
           </div>
         ) : null}
@@ -170,7 +236,7 @@ export function Preview3D(props: {
           ) : null}
         </svg>
       ) : null}
-      {enabled && big ? <ShortcutGuide position="absolute" storageKey="lambert.guide3d.open" sections={GUIDE_3D} /> : null}
+      {is3d && big ? <ShortcutGuide position="absolute" storageKey="lambert.guide3d.open" sections={GUIDE_3D} /> : null}
     </div>
   );
 }

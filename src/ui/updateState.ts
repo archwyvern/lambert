@@ -14,7 +14,7 @@ export interface UpdateState {
 
 export const initialUpdateState: UpdateState = { phase: "idle", manual: false };
 
-export type UpdateAction = { type: "check"; manual: boolean } | { type: "dismiss" } | UpdateEvent;
+export type UpdateAction = { type: "check"; manual: boolean } | { type: "download" } | { type: "dismiss" } | UpdateEvent;
 
 export function reduceUpdate(state: UpdateState, action: UpdateAction): UpdateState {
   switch (action.type) {
@@ -22,6 +22,10 @@ export function reduceUpdate(state: UpdateState, action: UpdateAction): UpdateSt
     case "checking": return { ...state, phase: "checking" };
     case "available": return { phase: "available", version: action.version, manual: state.manual };
     case "not-available": return state.manual ? { phase: "uptodate", manual: false } : { phase: "idle", manual: false };
+    // Clicking Download enters "downloading" IMMEDIATELY (before the first progress event). This gives
+    // instant feedback AND makes a download that fails before any progress surface its error (the error
+    // case below keys off phase === "downloading") instead of silently vanishing.
+    case "download": return { phase: "downloading", version: state.version, percent: 0, manual: state.manual };
     case "progress": return { ...state, phase: "downloading", percent: action.percent };
     case "downloaded": return { phase: "downloaded", version: action.version, manual: state.manual };
     case "error":

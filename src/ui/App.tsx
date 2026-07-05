@@ -77,9 +77,12 @@ export interface ViewState {
   lightDir: [number, number, number];
   /** Lit view: light intensity multiplier (1 = default). */
   lightEnergy: number;
+  /** The mode active before the current one — target of the "toggle last view" command (Shift+V).
+   *  Transient, like lightEnergy: not in the session schema, backfilled from DEFAULT_VIEW per session. */
+  prevMode?: ViewMode;
 }
 
-const DEFAULT_VIEW: ViewState = { mode: "lit", opacity: 1, lightDir: [-0.5, -0.5, 0.7], lightEnergy: 1 };
+const DEFAULT_VIEW: ViewState = { mode: "lit", opacity: 1, lightDir: [-0.5, -0.5, 0.7], lightEnergy: 1, prevMode: "normal" };
 
 /** In-app object clipboard (Copy/Paste), module-level so it survives across tabs — an artist can copy a
  *  tuned object from one .lmb tab and paste it into another. Snapshots node refs (the store's immutable
@@ -135,6 +138,7 @@ export function App(): React.JSX.Element {
   const [pixelGrid, setPixelGrid] = usePersistentState("pixelGrid", true); // 1px-cell grid past ~800% zoom
   // normal view: hide the encode where the diffuse is transparent (matches the export's alpha gate)
   const [normalAlphaGate, setNormalAlphaGate] = usePersistentState("normalAlphaGate", true);
+  const [autoUpdateCheck, setAutoUpdateCheck] = usePersistentState("autoUpdateCheck", true); // startup update check (Settings › Updates)
   const [recents, setRecents] = usePersistentState<RecentProject[]>("recentProjects", []); // launch-screen MRU
   const [lastDir, setLastDir] = usePersistentState<string | null>("lastProjectDir", null); // open-dialog defaultPath
   const [leftWidth, setLeftWidth] = usePersistentState("panel:left", 220);
@@ -148,6 +152,8 @@ export function App(): React.JSX.Element {
   // it only runs when the user opts in (click the pane to enable; the power button disables)
   // (the `3d` query flag pre-enables it for capture/demo shots — automation profiles are fresh)
   const [preview3dOn, setPreview3dOn] = usePersistentState("panel:3d:enabled", new URLSearchParams(location.search).has("3d"));
+  const [boxMode, setBoxMode] = usePersistentState<"3d" | "lit">("panel:3d:mode", "3d"); // 3D inspection box: orbit vs lit composite
+  const [boxLitViewport, setBoxLitViewport] = useState<Viewport | null>(null); // the box's independent lit camera (in-memory, driven by Preview3D)
   const [cornerHeight, setCornerHeight] = usePersistentState("panel:3d:corner", 300);
   const [, bumpRender] = useReducer((x: number) => x + 1, 0);
   const [, forceUpdate] = useReducer((x: number) => x + 1, 0);
@@ -955,7 +961,12 @@ export function App(): React.JSX.Element {
       case "command-palette":
         return setPaletteOpen(true);
       case "view-cycle":
-        return setActiveView((s) => ({ ...s, mode: VIEW_MODES[(VIEW_MODES.indexOf(s.mode) + 1) % VIEW_MODES.length]! }));
+        return setActiveView((s) => ({ ...s, mode: VIEW_MODES[(VIEW_MODES.indexOf(s.mode) + 1) % VIEW_MODES.length]!, prevMode: s.mode }));
+      case "view-toggle-last":
+        return setActiveView((s) => {
+          const back = s.prevMode ?? (s.mode === "lit" ? "normal" : "lit");
+          return back === s.mode ? s : { ...s, mode: back, prevMode: s.mode };
+        });
       case "view-swap":
         return setSwapped((sw) => !sw);
     }
@@ -1161,7 +1172,7 @@ export function App(): React.JSX.Element {
   }, [workspace, active, views, viewports, orbits]);
 
   // ?demo capture bootstrap (fixtures -> in-memory project + readiness flag) — QC-CARRY-2 extraction
-  useDemoBootstrap({ setWorkspace, setViews, setSwapped, setNewDocPath, setSelVerts, setTool, openSettings, runAction: (id) => runMenuActionRef.current(id), defaultView: DEFAULT_VIEW });
+  useDemoBootstrap({ setWorkspace, setViews, setSwapped, setNewDocPath, setSelVerts, setTool, setBoxMode, openSettings, runAction: (id) => runMenuActionRef.current(id), defaultView: DEFAULT_VIEW });
   // the window-level editor keymap (tools, Esc, Delete, nudges, copy/paste, X/V) — QC-CARRY-2 extraction
   useEditorKeymap({ workspaceRef, runMenuActionRef, bindingsRef: editorBindingsRef, selVertsRef, nudgeEndTimer, setSwapped, setSelVerts, setTool, setActiveView });
   const tabInfos = workspace
@@ -1234,6 +1245,8 @@ export function App(): React.JSX.Element {
           state={state}
           bindingOverrides={bindingOverrides}
           onBindingOverrides={setBindingOverrides}
+          autoUpdateCheck={autoUpdateCheck}
+          onAutoUpdateCheck={setAutoUpdateCheck}
           initialScreen={settingsScreen}
           onScreenChange={setLastSettingsScreen}
           onClose={() => setSettingsScreen(null)}
@@ -1333,6 +1346,8 @@ export function App(): React.JSX.Element {
                   onEnergyChange={(en) => setActiveView((v) => ({ ...v, lightEnergy: en }))}
                   canvas3dRef={canvas3dRef}
                   orbit3d={preview3dOn ? cam3d.orbit : null}
+                  boxMode={boxMode}
+                  boxLitViewport={boxLitViewport}
                   normalDirs={effectiveNormalDirs(state.doc, workspace!.config)}
                   overridesNormalDirs={state.doc.normalDirs !== undefined}
                   openSettings={openSettings}
@@ -1382,6 +1397,9 @@ export function App(): React.JSX.Element {
                   onResize={bumpRender}
                   big={swapped}
                   onSwap={() => setSwapped((s) => !s)}
+                  mode={boxMode}
+                  onModeChange={setBoxMode}
+                  onLitViewport={setBoxLitViewport}
                   lightDir={activeView.lightDir}
                   onLightChange={(d) => setActiveView((v) => ({ ...v, lightDir: d }))}
                 />
@@ -1415,7 +1433,7 @@ export function App(): React.JSX.Element {
         left={status ? <span className={status.tone === "error" ? "text-error" : "text-fg-mid"}>{status.text}</span> : null}
         right={state ? `${state.doc.source.width}×${state.doc.source.height} · ${flattenLayers(state.doc.layers).length} objects` : null}
       />
-      <UpdateNotice />
+      <UpdateNotice autoCheck={autoUpdateCheck} />
     </div>
   );
 }

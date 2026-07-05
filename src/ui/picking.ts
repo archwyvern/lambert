@@ -93,38 +93,7 @@ export function axisScaleFromDrag(
   return new Vector3(apply(startScale.x, b.x, a.x), apply(startScale.y, b.y, a.y), startScale.z);
 }
 
-// --- multi-vertex group editing (move/scale a set of selected control points) ---
-
-/** Axis-aligned bounds + centroid of a set of points (object-local). */
-export function pointsBounds(pts: Vector2[]): { min: Vector2; max: Vector2; centroid: Vector2 } {
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  let cx = 0;
-  let cy = 0;
-  for (const p of pts) {
-    minX = Math.min(minX, p.x);
-    minY = Math.min(minY, p.y);
-    maxX = Math.max(maxX, p.x);
-    maxY = Math.max(maxY, p.y);
-    cx += p.x;
-    cy += p.y;
-  }
-  return { min: v2(minX, minY), max: v2(maxX, maxY), centroid: v2(cx / pts.length, cy / pts.length) };
-}
-
-/** Per-axis scale factor for a group drag: how far the handle moved from the pivot. */
-export function groupScaleFactor(pivot: Vector2, startLocal: Vector2, currentLocal: Vector2): Vector2 {
-  const fx = Math.abs(startLocal.x - pivot.x) < 1e-3 ? 1 : (currentLocal.x - pivot.x) / (startLocal.x - pivot.x);
-  const fy = Math.abs(startLocal.y - pivot.y) < 1e-3 ? 1 : (currentLocal.y - pivot.y) / (startLocal.y - pivot.y);
-  return v2(fx, fy);
-}
-
-/** Scale points about a pivot by a per-axis factor (group vertex scale). */
-export function scalePointsAbout(pts: Vector2[], pivot: Vector2, factor: Vector2): Vector2[] {
-  return pts.map((p) => v2(pivot.x + (p.x - pivot.x) * factor.x, pivot.y + (p.y - pivot.y) * factor.y));
-}
+// --- multi-vertex group editing (move/select a set of control points) ---
 
 /** Shift-click selection toggle: drop i if already selected, else add it. */
 export function toggleIndex(selected: number[], i: number): number[] {

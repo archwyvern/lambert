@@ -20,6 +20,8 @@ export function useDemoBootstrap(opts: {
   setNewDocPath: (p: string | null) => void;
   setSelVerts: (v: number[]) => void;
   setTool: (t: ToolMode) => void;
+  /** Capture aid `box=lit|3d`: set what the 3D inspection box draws. */
+  setBoxMode: (m: "3d" | "lit") => void;
   /** Capture aid `settings=<screen>`: open the Settings dialog at that screen. */
   openSettings: (screen: string) => void;
   /** Capture aid `palette`: run a dispatcher action after mount (opens the command palette). */
@@ -27,7 +29,7 @@ export function useDemoBootstrap(opts: {
   /** Passed in (not imported) so this hook keeps a type-only dependency on App. */
   defaultView: ViewState;
 }): void {
-  const { setWorkspace, setViews, setSwapped, setNewDocPath, setSelVerts, setTool, openSettings, runAction, defaultView } = opts;
+  const { setWorkspace, setViews, setSwapped, setNewDocPath, setSelVerts, setTool, setBoxMode, openSettings, runAction, defaultView } = opts;
   useEffect(() => {
     const q = new URLSearchParams(location.search);
     if (!q.has("demo")) return;
@@ -64,6 +66,8 @@ export function useDemoBootstrap(opts: {
         if (select) tab.store.select(findNode(doc.layers, select)?.id ?? doc.layers[0]?.id ?? null);
         const t = q.get("tool");
         if (t && t in TOOL_KEYS) setTool(TOOL_KEYS[t]!);
+        const box = q.get("box");
+        if (box === "lit" || box === "3d") setBoxMode(box);
         const settingsScreen = q.get("settings");
         if (settingsScreen) setTimeout(() => openSettings(settingsScreen), 200); // after workspaceRef lands
         if (q.has("palette")) setTimeout(() => runAction("command-palette"), 200);

@@ -28,7 +28,7 @@ import { localBounds, paddedCorners } from "../field/objectBounds";
 import { Vector2, Vector3 } from "@carapace/primitives";
 import { v2 } from "../field/vec";
 import { ContextMenu, MenuEntry } from "./kit";
-import { axisScaleFromDrag, grabGroup, groupScaleFactor, pointsBounds, rotationFromDrag, ROTATE_SNAP, scalePointsAbout, snapAngle, toggleIndex } from "./picking";
+import { axisScaleFromDrag, constrainAxis, grabGroup, rotationFromDrag, ROTATE_SNAP, snapAngle, toggleIndex } from "./picking";
 import type { Placing, ToolMode } from "./tools";
 import { canvasToScreen, Viewport } from "./viewport";
 import { eventToCanvas } from "./canvasCoords";
@@ -60,7 +60,6 @@ interface DragSnap {
 interface VertSnap {
   startCanvas: Vector2;
   starts: { i: number; p: Vector2 }[];
-  pivot: Vector2;
 }
 
 const PAD = 6; // local-px breathing room around the footprint
@@ -254,10 +253,9 @@ function GizmosInner(props: {
     );
   };
 
-  const vertSnap = (e: React.PointerEvent, indices: number[], pivot: Vector2): VertSnap => ({
+  const vertSnap = (e: React.PointerEvent, indices: number[]): VertSnap => ({
     startCanvas: eventCanvasPoint(e),
     starts: indices.map((i) => ({ i, p: object.controlPoints[i]! })),
-    pivot,
   });
 
   // a vertex dot: shift-click toggles it in the selection; plain drag moves the selection
@@ -274,31 +272,19 @@ function GizmosInner(props: {
         const group = grabGroup(selVerts, i);
         if (!selVerts.includes(i)) setSelVerts([i]);
         setDraggingVert(true);
-        return vertSnap(e, group, v2(0, 0));
+        return vertSnap(e, group);
       },
       onMove: (e, d) => {
-        const cur = w2l(eventCanvasPoint(e));
+        let cdx = eventCanvasPoint(e).x - d.startCanvas.x;
+        let cdy = eventCanvasPoint(e).y - d.startCanvas.y;
+        // Shift mid-drag locks to the dominant canvas axis (screen H/V) — same as godot move-mode
+        // (CanvasView). Constrain in CANVAS space so the lock stays screen-horizontal/vertical even on
+        // a rotated object, then carry the constrained delta through w2l into local space.
+        if (e.shiftKey) ({ dx: cdx, dy: cdy } = constrainAxis(cdx, cdy));
+        const cur = w2l(v2(d.startCanvas.x + cdx, d.startCanvas.y + cdy));
         const s0 = w2l(d.startCanvas);
         const dl = v2(cur.x - s0.x, cur.y - s0.y);
         applyVertDrag(d, (start) => v2(start.x + dl.x, start.y + dl.y));
-      },
-      onEnd: () => {
-        setDraggingVert(false);
-        store.endGesture();
-      },
-      threshold: HANDLE_DRAG_PX,
-    });
-
-  // group-scale handle on the selection's bbox corner: scales selected verts about centroid
-  const groupScaleHandle = (pivot: Vector2) =>
-    vertDrag({
-      onStart: (e) => {
-        setDraggingVert(true);
-        return vertSnap(e, selVerts, pivot);
-      },
-      onMove: (e, d) => {
-        const factor = groupScaleFactor(d.pivot, w2l(d.startCanvas), w2l(eventCanvasPoint(e)));
-        applyVertDrag(d, (start) => scalePointsAbout([start], d.pivot, factor)[0]!);
       },
       onEnd: () => {
         setDraggingVert(false);
@@ -751,45 +737,6 @@ function GizmosInner(props: {
       {/* rotate knobs + corner scale handles (shared gizmo chrome) */}
       {handles ? <RotateKnobs corners={corners} handlers={rotateHandle} /> : null}
       {handles ? <CornerHandles corners={corners} handlers={cornerScale} /> : null}
-      {/* group-scale frame: bbox of the selected vertices with corner handles (>=2 selected).
-          Gated to control-point objects (a cable has none — selVerts there are anchor indices) and
-          filtered for stale indices: switching objects re-renders with the new object but the previous
-          selection before the clearing effect runs, so an index may be out of range for one frame. */}
-      {vertHandles && !isPath && getObjectType(object.typeId).controlPoints.kind !== "none" && selVerts.length >= 2
-        ? (() => {
-            const sel = selVerts.map((i) => object.controlPoints[i]).filter((p): p is Vector2 => p !== undefined);
-            if (sel.length < 2) return null;
-            const b = pointsBounds(sel);
-            // pad the frame out from the dots (constant ~10 screen px) so corner handles
-            // don't sit on top of the vertices and stay grabbable
-            const gp = (PAD + 4) / Math.max(0.0001, (Math.abs(object.transform.scale.x) + Math.abs(object.transform.scale.y)) / 2);
-            const cc = paddedCorners(b, gp).map((c) => toScreen(c));
-            return (
-              <>
-                <polygon
-                  points={cc.map((c) => `${c.x},${c.y}`).join(" ")}
-                  fill="none"
-                  stroke="var(--color-accent)"
-                  strokeWidth={1}
-                  strokeDasharray="2 3"
-                  opacity={0.8}
-                />
-                {cc.map((c, i) => (
-                  <rect
-                    key={`gs${i}`}
-                    x={c.x - 4}
-                    y={c.y - 4}
-                    width={8}
-                    height={8}
-                    fill="var(--color-accent)"
-                    className="pointer-events-auto cursor-nwse-resize"
-                    {...groupScaleHandle(b.centroid)}
-                  />
-                ))}
-              </>
-            );
-          })()
-        : null}
       {vertHandles && !isPath && getObjectType(object.typeId).controlPoints.kind !== "none"
         ? (() => {
             const kind = getObjectType(object.typeId).controlPoints.kind;

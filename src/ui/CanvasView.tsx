@@ -100,6 +100,10 @@ export function CanvasView(props: {
   canvas3dRef: React.RefObject<HTMLCanvasElement | null>;
   /** Null = the 3D preview is disabled; the pass is skipped entirely. */
   orbit3d: Orbit | null;
+  /** What the 3D box draws when on: the orbit 3D pass ("3d") or the lit composite ("lit"). */
+  boxMode: "3d" | "lit";
+  /** The 3D box's own 2D camera for lit mode (independent of the main viewport). */
+  boxLitViewport: Viewport | null;
   /** EFFECTIVE normal-channel convention (doc override, else project), for the normal-view encode. */
   normalDirs: NormalDirs;
   /** The doc overrides the project convention (the tint widget labels itself accordingly). */
@@ -127,7 +131,7 @@ export function CanvasView(props: {
   const { store, state, view, tool, diffuseBytes, selVerts, setSelVerts, onLightChange, onEnergyChange, canvas3dRef, orbit3d, normalDirs, swapped } =
     props;
   const { tabId, savedViewport, onViewportChange, setTool, snap, rulers, resolvePaletteObject, maskFocus } = props;
-  const { overridesNormalDirs, openSettings, pixelGrid, normalAlphaGate } = props;
+  const { overridesNormalDirs, openSettings, pixelGrid, normalAlphaGate, boxMode, boxLitViewport } = props;
   const inset = rulers ? RULER : 0;
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -295,6 +299,8 @@ export function CanvasView(props: {
       lightEnergy: view.lightEnergy,
       normalXform: normalXform(normalDirs),
       orbit3d,
+      boxMode,
+      boxLitViewport,
       detail,
       normalAlphaGate,
     });
@@ -344,7 +350,8 @@ export function CanvasView(props: {
     store.update((d) => ({ ...d, layers: updateNode(d.layers, target.id, (n) => ({ ...n, masks: [...(n.masks ?? []), mask] })) }));
     store.endGesture();
     setPenPts([]);
-    setTool("select");
+    // stay in the pen tool after completing a mask (draw another) — the active tool only changes via
+    // explicit tool selection or a hotkey, never as a side effect of finishing a gesture
   };
 
   const onPointerDown = (e: React.PointerEvent): void => {

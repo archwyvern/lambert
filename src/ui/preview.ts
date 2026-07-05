@@ -30,6 +30,12 @@ export interface PreviewParams {
   normalXform: { xx: number; xy: number; yx: number; yy: number };
   /** Orbit camera for the attached 3D inspection canvas; null/undefined skips the pass. */
   orbit3d?: Orbit | null;
+  /** What the 3D inspection box draws: "3d" = the orbit displaced-grid pass; "lit" = the lit composite
+   *  (the 2D lit view, fit to the box). Only consulted when the box is on (orbit3d present). */
+  boxMode?: "3d" | "lit";
+  /** The box's own 2D lit camera (independent of the main viewport), in the box's CSS px. Undefined/null
+   *  falls back to a centred auto-fit. */
+  boxLitViewport?: Viewport | null;
   /** The Emboss/Detail bands for this doc (null when no detail adjustment exists). */
   detail?: DetailField | null;
   /** Normal view: hide the encode where the diffuse is fully transparent (matches the export's
@@ -50,6 +56,7 @@ export class PreviewRenderer {
   private ctx!: GPUCanvasContext;
   private compositePipeline!: GPURenderPipeline;
   private uniforms!: GPUBuffer;
+  private boxUniforms!: GPUBuffer; // separate uniform buffer for the lit-in-box composite pass
   private diffuseTex: GPUTexture | null = null;
   // Decoded diffuse cache keyed on the source byte buffer (stable per open tab). Switching tabs just
   // rebinds the cached texture instead of re-decoding a multi-MP PNG + re-uploading. Bounded by open
@@ -105,6 +112,7 @@ export class PreviewRenderer {
       fragment: { module, entryPoint: "fs", targets: [{ format }] },
     });
     p.uniforms = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    p.boxUniforms = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     const module3d = device.createShaderModule({ code: buildPreview3dWgsl() });
     p.pipeline3d = await device.createRenderPipelineAsync({
       layout: "auto",
@@ -361,6 +369,80 @@ export class PreviewRenderer {
     tex: GPUTexture;
   } | null = null;
 
+  // Draw the LIT composite into the 3D box canvas — the same analytic fragment as the main viewport's
+  // Lit view, reusing the already-packed field buffers, so it's pixel-identical (not the tessellated 3D
+  // mesh). The box has its OWN fit-to-box camera (independent of the main viewport, non-interactive):
+  // the whole doc centred in the box with ~10% padding, computed in device px (canvas3d.width is device
+  // px, so the composite's zoom/pan uniform is used directly — no dpr factor). Runs after renderNow, so
+  // the field buffers + diffuse + detail are already current for this frame.
+  private renderLitToBox(docW: number, docH: number, p: PreviewParams): void {
+    if (!this.ctx3d || !this.canvas3d || !this.diffuseTex || !this.recordsBuf) return;
+    // The box owns its lit camera (Preview3D drives pan/zoom); it arrives in the box's CSS px, so scale by
+    // the box dpr into device px. Before the first report (or if absent) fall back to a centred auto-fit.
+    let zoom: number, panX: number, panY: number;
+    if (p.boxLitViewport) {
+      const dpr = this.canvas3d.width / (this.canvas3d.getBoundingClientRect().width || this.canvas3d.width) || 1;
+      zoom = p.boxLitViewport.zoom * dpr;
+      panX = p.boxLitViewport.panX * dpr;
+      panY = p.boxLitViewport.panY * dpr;
+    } else {
+      const boxW = this.canvas3d.width;
+      const boxH = this.canvas3d.height;
+      zoom = Math.min(boxW / docW, boxH / docH) * 0.9;
+      panX = (boxW - docW * zoom) / 2;
+      panY = (boxH - docH * zoom) / 2;
+    }
+    const ub = new ArrayBuffer(64);
+    const f = new Float32Array(ub);
+    const u = new Uint32Array(ub);
+    f[0] = zoom;
+    f[1] = panX;
+    f[2] = panY;
+    u[3] = MODE_INDEX.lit; // lit is unaffected by the normal-view alpha-gate bit
+    f[4] = docW;
+    f[5] = docH;
+    f[6] = 1; // opacity (lit ignores it)
+    u[7] = this.shapeCount;
+    f[8] = p.lightDir[0];
+    f[9] = p.lightDir[1];
+    f[10] = p.lightDir[2];
+    f[11] = p.normalXform.xx;
+    f[12] = p.normalXform.xy;
+    f[13] = p.normalXform.yx;
+    f[14] = p.normalXform.yy;
+    f[15] = p.lightEnergy;
+    this.device.queue.writeBuffer(this.boxUniforms, 0, ub);
+    const bind = this.device.createBindGroup({
+      layout: this.compositePipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: this.boxUniforms } },
+        { binding: 1, resource: { buffer: this.recordsBuf } },
+        { binding: 2, resource: { buffer: this.pointsBuf! } },
+        { binding: 4, resource: { buffer: this.meshBuf! } },
+        { binding: 5, resource: this.diffuseTex.createView() },
+        { binding: 6, resource: { buffer: this.maskLoopsBuf! } },
+        { binding: 7, resource: { buffer: this.maskVertsBuf! } },
+        { binding: 8, resource: { buffer: this.detailBuf! } },
+      ],
+    });
+    const enc = this.device.createCommandEncoder();
+    const pass = enc.beginRenderPass({
+      colorAttachments: [
+        {
+          view: this.ctx3d.getCurrentTexture().createView(),
+          loadOp: "clear",
+          storeOp: "store",
+          clearValue: { r: 0.024, g: 0.024, b: 0.047, a: 1 },
+        },
+      ],
+    });
+    pass.setPipeline(this.compositePipeline);
+    pass.setBindGroup(0, bind);
+    pass.draw(3);
+    pass.end();
+    this.device.queue.submit([enc.finish()]);
+  }
+
   private renderNow(docW: number, docH: number, p: PreviewParams): void {
     if (!this.diffuseTex) return;
     const probe = (globalThis as { __lambertPerf?: PerfProbe }).__lambertPerf;
@@ -433,7 +515,11 @@ export class PreviewRenderer {
     pass.draw(3);
     pass.end();
     this.device.queue.submit([enc.finish()]);
-    this.render3D(docW, docH, p);
+    // box (3D inspection panel): draw its selected mode when the box is on (orbit3d present)
+    if (p.orbit3d) {
+      if (p.boxMode === "lit") this.renderLitToBox(docW, docH, p);
+      else this.render3D(docW, docH, p);
+    }
     if (probe) {
       const cpuMs = performance.now() - t0;
       const rec = { packMs, cpuMs, gpuMs: -1 };

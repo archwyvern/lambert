@@ -106,11 +106,14 @@ export function SettingsDialog(props: {
   /** User keybinding overrides (app-level, not per-project). */
   bindingOverrides: BindingOverrides;
   onBindingOverrides: (fn: (prev: BindingOverrides) => BindingOverrides) => void;
+  /** App-level "check for updates automatically" toggle (per-machine). */
+  autoUpdateCheck: boolean;
+  onAutoUpdateCheck: (v: boolean) => void;
   initialScreen?: string;
   onScreenChange?: (id: string) => void;
   onClose: () => void;
 }): React.JSX.Element {
-  const { config, onConfig, store, state, bindingOverrides, onBindingOverrides, initialScreen, onScreenChange, onClose } = props;
+  const { config, onConfig, store, state, bindingOverrides, onBindingOverrides, autoUpdateCheck, onAutoUpdateCheck, initialScreen, onScreenChange, onClose } = props;
 
   const shortcutRows: ShortcutRow[] = COMMANDS.map((c) => ({
     id: c.id,
@@ -184,6 +187,25 @@ export function SettingsDialog(props: {
                 return rest;
               })
             }
+          />
+        </div>
+      ),
+    },
+    {
+      id: "app-updates",
+      label: "Updates",
+      group: "Application",
+      keywords: ["update", "auto-update", "version", "download", "release", "check", "startup"],
+      render: () => (
+        <div>
+          <Blurb>
+            When on, Lambert checks for a new release shortly after launch and offers it in a banner.
+            Help › Check for Updates always works either way. Stored per-machine, not in the project.
+          </Blurb>
+          <FormToggle
+            label="Check for updates automatically"
+            value={autoUpdateCheck}
+            onChange={onAutoUpdateCheck}
           />
         </div>
       ),

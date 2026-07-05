@@ -3,7 +3,7 @@ import "../../src/field/objects";
 import { createObjectInstance, ObjectTypeId } from "../../src/field/registry";
 import { resolveObjects } from "../../src/field/flatten";
 import { createMask } from "../../src/field/maskOps";
-import { axisScaleFromDrag, constrainAxis, grabGroup, groupScaleFactor, pointsBounds, pointsInBox, scalePointsAbout, pickObject, rotationFromDrag, snapAngle, toggleIndex } from "../../src/ui/picking";
+import { axisScaleFromDrag, constrainAxis, grabGroup, pointsInBox, pickObject, rotationFromDrag, snapAngle, toggleIndex } from "../../src/ui/picking";
 import { toLocal } from "../../src/field/transform";
 import { v2 } from "../../src/field/vec";
 import { Vector3 } from "@carapace/primitives";
@@ -108,29 +108,6 @@ test("gizmo forward transform must invert toLocal (scale THEN rotate)", () => {
   const back = toLocal(t, forward);
   expect(back.x).toBeCloseTo(cp.x);
   expect(back.y).toBeCloseTo(cp.y);
-});
-
-test("pointsBounds: min/max/centroid over a set", () => {
-  const b = pointsBounds([v2(0, 0), v2(10, 4), v2(2, -6)]);
-  expect(b.min).toEqual(v2(0, -6));
-  expect(b.max).toEqual(v2(10, 4));
-  expect(b.centroid.x).toBeCloseTo(4);
-  expect(b.centroid.y).toBeCloseTo(-2 / 3);
-});
-
-test("groupScaleFactor: ratio of handle distance from pivot, axis-degenerate -> 1", () => {
-  const f = groupScaleFactor(v2(0, 0), v2(10, 5), v2(20, 15));
-  expect(f.x).toBeCloseTo(2);
-  expect(f.y).toBeCloseTo(3);
-  const deg = groupScaleFactor(v2(0, 0), v2(0, 5), v2(8, 10)); // start.x == pivot.x
-  expect(deg.x).toBe(1); // no x scale when the handle sits on the pivot axis
-  expect(deg.y).toBeCloseTo(2);
-});
-
-test("scalePointsAbout: scales each point around the pivot per axis", () => {
-  const out = scalePointsAbout([v2(2, 2), v2(-2, 6)], v2(0, 2), v2(2, 0.5));
-  expect(out[0]).toEqual(v2(4, 2)); // (2,2): x*2 about 0, y about 2 unchanged
-  expect(out[1]).toEqual(v2(-4, 4)); // (-2,6): x*2, (6-2)*0.5+2 = 4
 });
 
 test("pointsInBox: indices of canvas points inside the marquee, order-independent corners", () => {
