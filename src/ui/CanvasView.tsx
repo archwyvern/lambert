@@ -297,6 +297,7 @@ export function CanvasView(props: {
       opacity: view.opacity,
       lightDir: view.lightDir,
       lightEnergy: view.lightEnergy,
+      pointLights: view.pointLights,
       normalXform: normalXform(normalDirs),
       orbit3d,
       boxMode,

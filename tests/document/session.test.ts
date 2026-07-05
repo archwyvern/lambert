@@ -49,14 +49,14 @@ test("session with no open project round-trips (empty tabs, no active)", () => {
   expect(s.tabs).toEqual([]);
 });
 
-test("migrates a legacy per-tab view: removed 'height' mode -> lit, stray 'raster' field ignored", () => {
+test("migrates a legacy per-tab view: an unknown mode -> normal, stray 'raster' field ignored", () => {
   const legacy = JSON.parse(
     buildSessionJson({ projectPath: "/p", activeIndex: 0, tabs: [tab("/p/a.png", null, false)] }),
   );
   legacy.tabs[0].view.mode = "height"; // a mode that no longer exists
   legacy.tabs[0].view.raster = true; // saved before the vector/raster toggle was removed — must not break parse
   const s = parseSessionJson(JSON.stringify(legacy));
-  expect(s.tabs[0]!.view.mode).toBe("lit");
+  expect(s.tabs[0]!.view.mode).toBe("normal");
   expect("raster" in s.tabs[0]!.view).toBe(false); // the removed field is stripped, not carried forward
 });
 

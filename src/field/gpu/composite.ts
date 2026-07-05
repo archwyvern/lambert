@@ -17,6 +17,17 @@ import { buildFieldLibWgsl } from "./wgsl";
  * only visible under magnification. If exact WYSIWYG on slopes ever matters, preview at ss2 here.
  */
 const COMPOSITE_IO = /* wgsl */ `
+struct PointLight {
+  posX: f32,          // doc coords
+  posY: f32,
+  height: f32,        // doc units above the plane (the light's z)
+  intensity: f32,
+  colorR: f32,
+  colorG: f32,
+  colorB: f32,
+  on: f32,            // 1 = contributes, 0 = skipped
+}
+
 struct CompositeUniforms {
   zoom: f32,
   panX: f32,
@@ -34,6 +45,7 @@ struct CompositeUniforms {
   nYX: f32,
   nYY: f32,
   lightEnergy: f32,   // lit mode: scales the diffuse light term (1 = default; >1 brightens)
+  lights: array<PointLight, 2>,  // lit-preview point lights (doc-space), summed on top of the directional
 }
 
 @group(0) @binding(0) var<uniform> cu: CompositeUniforms;
@@ -99,9 +111,19 @@ fn fs(@builtin(position) fragPos: vec4f) -> @location(0) vec4f {
   // light, no matter what object/normal sits under them — in 2D the only thing that gets lit is the
   // visible artwork.
   let l = normalize(vec3f(cu.lightX, cu.lightY, cu.lightZ));
-  let lambert = max(dot(n, l), 0.0);
-  let shade = 0.25 + 0.75 * cu.lightEnergy * lambert;
-  return vec4f(mix(vec3f(0.024, 0.024, 0.047), diffuse.rgb * shade, diffuse.a), 1.0);
+  // ambient + the directional key light (white), then add each enabled point light (coloured, with a
+  // height-scaled distance falloff). Point lights are positioned in doc space — their handles live in the
+  // lit preview; pe is the doc-pixel centre, so the light vector is purely in doc units.
+  var light = vec3f(0.25 + 0.75 * cu.lightEnergy * max(dot(n, l), 0.0));
+  for (var i = 0u; i < 2u; i = i + 1u) {
+    let pl = cu.lights[i];
+    if (pl.on < 0.5) { continue; }
+    let dxy = vec2f(pl.posX - pe.x, pl.posY - pe.y);
+    let lp = normalize(vec3f(dxy, pl.height));
+    let atten = pl.height * pl.height / (dot(dxy, dxy) + pl.height * pl.height);
+    light += vec3f(pl.colorR, pl.colorG, pl.colorB) * pl.intensity * max(dot(n, lp), 0.0) * atten;
+  }
+  return vec4f(mix(vec3f(0.024, 0.024, 0.047), diffuse.rgb * light, diffuse.a), 1.0);
 }
 `;
 
