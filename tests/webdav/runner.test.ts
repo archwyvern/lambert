@@ -63,7 +63,7 @@ describe("runners against the fixture", () => {
     writeFileSync(join(root, "zarha", "b.lmb"), "doc-b");
     writeFileSync(join(root, "zarha", "project.lambert"), "{}");
     fx = await startFixture({ root, username: "u", password: "p", etagMode: "sha256" });
-    dav = new DavClient(fetchTransport, fx.url, { username: "u", password: "p" });
+    dav = new DavClient(fetchTransport, fx.url, { Authorization: `Basic ${btoa("u:p")}` });
   });
   afterEach(() => fx.close());
 

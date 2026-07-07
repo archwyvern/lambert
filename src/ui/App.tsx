@@ -46,7 +46,7 @@ import { usePersistentState } from "./persist";
 import { loadSidecar, saveSidecar } from "../remote/sidecar";
 import type { Sidecar } from "../remote/sync";
 import { runPull, runPush, type SyncUi } from "../remote/runner";
-import { makeDavClient, type RemoteServer } from "../remote/servers";
+import { makeDavClient, normalizeServer, type RemoteServer } from "../remote/servers";
 import { davTransport, localIo, sidecarIo } from "./remoteGlue";
 import { Sash, SplitView, EditorTabs, tabVerbIds, StatusBar, formatKeys, KeybindingProvider, useConfirm, EmptyState, parseGitPorcelainZ, scmDecoration, type ScmDecoration, type MenuItem, type TabMenuVerb } from "@carapace/shell";
 import { Toolbar } from "./Toolbar";
@@ -175,6 +175,8 @@ export function App(): React.JSX.Element {
   // remote projects: configured WebDAV servers (app-level) + the open project's sync state (null =
   // not a remote project). sidecarRef keeps the command registry's stable closures honest.
   const [remoteServers, setRemoteServers] = usePersistentState<RemoteServer[]>("remoteServers", []);
+  // one-time shape migration: v0.6.0 entries stored flat username/password (pre-auth-modes)
+  useEffect(() => setRemoteServers((prev) => prev.map(normalizeServer)), []); // eslint-disable-line react-hooks/exhaustive-deps
   const [remoteCloneOpen, setRemoteCloneOpen] = useState(false);
   const [sidecar, setSidecar] = useState<Sidecar | null>(null);
   const sidecarRef = useRef<Sidecar | null>(null);

@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { useConfirm } from "@carapace/shell";
+import { Segmented, useConfirm } from "@carapace/shell";
 import { Button } from "./kit";
 import { getHost } from "./host";
-import { makeDavClient, newServerId, type RemoteServer } from "../remote/servers";
+import { makeDavClient, newServerId, type RemoteAuth, type RemoteServer } from "../remote/servers";
 import { davTransport } from "./remoteGlue";
 
 /**
@@ -15,11 +15,28 @@ interface Draft {
   id: string | null;
   name: string;
   baseUrl: string;
+  /** Both modes' fields are kept while editing; `save` materializes only the active one. */
+  authKind: RemoteAuth["kind"];
   username: string;
   password: string;
+  header: string;
+  key: string;
 }
 
-const emptyDraft = (): Draft => ({ id: null, name: "", baseUrl: "", username: "", password: "" });
+const emptyDraft = (): Draft => ({
+  id: null, name: "", baseUrl: "", authKind: "header", username: "", password: "", header: "", key: "",
+});
+
+const draftOf = (s: RemoteServer): Draft => ({
+  id: s.id,
+  name: s.name,
+  baseUrl: s.baseUrl,
+  authKind: s.auth.kind,
+  username: s.auth.kind === "basic" ? s.auth.username : "",
+  password: s.auth.kind === "basic" ? s.auth.password : "",
+  header: s.auth.kind === "header" ? s.auth.header : "",
+  key: s.auth.kind === "header" ? s.auth.key : "",
+});
 
 function Field(props: {
   label: string;
@@ -53,7 +70,11 @@ export function RemoteServersScreen(props: {
   // per-server test-connection outcome; transient UI state only
   const [testResult, setTestResult] = useState<Record<string, string>>({});
 
-  const canSave = draft !== null && draft.name.trim() !== "" && /^https?:\/\//.test(draft.baseUrl.trim());
+  const canSave =
+    draft !== null &&
+    draft.name.trim() !== "" &&
+    /^https?:\/\//.test(draft.baseUrl.trim()) &&
+    (draft.authKind === "basic" || draft.header.trim() !== "");
 
   const save = (): void => {
     if (!draft || !canSave) return;
@@ -61,8 +82,10 @@ export function RemoteServersScreen(props: {
       id: draft.id ?? newServerId(),
       name: draft.name.trim(),
       baseUrl: draft.baseUrl.trim(),
-      username: draft.username,
-      password: draft.password,
+      auth:
+        draft.authKind === "basic"
+          ? { kind: "basic", username: draft.username, password: draft.password }
+          : { kind: "header", header: draft.header.trim(), key: draft.key },
     };
     onServers((prev) => (draft.id ? prev.map((s) => (s.id === draft.id ? entry : s)) : [...prev, entry]));
     setDraft(null);
@@ -116,9 +139,7 @@ export function RemoteServersScreen(props: {
                 {testResult[s.id] ? <div className="truncate text-sm text-fg-mid">{testResult[s.id]}</div> : null}
               </div>
               <Button onClick={() => testConnection(s)}>Test</Button>
-              <Button onClick={() => setDraft({ id: s.id, name: s.name, baseUrl: s.baseUrl, username: s.username, password: s.password })}>
-                Edit
-              </Button>
+              <Button onClick={() => setDraft(draftOf(s))}>Edit</Button>
               <Button variant="danger" onClick={() => void remove(s)}>
                 Remove
               </Button>
@@ -135,8 +156,29 @@ export function RemoteServersScreen(props: {
               honor the lineage. */}
           <Field label="Name" value={draft.name} onChange={(name) => setDraft({ ...draft, name })} placeholder="Skyrat" />
           <Field label="Base URL" value={draft.baseUrl} onChange={(baseUrl) => setDraft({ ...draft, baseUrl })} placeholder="https://skyrat.example.com/dav/" />
-          <Field label="Username" value={draft.username} onChange={(username) => setDraft({ ...draft, username })} />
-          <Field label="Password" value={draft.password} onChange={(password) => setDraft({ ...draft, password })} secret />
+          <div className="flex items-center gap-3">
+            <span className="w-24 shrink-0 text-base text-fg-mid">Auth</span>
+            <Segmented
+              label="Auth"
+              options={[
+                { value: "header", label: "API key" },
+                { value: "basic", label: "Username / Password" },
+              ]}
+              value={draft.authKind}
+              onChange={(authKind) => setDraft({ ...draft, authKind })}
+            />
+          </div>
+          {draft.authKind === "header" ? (
+            <>
+              <Field label="Header" value={draft.header} onChange={(header) => setDraft({ ...draft, header })} placeholder="X-Skyrat-Api-Key" />
+              <Field label="Key" value={draft.key} onChange={(key) => setDraft({ ...draft, key })} secret />
+            </>
+          ) : (
+            <>
+              <Field label="Username" value={draft.username} onChange={(username) => setDraft({ ...draft, username })} />
+              <Field label="Password" value={draft.password} onChange={(password) => setDraft({ ...draft, password })} secret />
+            </>
+          )}
           <div className="flex justify-end gap-2 pt-1">
             <Button onClick={() => setDraft(null)}>Cancel</Button>
             <Button variant="primary" disabled={!canSave} onClick={save}>
