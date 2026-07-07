@@ -1,6 +1,7 @@
 import { createIpcFs } from "@carapace/shell";
 import { createIpcOs, type OsBridge } from "@carapace/shell/ipc";
 import type { CarapaceHost, FsBridge } from "@carapace/shell";
+import type { DavRequest, DavResponse } from "../remote/dav";
 
 export interface FileFilter {
   name: string;
@@ -37,6 +38,10 @@ export interface Host {
   /** Fetch a remote diffuse (main-process fetch, no renderer CORS/CSP), cached in userData by URL hash.
    *  refresh bypasses the cache. Throws if offline with no cached copy. */
   fetchUrl(url: string, opts?: { refresh?: boolean }): Promise<Uint8Array>;
+  /** Generic HTTP proxy for the remote-projects WebDAV client (custom methods, no CORS, uncached). */
+  request(req: DavRequest): Promise<DavResponse>;
+  /** Rename/move a file (atomic sidecar saves). */
+  rename(from: string, to: string): Promise<void>;
   /** Whether a path exists (project-marker / file checks). */
   pathExists(path: string): Promise<boolean>;
   /** Raw `git status --porcelain=v1 -z` stdout for a dir ("" when not a repo / git absent). */

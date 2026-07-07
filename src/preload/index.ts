@@ -25,6 +25,8 @@ contextBridge.exposeInMainWorld("lambertHost", {
   readFile: (path: string) => ipcRenderer.invoke("fs:read", path),
   writeFile: (path: string, data: Uint8Array) => ipcRenderer.invoke("fs:write", path, data),
   fetchUrl: (url: string, opts?: { refresh?: boolean }) => ipcRenderer.invoke("net:fetchUrl", url, opts),
+  request: (req: unknown) => ipcRenderer.invoke("net:request", req),
+  rename: (from: string, to: string) => ipcRenderer.invoke("fs:rename", from, to),
   openFolderDialog: (opts: unknown) => ipcRenderer.invoke("dialog:openFolder", opts),
   pathExists: (path: string) => ipcRenderer.invoke("fs:exists", path),
   gitStatus: (dir: string) => ipcRenderer.invoke("git:status", dir),
