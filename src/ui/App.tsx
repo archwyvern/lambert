@@ -43,7 +43,7 @@ import { FileExplorer } from "@carapace/shell";
 import type { DirEntry, FileExplorerActions, FileExplorerProps, MenuModel } from "@carapace/shell";
 import { DocumentRegular, FolderRegular, ImageRegular } from "@fluentui/react-icons";
 import { usePersistentState } from "./persist";
-import { Sash, SplitView, EditorTabs, StatusBar, formatKeys, useConfirm, EmptyState, parseGitPorcelainZ, scmDecoration, type ScmDecoration } from "@carapace/shell";
+import { Sash, SplitView, EditorTabs, StatusBar, formatKeys, KeybindingProvider, useConfirm, EmptyState, parseGitPorcelainZ, scmDecoration, type ScmDecoration } from "@carapace/shell";
 import { Toolbar } from "./Toolbar";
 import { ViewControls } from "./ViewControls";
 import { LambertMark } from "./LambertMark";
@@ -121,7 +121,9 @@ export function App(): React.JSX.Element {
   // a two-step chord prefix is waiting for its second keystroke (status-bar hint)
   const [chordPending, setChordPending] = useState<string | null>(null);
   // Rebindable shortcuts: user overrides by command id (chord rebinds, null unbinds, absent = default).
+  // The same map also carries carapace component-binding overrides (dotted ids, e.g. "tree.rename").
   const [bindingOverrides, setBindingOverrides] = usePersistentState<BindingOverrides>("keybindings", {});
+  const keybindingsConfig = useMemo(() => ({ overrides: bindingOverrides }), [bindingOverrides]);
   // pre-v0.5 stored rebinds against the single "settings" command — rename once on startup
   useEffect(() => setBindingOverrides(migrateLegacyOverrides), []);
   const bindings = useMemo(
@@ -1239,6 +1241,7 @@ export function App(): React.JSX.Element {
   });
 
   return (
+    <KeybindingProvider config={keybindingsConfig}>
     <div className="flex h-screen flex-col bg-bg text-base text-fg">
       {/* always rendered: with a frameless window this bar IS the titlebar (drag + window controls) */}
       <Toolbar
@@ -1497,5 +1500,6 @@ export function App(): React.JSX.Element {
       />
       <UpdateNotice autoCheck={autoUpdateCheck} />
     </div>
+    </KeybindingProvider>
   );
 }
