@@ -32,6 +32,13 @@ linux:
   category: Graphics
   maintainer: Archwyvern <codekestrel@googlemail.com>
   synopsis: Shape-based height-field authoring for normal maps.
+  # The window's X11 WM_CLASS is `lambert` (lowercase — Electron derives it from app.setName).
+  # electron-builder defaults StartupWMClass to productName (`Lambert`, capital), so the desktop
+  # menu/dock can't match the running window to its launcher and paints a generic icon. Pin the
+  # real class so the taskbar entry, pinned launcher, and window are one thing.
+  desktop:
+    entry:
+      StartupWMClass: lambert
 
 # Version-less AppImage filename. electron-updater can only overwrite the running AppImage IN PLACE
 # when the new file shares its basename; a versioned default name (Lambert-${version}.AppImage)
