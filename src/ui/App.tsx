@@ -53,6 +53,7 @@ import { Toolbar } from "./Toolbar";
 import { ViewControls } from "./ViewControls";
 import { LambertMark } from "./LambertMark";
 import { LaunchScreen } from "./LaunchScreen";
+import { RemoteCloneDialog } from "./RemoteCloneDialog";
 import { NewDocumentDialog } from "./NewDocumentDialog";
 import { AboutDialog } from "./AboutDialog";
 import { DocumentSettingsDialog, PreferencesDialog, ProjectSettingsDialog } from "./SettingsDialog";
@@ -174,6 +175,7 @@ export function App(): React.JSX.Element {
   // remote projects: configured WebDAV servers (app-level) + the open project's sync state (null =
   // not a remote project). sidecarRef keeps the command registry's stable closures honest.
   const [remoteServers, setRemoteServers] = usePersistentState<RemoteServer[]>("remoteServers", []);
+  const [remoteCloneOpen, setRemoteCloneOpen] = useState(false);
   const [sidecar, setSidecar] = useState<Sidecar | null>(null);
   const sidecarRef = useRef<Sidecar | null>(null);
   sidecarRef.current = sidecar;
@@ -989,6 +991,8 @@ export function App(): React.JSX.Element {
         return exportHeightmap();
       case "export-all":
         return exportAll();
+      case "remote-clone":
+        return setRemoteCloneOpen(true);
       case "remote-sync":
         return remoteSync();
       case "remote-export":
@@ -1450,7 +1454,23 @@ export function App(): React.JSX.Element {
       <CommandProvider registry={registry}>
         <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       </CommandProvider>
-      {settingsOpen === "prefs" && workspace ? (
+      {remoteCloneOpen ? (
+        <RemoteCloneDialog
+          servers={remoteServers}
+          onAddServer={() => {
+            setRemoteCloneOpen(false);
+            openSettingsDialog("prefs", "app-remotes");
+          }}
+          onCloned={(dir) => {
+            setRemoteCloneOpen(false);
+            openPath(dir);
+          }}
+          onClose={() => setRemoteCloneOpen(false)}
+        />
+      ) : null}
+      {/* prefs are app-level (shortcuts, updates, remote servers) — no workspace required, and the
+          clone-from-launch-screen flow needs Remote Servers reachable before any project exists */}
+      {settingsOpen === "prefs" ? (
         <PreferencesDialog
           bindingOverrides={bindingOverrides}
           onBindingOverrides={setBindingOverrides}
@@ -1664,6 +1684,7 @@ export function App(): React.JSX.Element {
               onRemoveRecent={removeRecentProject}
               onNew={() => openProject("new")}
               onOpen={() => openProject("open")}
+              onRemote={() => setRemoteCloneOpen(true)}
             />
           )}
         </div>

@@ -34,6 +34,7 @@ export function buildMenuModel(opts: {
       items: [
         { label: "New Project…", shortcut: keys("new-project"), run: () => action("new-project") },
         { label: "Open Project…", shortcut: keys("open-project"), run: () => action("open-project") },
+        { label: "Clone Remote Project…", shortcut: keys("remote-clone"), run: () => action("remote-clone") },
         { separator: true },
         { label: "New Document…", shortcut: keys("new-document"), enabled: hasWorkspace, run: () => action("new-document") },
         { label: "Reload Diffuse", enabled: hasActive, run: () => action("reload-diffuse") },
