@@ -54,7 +54,7 @@ raw field instead. Arrows nudge (Shift ×10), Esc cancels a drag in progress (re
 deselects. The `?  Shortcuts` pill (bottom-right) shows the full contextual list.
 
 Every menu action is a **command**: Ctrl+Shift+P opens the palette (fuzzy search, Enter runs),
-and Settings ▸ Application ▸ Shortcuts rebinds any of them (click a row, press the new chord).
+and Preferences ▸ Shortcuts rebinds any of them (click a row, press the new chord).
 
 Edit: Ctrl+C/V copies objects (works across tabs), Ctrl+D duplicates, Ctrl+G groups,
 Ctrl+Shift+G ungroups, Delete removes. The **Arrange** menu aligns (left/center/right,
@@ -89,7 +89,7 @@ detail. Group masks apply to all children. Rename anything with F2 or double-cli
 
 ## Adjustment layers
 
-**Adjustment** (in the palette's Effects section) filters everything below it inside a region
+**Adjustment** (in the palette's Special section) filters everything below it inside a region
 (full-canvas by default; reshape it with the vertex tool). It hosts an ordered list of height
 transforms — raise/lower, multiply, clamp, curve, ramp, and **Emboss/Detail**, which lifts
 surface detail out of the diffuse's own luminance (scrub `strength`; negative inverts to
@@ -98,10 +98,12 @@ dark-high). Each entry has a blend slider and a bypass eye. See the
 
 ## Settings
 
-**Ctrl+,** opens Settings (searchable): **Project** holds the normal-channel directions (a
-visual ball editor, with rotation presets for engine conventions) and the default output
-format; **Document** can override both per-`.lmb`; **Application** holds editor preferences and
-the shortcut editor. Everything applies instantly — the canvas peeks around the modal.
+Three dialogs under the File menu, each searchable and instant-apply (the canvas peeks around
+the modal): **Preferences** (**Ctrl+,**) holds the per-machine application settings — the
+shortcut editor and the update check; **Project Settings** holds the normal-channel directions
+(a visual ball editor, with rotation presets for engine conventions) and the default output
+format, stored in `project.lambert`; **Document Settings** overrides both per-`.lmb`, plus the
+canvas origin.
 
 ## Presets
 
@@ -124,5 +126,5 @@ document; **File ▸ Export Height Map** writes a 16-bit grayscale height PNG. T
 alpha channel is the authored mask — pixels your shapes never touched stay transparent so the
 engine keeps its baseline normals there. Normal channel directions (red/green orientation,
 plus rotation for engine conventions) and the output format (RGB/RGBA/RG/RGA channels, 8/16-bit
-depth, PNG / EXR / Radiance HDR) live in **Settings ▸ Project**, with per-document overrides in
-**Settings ▸ Document** — so exports are reproducible from the project files alone.
+depth, PNG / EXR / Radiance HDR) live in **Project Settings**, with per-document overrides in
+**Document Settings** — so exports are reproducible from the project files alone.
