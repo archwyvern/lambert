@@ -36,6 +36,12 @@ contextBridge.exposeInMainWorld("lambertHost", {
   loadSession: () => ipcRenderer.invoke("session:load"),
   saveSession: (json: string) => ipcRenderer.invoke("session:save", json),
   revealPath: (path: string) => ipcRenderer.invoke("path:reveal", path),
+  // --- #2 transient-window SPIKE (branch-only; see src/main/spikePopup.ts) ---
+  spikePopupOpen: (opts: { dx: number; dy: number; w: number; h: number; payload: string }) => ipcRenderer.invoke("spike:popup-open", opts),
+  spikePopupClose: () => ipcRenderer.invoke("spike:popup-close"),
+  spikeRelayToParent: (data: unknown) => ipcRenderer.send("spike:relay-to-parent", data),
+  spikeRelayToPopup: (data: unknown) => ipcRenderer.send("spike:relay-to-popup", data),
+  spikeOnEvent: (cb: (ev: unknown) => void) => ipcRenderer.on("spike:event", (_e, ev) => cb(ev)),
   onMenuAction: (cb: (action: string) => void) =>
     ipcRenderer.on("menu:action", (_e, action: string) => cb(action)),
   setMenuAccelerators: (map: Record<string, string | null>) => ipcRenderer.invoke("menu:accelerators", map),
@@ -56,3 +62,8 @@ contextBridge.exposeInMainWorld("lambertHost", {
 // carapace fs + os bridges (window.carapaceFs / carapaceOs) for the shared <FileExplorer>
 exposeFs(contextBridge, ipcRenderer);
 exposeOs(contextBridge, ipcRenderer);
+
+// #2 SPIKE: MessagePorts can't cross the context bridge — re-post them into the main world.
+ipcRenderer.on("spike:port", (e, meta: { role: string }) => {
+  window.postMessage({ type: "spike:port", role: meta.role }, "*", e.ports);
+});

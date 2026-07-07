@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { serveFs, serveOs } from "@carapace/shell/node";
+import { autoRunPopupSpike, registerPopupSpike } from "./spikePopup";
 import electronUpdater from "electron-updater";
 
 // electron-updater is CJS; its named exports come off the default import under bundling.
@@ -46,6 +47,8 @@ if (process.platform === "linux") {
 if (!app.isPackaged) app.commandLine.appendSwitch("disable-http-cache");
 
 const selftest = process.argv.includes("--selftest");
+// #2 transient-window spike (branch-only): auto-drives a parented frameless popup + logs findings
+const spikeRun = process.argv.includes("--spike");
 const captureIndex = process.argv.indexOf("--capture");
 const capturePath = captureIndex >= 0 ? process.argv[captureIndex + 1] : undefined;
 const queryIndex = process.argv.indexOf("--query");
@@ -335,6 +338,10 @@ app.whenReady().then(() => {
   }
   const win = new BrowserWindow(winOpts);
   mainWindow = win;
+  if (spikeRun) {
+    registerPopupSpike(() => mainWindow);
+    autoRunPopupSpike(win);
+  }
 
   // renderer links (target=_blank, e.g. the About credits) open in the OS browser, never a popup
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -552,7 +559,7 @@ app.whenReady().then(() => {
   }
 
   const devUrl = process.env["ELECTRON_RENDERER_URL"];
-  const query = selftest ? "?selftest=1" : extraQuery ? `?${extraQuery}` : "";
+  const query = spikeRun ? "?spike=1" : selftest ? "?selftest=1" : extraQuery ? `?${extraQuery}` : "";
   if (devUrl) {
     void win.loadURL(devUrl + query);
   } else {
