@@ -99,3 +99,10 @@ export type BindingOverrides = Record<string, string | null>;
 export function effectiveKeys(spec: CommandSpec, overrides: BindingOverrides): string | null {
   return spec.id in overrides ? (overrides[spec.id] ?? null) : spec.keys;
 }
+
+/** Pre-v0.5 the three settings dialogs were one "settings" command — carry a user rebind over. */
+export function migrateLegacyOverrides(prev: BindingOverrides): BindingOverrides {
+  if (!("settings" in prev)) return prev;
+  const { settings, ...rest } = prev;
+  return "preferences" in rest ? rest : { ...rest, preferences: settings ?? null };
+}
