@@ -43,7 +43,7 @@ import { FileExplorer } from "@carapace/shell";
 import type { DirEntry, FileExplorerActions, FileExplorerProps, MenuModel } from "@carapace/shell";
 import { DocumentRegular, FolderRegular, ImageRegular } from "@fluentui/react-icons";
 import { usePersistentState } from "./persist";
-import { Sash, SplitView, EditorTabs, StatusBar, useConfirm, EmptyState, parseGitPorcelainZ, scmDecoration, type ScmDecoration } from "@carapace/shell";
+import { Sash, SplitView, EditorTabs, StatusBar, formatKeys, useConfirm, EmptyState, parseGitPorcelainZ, scmDecoration, type ScmDecoration } from "@carapace/shell";
 import { Toolbar } from "./Toolbar";
 import { ViewControls } from "./ViewControls";
 import { LambertMark } from "./LambertMark";
@@ -118,6 +118,8 @@ export function App(): React.JSX.Element {
   const [projectScreen, setProjectScreen] = usePersistentState("projectSettings:screen", SETTINGS_DEFAULT_SCREEN.project);
   const [docScreen, setDocScreen] = usePersistentState("docSettings:screen", SETTINGS_DEFAULT_SCREEN.doc);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // a two-step chord prefix is waiting for its second keystroke (status-bar hint)
+  const [chordPending, setChordPending] = useState<string | null>(null);
   // Rebindable shortcuts: user overrides by command id (chord rebinds, null unbinds, absent = default).
   const [bindingOverrides, setBindingOverrides] = usePersistentState<BindingOverrides>("keybindings", {});
   // pre-v0.5 stored rebinds against the single "settings" command — rename once on startup
@@ -136,10 +138,15 @@ export function App(): React.JSX.Element {
       ),
     [bindings],
   );
-  // native menu accelerators track the effective bindings (main rebuilds the OS menu)
+  // native menu accelerators track the effective bindings (main rebuilds the OS menu). Two-step
+  // chords can't be Electron accelerators — those commands fire via the window keymap only.
   useEffect(() => {
     const map: Record<string, string | null> = {};
-    for (const c of COMMANDS) if (c.scope === "global") map[c.id] = bindings.get(c.id) ?? null;
+    for (const c of COMMANDS) {
+      if (c.scope !== "global") continue;
+      const keys = bindings.get(c.id) ?? null;
+      map[c.id] = keys && !keys.includes(" ") ? keys : null;
+    }
     void getHost().setMenuAccelerators(map);
   }, [bindings]);
   // New Document = name-first: the explorer's inline editor sets the path, then a modal picks the
@@ -1199,7 +1206,7 @@ export function App(): React.JSX.Element {
   // ?demo capture bootstrap (fixtures -> in-memory project + readiness flag) — QC-CARRY-2 extraction
   useDemoBootstrap({ setWorkspace, setViews, setSwapped, setNewDocPath, setSelVerts, setTool, setBoxMode, openSettings, runAction: (id) => runMenuActionRef.current(id), defaultView: DEFAULT_VIEW });
   // the window-level editor keymap (tools, Esc, Delete, nudges, copy/paste, X/V) — QC-CARRY-2 extraction
-  useEditorKeymap({ workspaceRef, runMenuActionRef, bindingsRef: editorBindingsRef, selVertsRef, nudgeEndTimer, setSwapped, setSelVerts, setTool, setActiveView });
+  useEditorKeymap({ workspaceRef, runMenuActionRef, bindingsRef: editorBindingsRef, selVertsRef, nudgeEndTimer, setSwapped, setSelVerts, setTool, setActiveView, onChordPending: setChordPending });
   const tabInfos = workspace
     ? workspace.tabs.map((t) => ({
         id: t.id,
@@ -1474,7 +1481,13 @@ export function App(): React.JSX.Element {
         </div>
       </div>
       <StatusBar
-        left={status ? <span className={status.tone === "error" ? "text-error" : "text-fg-mid"}>{status.text}</span> : null}
+        left={
+          chordPending ? (
+            <span className="text-fg-mid">({formatKeys(chordPending)}) waiting for the second key…</span>
+          ) : status ? (
+            <span className={status.tone === "error" ? "text-error" : "text-fg-mid"}>{status.text}</span>
+          ) : null
+        }
         right={state ? `${state.doc.source.width}×${state.doc.source.height} · ${flattenLayers(state.doc.layers).length} objects` : null}
       />
       <UpdateNotice autoCheck={autoUpdateCheck} />
