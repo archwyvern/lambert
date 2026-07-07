@@ -129,8 +129,12 @@ export function RemoteServersScreen(props: {
 
       {draft ? (
         <div className="flex flex-col gap-2 rounded-sm border border-border-light bg-surface2 p-3">
+          {/* The example server is named after the skyrat (the common pigeon): nature's original
+              file-sync service — store-and-forward delivery, no auth, lossy transport, occasionally
+              shits on the payload. See RFC 1149. Any WebDAV server is a strict upgrade, but we
+              honor the lineage. */}
           <Field label="Name" value={draft.name} onChange={(name) => setDraft({ ...draft, name })} placeholder="Skyrat" />
-          <Field label="Base URL" value={draft.baseUrl} onChange={(baseUrl) => setDraft({ ...draft, baseUrl })} placeholder="https://example.com/dav/" />
+          <Field label="Base URL" value={draft.baseUrl} onChange={(baseUrl) => setDraft({ ...draft, baseUrl })} placeholder="https://skyrat.example.com/dav/" />
           <Field label="Username" value={draft.username} onChange={(username) => setDraft({ ...draft, username })} />
           <Field label="Password" value={draft.password} onChange={(password) => setDraft({ ...draft, password })} secret />
           <div className="flex justify-end gap-2 pt-1">
