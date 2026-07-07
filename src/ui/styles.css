@@ -97,9 +97,13 @@ body {
   background: rgba(131, 132, 133, 0.4);
 }
 
-:focus-visible {
-  outline: 1px solid var(--color-accent);
-  outline-offset: 0px;
+/* In @layer base so `outline-none` (a utility, higher layer) can opt a container out — un-layered
+   this beat EVERY utility and painted accent rings on focused popups (e.g. the tab context menu). */
+@layer base {
+  :focus-visible {
+    outline: 1px solid var(--color-accent);
+    outline-offset: 0px;
+  }
 }
 
 /* hide native number-input spinners; the SpinBox provides its own steppers */
