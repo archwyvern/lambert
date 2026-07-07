@@ -2,6 +2,20 @@ import { contextBridge, ipcRenderer, webUtils } from "electron";
 import os from "node:os";
 import { exposeFs, exposeOs } from "@carapace/shell/ipc";
 
+// Spawned-window pref seeding: "open in new window" runs this instance on a fresh disposable
+// profile, so the parent snapshots its localStorage prefs into the profile and we replay them here
+// — before any renderer code reads them. The sentinel keeps a reloaded window from re-seeding over
+// prefs the user has since changed. Normal launches get null and skip all of this.
+try {
+  const seed = ipcRenderer.sendSync("session:spawn-seed") as string | null;
+  if (seed !== null && localStorage.getItem("lambert:__seeded") === null) {
+    for (const [k, v] of Object.entries(JSON.parse(seed) as Record<string, string>)) localStorage.setItem(k, v);
+    localStorage.setItem("lambert:__seeded", "1");
+  }
+} catch {
+  // unreadable/malformed seed: the window simply runs with default prefs
+}
+
 contextBridge.exposeInMainWorld("lambertHost", {
   // filesystem path for a DataTransfer File (drag-drop) — File.path is gone in modern Electron
   pathForFile: (file: File) => {
@@ -42,6 +56,7 @@ contextBridge.exposeInMainWorld("lambertHost", {
     ipcRenderer.on("menu:action", (_e, action: string) => cb(action)),
   setMenuAccelerators: (map: Record<string, string | null>) => ipcRenderer.invoke("menu:accelerators", map),
   notifyProjectOpened: () => ipcRenderer.send("window:enter-project"),
+  openInNewWindow: (dir: string, prefsJson: string) => ipcRenderer.invoke("window:openNew", dir, prefsJson),
   onOpenProjectPath: (cb: (dir: string) => void) =>
     ipcRenderer.on("open-project-path", (_e, dir: string) => cb(dir)),
   takePendingOpen: () => ipcRenderer.invoke("project:take-pending-open"),
