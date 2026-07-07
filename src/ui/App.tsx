@@ -989,6 +989,10 @@ export function App(): React.JSX.Element {
         return openSettingsDialog("project");
       case "document-settings":
         return openSettingsDialog("doc");
+      case "rename":
+        // Layers owns the rename UI — same window-event pattern as lambert-zoom
+        window.dispatchEvent(new Event("lambert-rename"));
+        return;
       case "command-palette":
         return setPaletteOpen(true);
       case "view-cycle":
@@ -1397,6 +1401,7 @@ export function App(): React.JSX.Element {
                   boxLitViewport={boxLitViewport}
                   normalDirs={effectiveNormalDirs(state.doc, workspace!.config)}
                   adjustmentDefaults={workspace!.config.adjustmentDefaults}
+                  deleteKeys={bindings.get("delete") ?? null}
                   overridesNormalDirs={state.doc.normalDirs !== undefined}
                   openSettings={openSettings}
                   swapped={swapped}

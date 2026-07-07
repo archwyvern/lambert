@@ -79,8 +79,10 @@ function GizmosInner(props: {
   setPlacing: (p: Placing | null) => void;
   /** Global ½px grid snap (vertices, polygon + curve points). */
   snap: boolean;
+  /** The effective (rebindable) delete chord — MaskGizmo owns it while a mask anchor is selected. */
+  deleteKeys: string | null;
 }): React.JSX.Element | null {
-  const { doc, selectedId, viewport, store, tool, selVerts, setSelVerts, setPlacing, snap, maskFocus } = props;
+  const { doc, selectedId, viewport, store, tool, selVerts, setSelVerts, setPlacing, snap, maskFocus, deleteKeys } = props;
   // grid + guide snap for any world point being edited (no-op when both toggles are off)
   const snapPt = editSnap(doc.canvas, snap, viewport.zoom);
   const selNode = selectedId ? findNode(doc.layers, selectedId) : null;
@@ -114,7 +116,7 @@ function GizmosInner(props: {
       <>
         <GroupGizmo group={selNode} viewport={viewport} store={store} doc={doc} />
         {unlocked && selNode.masks?.length ? (
-          <MaskGizmo nodeId={selNode.id} masks={selNode.masks} doc={doc} viewport={viewport} snap={snap} store={store} focus={maskFocus?.nodeId === selNode.id ? maskFocus : null} />
+          <MaskGizmo nodeId={selNode.id} masks={selNode.masks} doc={doc} viewport={viewport} snap={snap} store={store} focus={maskFocus?.nodeId === selNode.id ? maskFocus : null} deleteKeys={deleteKeys} />
         ) : null}
       </>
     );
@@ -842,7 +844,7 @@ function GizmosInner(props: {
         <ContextMenu x={cableMenu.x} y={cableMenu.y} items={cableMenuItems(cableMenu.i)} onClose={() => setCableMenu(null)} />
       ) : null}
       {vertHandles && object.masks?.length ? (
-        <MaskGizmo nodeId={object.id} masks={object.masks} doc={doc} viewport={viewport} snap={snap} store={store} focus={maskFocus?.nodeId === object.id ? maskFocus : null} />
+        <MaskGizmo nodeId={object.id} masks={object.masks} doc={doc} viewport={viewport} snap={snap} store={store} focus={maskFocus?.nodeId === object.id ? maskFocus : null} deleteKeys={deleteKeys} />
       ) : null}
     </>
   );

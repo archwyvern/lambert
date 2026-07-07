@@ -57,19 +57,17 @@ export function Layers(props: { store: DocumentStore; state: EditorState }): Rea
     };
   }, [menu]);
 
-  // F2 renames the selected layer from anywhere
+  // the rename command (default F2, rebindable) renames the selected layer — dispatched by App
   useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== "F2" || e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+    const onRename = (): void => {
       const id = state.selectedId;
       const n = id ? findNode(state.doc.layers, id) : null;
       if (!n) return;
-      e.preventDefault();
       setRenaming(n.id);
       setRenameText(nodeLabel(n));
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("lambert-rename", onRename);
+    return () => window.removeEventListener("lambert-rename", onRename);
   }, [state.selectedId, state.doc.layers]);
 
   const patchNode = (id: string, fn: (n: LayerNode) => LayerNode): void => {

@@ -63,6 +63,7 @@ export function buildMenuModel(opts: {
         { label: "Duplicate", shortcut: keys("duplicate"), enabled: hasSel, run: () => action("duplicate") },
         { label: "Save as Preset", enabled: hasSel, run: () => action("save-preset") },
         { label: "Delete", enabled: hasSel, run: () => action("delete") },
+        { label: "Rename", shortcut: keys("rename"), enabled: hasSel, run: () => action("rename") },
         { separator: true },
         { label: "Group", shortcut: keys("group"), enabled: hasSel, run: () => action("group") },
         { label: "Ungroup", shortcut: keys("ungroup"), enabled: hasSel, run: () => action("ungroup") },
