@@ -55,6 +55,17 @@ export function useDemoBootstrap(opts: {
           diffuse: { bytes: encode({ width: w, height: h, data }) },
         };
         ws.openTab(tab);
+        if (q.has("secondtab")) {
+          // capture aid: a second (pinned, if `pin`) tab so the tab strip/menu verbs are visible
+          ws.openTab({
+            id: crypto.randomUUID(),
+            docPath: "/demo/second.lmb",
+            store: new DocumentStore({ ...emptyDoc("file:///demo/demo.df.png", w, h) }, "/demo/second.lmb"),
+            diffuse: { bytes: encode({ width: w, height: h, data }) },
+            pinned: q.has("pin") || undefined,
+          });
+          ws.focus(tab.id);
+        }
         const mode = q.get("mode");
         const v: ViewState = { ...defaultView };
         if (mode && (VIEW_MODES as string[]).includes(mode)) v.mode = mode as ViewMode;
@@ -71,6 +82,14 @@ export function useDemoBootstrap(opts: {
         const settingsScreen = q.get("settings");
         if (settingsScreen) setTimeout(() => openSettings(settingsScreen), 200); // after workspaceRef lands
         if (q.has("palette")) setTimeout(() => runAction("command-palette"), 200);
+        if (q.has("tabmenu")) {
+          // capture aid: right-click the first tab so the context menu is in the shot
+          setTimeout(() => {
+            document.querySelector('[role="tab"]')?.dispatchEvent(
+              new MouseEvent("contextmenu", { bubbles: true, clientX: 300, clientY: 60 }),
+            );
+          }, 250);
+        }
         const markReady = (): void => {
           (window as unknown as { __lambertDemoReady?: boolean }).__lambertDemoReady = true;
         };
