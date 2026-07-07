@@ -21,7 +21,8 @@ const adjustmentSchema = z.object({
   kind: z.string(),
   /** Blend 0..1: out = mix(H, f(H), strength). */
   strength: z.number().min(0).max(1),
-  params: z.record(z.string(), z.number()),
+  /** Absent = the entry inherits the project's adjustmentDefaults live. */
+  params: z.record(z.string(), z.number()).optional(),
   /** Absent = active; false = bypassed. */
   visible: z.boolean().optional(),
 });
@@ -229,6 +230,9 @@ export const projectConfigSchema = z.object({
   output: outputSettingsSchema,
   /** User-saved object presets (the palette's "Project" section). */
   presets: z.array(savedPresetSchema).optional(),
+  /** Per-kind default adjustment params (sparse): kind id -> param -> value. Entries without their
+   *  own params follow these live; factory defaults fill anything unset here. */
+  adjustmentDefaults: z.record(z.string(), z.record(z.string(), z.number())).optional(),
 });
 
 export type ProjectConfig = z.infer<typeof projectConfigSchema>;

@@ -1,5 +1,6 @@
-import { FormToggle, Segmented, SettingsModal, ShortcutEditor, SpinSlider } from "@carapace/shell";
+import { FormToggle, humanizeLabel, Segmented, SettingsModal, ShortcutEditor, SpinSlider } from "@carapace/shell";
 import type { SettingsScreen, ShortcutRow } from "@carapace/shell";
+import { ADJUSTMENT_KINDS } from "../field/adjustments";
 import type { DocumentStore, EditorState } from "../document/store";
 import { BindingOverrides, COMMANDS, effectiveKeys } from "./commands";
 import {
@@ -215,6 +216,54 @@ export function ProjectSettingsDialog(props: {
             Settings › Output Format). The default is 16-bit RGBA PNG.
           </Blurb>
           <OutputFormatEditor value={config.output} onChange={(output) => onConfig({ ...config, output })} />
+        </div>
+      ),
+    },
+    {
+      id: "project-adjustments",
+      label: "Adjustment Defaults",
+      keywords: ["adjustment", "emboss", "detail", "ramp", "curve", "clamp", "multiply", "raise", "lower", "defaults"],
+      render: () => (
+        <div>
+          <Blurb>
+            Default parameters for each adjustment kind, stored in project.lambert. New adjustment
+            entries follow these live; flip an entry's override switch to keep its own values
+            instead (stored in the .lmb).
+          </Blurb>
+          {ADJUSTMENT_KINDS.map((kind) => {
+            const stored = config.adjustmentDefaults?.[kind.id];
+            const resetKind = (): void => {
+              const { [kind.id]: _drop, ...rest } = config.adjustmentDefaults ?? {};
+              onConfig({ ...config, adjustmentDefaults: Object.keys(rest).length ? rest : undefined });
+            };
+            const setDefault = (key: string, v: number): void =>
+              onConfig({
+                ...config,
+                adjustmentDefaults: { ...config.adjustmentDefaults, [kind.id]: { ...config.adjustmentDefaults?.[kind.id], [key]: v } },
+              });
+            return (
+              <div key={kind.id} className="mb-4">
+                <div className="mb-1 flex items-center gap-3">
+                  <span className="text-base font-semibold text-fg">{kind.name}</span>
+                  {stored ? <Button onClick={resetKind}>Reset</Button> : null}
+                </div>
+                {Object.entries(kind.params).map(([key, spec]) => (
+                  <Row key={key} label={humanizeLabel(key).toLowerCase()}>
+                    <div className="w-28">
+                      <SpinSlider
+                        value={stored?.[key] ?? spec.default}
+                        min={spec.min}
+                        max={spec.max}
+                        integer={!spec.float}
+                        hideSlider={spec.min === undefined || spec.max === undefined}
+                        onChange={(v) => setDefault(key, v)}
+                      />
+                    </div>
+                  </Row>
+                ))}
+              </div>
+            );
+          })}
         </div>
       ),
     },

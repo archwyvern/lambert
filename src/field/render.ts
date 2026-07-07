@@ -1,3 +1,4 @@
+import type { AdjustmentDefaults } from "./adjustments";
 import type { DetailField } from "./detail";
 import { evaluateField, FieldResult } from "./evalCpu";
 import type { ResolvedObject } from "./flatten";
@@ -18,6 +19,8 @@ export interface RenderOptions {
   supersample: 1 | 2;
   /** The Emboss/Detail bands (doc-res), sampled by "detail" adjustments; absent = zeros. */
   detail?: DetailField | null;
+  /** Project default params for inheriting adjustment entries (absent = factory defaults). */
+  defaults?: AdjustmentDefaults;
 }
 
 /**
@@ -103,7 +106,10 @@ export function renderField(
   opts: RenderOptions,
 ): RenderResult {
   const f = opts.supersample;
-  const ctx = opts.detail ? { detail: { field: opts.detail, scale: opts.detail.scale / f } } : undefined;
+  const ctx = {
+    defaults: opts.defaults,
+    ...(opts.detail ? { detail: { field: opts.detail, scale: opts.detail.scale / f } } : {}),
+  };
   if (f === 1) {
     const field = evaluateField(resolved, width, height, ctx);
     return { ...field, normals: deriveNormals(field.heightMap, width, height) };

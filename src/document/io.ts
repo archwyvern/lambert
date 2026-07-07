@@ -135,9 +135,9 @@ export async function exportDocNx(host: Host, doc: LambertDoc, label: string, co
   const bytes = await resolveDiffuse(host, doc.source.uri);
   const { detailChainParams } = await import("../field/adjustments");
   const { detailFieldForDiffuse } = await import("../field/detail");
-  const chain = detailChainParams(doc.layers);
+  const chain = detailChainParams(doc.layers, config.adjustmentDefaults);
   const detail = chain ? detailFieldForDiffuse(bytes, chain) : null;
-  const render = await gpuExportRender(doc, detail);
+  const render = await gpuExportRender(doc, detail, config.adjustmentDefaults);
   const diffuse = decode(bytes);
   // Re-validate dims before the alpha gate: if the diffuse changed size since the doc was opened, its
   // opacity[] would be the wrong length and encodeNxPng would index out of range → corrupt NX alpha.
@@ -161,15 +161,15 @@ export async function exportTabNx(host: Host, tab: Tab, config: ProjectConfig, o
 
 /** Export the active tab's height field as 16-bit grayscale PNG (heights normalized min->0,
  *  max->65535). Same ss2 render as the NX; no diffuse involvement (the height field is authored). */
-export async function exportTabHeightmap(host: Host, tab: Tab, outPath: string): Promise<string> {
+export async function exportTabHeightmap(host: Host, tab: Tab, config: ProjectConfig, outPath: string): Promise<string> {
   if (!tab.docPath) throw new Error("Save the document before exporting its height map");
   const { gpuExportRender } = await import("../ui/exportRender");
   const doc = tab.store.state.doc;
   const { detailChainParams } = await import("../field/adjustments");
   const { detailFieldForDiffuse } = await import("../field/detail");
-  const chain = detailChainParams(doc.layers);
+  const chain = detailChainParams(doc.layers, config.adjustmentDefaults);
   const detail = chain ? detailFieldForDiffuse(tab.diffuse.bytes, chain) : null;
-  const render = await gpuExportRender(doc, detail);
+  const render = await gpuExportRender(doc, detail, config.adjustmentDefaults);
   const { encodeHeightmapPng } = await import("../exporters/heightmap");
   await host.writeFile(outPath, encodeHeightmapPng(render));
   return `wrote ${outPath}`;

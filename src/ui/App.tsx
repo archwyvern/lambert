@@ -625,7 +625,7 @@ export function App(): React.JSX.Element {
         filters: [{ name: "Height map (16-bit grayscale)", extensions: ["png"] }],
       });
       if (!out) return;
-      run(exportTabHeightmap(getHost(), t, out).then((r) => { refreshGitStatus(); return r; }));
+      run(exportTabHeightmap(getHost(), t, ws.config, out).then((r) => { refreshGitStatus(); return r; }));
     })();
   };
 
@@ -1389,6 +1389,7 @@ export function App(): React.JSX.Element {
                   boxMode={boxMode}
                   boxLitViewport={boxLitViewport}
                   normalDirs={effectiveNormalDirs(state.doc, workspace!.config)}
+                  adjustmentDefaults={workspace!.config.adjustmentDefaults}
                   overridesNormalDirs={state.doc.normalDirs !== undefined}
                   openSettings={openSettings}
                   swapped={swapped}
@@ -1413,6 +1414,7 @@ export function App(): React.JSX.Element {
                   openSettings={openSettings}
                   setTool={setTool}
                   snap={snap}
+                  adjustmentDefaults={workspace!.config.adjustmentDefaults}
                   onSelectMask={(nodeId, maskId) => {
                     active.store.select(nodeId);
                     setMaskFocus((f) => ({ nodeId, maskId, seq: (f?.seq ?? 0) + 1 }));

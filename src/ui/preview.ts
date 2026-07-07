@@ -1,4 +1,5 @@
 import { decode } from "fast-png";
+import type { AdjustmentDefaults } from "../field/adjustments";
 import { flattenLayers, type ResolvedObject } from "../field/flatten";
 import type { DetailField } from "../field/detail";
 import { buildCompositeWgsl } from "../field/gpu/composite";
@@ -41,6 +42,8 @@ export interface PreviewParams {
   pointLights?: PointLight[];
   /** The XY encode transform for the normal view (normalXform of the effective dirs). */
   normalXform: { xx: number; xy: number; yx: number; yy: number };
+  /** Project default params for inheriting adjustment entries (absent = factory defaults). */
+  defaults?: AdjustmentDefaults;
   /** Orbit camera for the attached 3D inspection canvas; null/undefined skips the pass. */
   orbit3d?: Orbit | null;
   /** What the 3D inspection box draws: "3d" = the orbit displaced-grid pass; "lit" = the lit composite
@@ -86,6 +89,7 @@ export class PreviewRenderer {
   private shapeCount = 0;
   private packSeq = 0;
   private lastShapes2d: LayerNode[] | null = null;
+  private lastDefaults: AdjustmentDefaults | undefined;
   private frame: number | null = null;
   private pending: { docW: number; docH: number; params: PreviewParams } | null = null;
   private pipeline3d!: GPURenderPipeline;
@@ -343,8 +347,8 @@ export class PreviewRenderer {
   }
 
   /** Pack the object list into the storage buffers the analytic composite reads. */
-  private packObjectBuffers(resolved: ResolvedObject[]): void {
-    const packed = packObjects(resolved);
+  private packObjectBuffers(resolved: ResolvedObject[], defaults?: AdjustmentDefaults): void {
+    const packed = packObjects(resolved, defaults);
     this.recordsBuf?.destroy();
     this.pointsBuf?.destroy();
     this.meshBuf?.destroy();
@@ -482,9 +486,10 @@ export class PreviewRenderer {
     // pack the objects BOTH analytic passes evaluate (2D composite + 3D preview); re-pack only when the
     // layer tree changes
     let packMs = 0;
-    if (p.layers !== this.lastShapes2d || !this.recordsBuf) {
-      this.packObjectBuffers(flattenLayers(p.layers));
+    if (p.layers !== this.lastShapes2d || p.defaults !== this.lastDefaults || !this.recordsBuf) {
+      this.packObjectBuffers(flattenLayers(p.layers), p.defaults);
       this.lastShapes2d = p.layers;
+      this.lastDefaults = p.defaults;
       this.packSeq++;
       if (probe) packMs = performance.now() - t0;
     }

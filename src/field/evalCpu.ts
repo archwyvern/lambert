@@ -1,5 +1,5 @@
 import { affineInvert, affineApply } from "./affine";
-import { applyAdjustments, type AdjustContext } from "./adjustments";
+import { applyAdjustments, type AdjustContext, type AdjustmentDefaults } from "./adjustments";
 import { sampleDetail, type DetailField } from "./detail";
 import { combineHeight, influence, objectCombineOp } from "./combine";
 import type { ResolvedObject } from "./flatten";
@@ -25,6 +25,8 @@ export interface FieldResult {
  *  `scale` maps the CURRENT eval space to detail texels (1 at doc res, 1/f under supersample). */
 export interface EvalContext {
   detail?: { field: DetailField; scale: number };
+  /** Project default params for inheriting adjustment entries (absent = factory defaults). */
+  defaults?: AdjustmentDefaults;
 }
 
 /** Height change (px) at which an adjustment counts as FULLY authoring a pixel (mask ramps up to
@@ -32,11 +34,12 @@ export interface EvalContext {
 export const ADJUST_MASK_EPS = 0.05;
 
 export function evaluateField(resolved: ResolvedObject[], width: number, height: number, ctx?: EvalContext): FieldResult {
-  const adjustCtx: AdjustContext = ctx?.detail
-    ? {
-        sampleDetail: (pw) => sampleDetail(ctx.detail!.field, pw.x * ctx.detail!.scale, pw.y * ctx.detail!.scale),
-      }
-    : {};
+  const adjustCtx: AdjustContext = {
+    defaults: ctx?.defaults,
+    ...(ctx?.detail
+      ? { sampleDetail: (pw) => sampleDetail(ctx.detail!.field, pw.x * ctx.detail!.scale, pw.y * ctx.detail!.scale) }
+      : {}),
+  };
   const heightMap = new Float32Array(width * height);
   const mask = new Float32Array(width * height);
   const items = resolved.map((rs) => {

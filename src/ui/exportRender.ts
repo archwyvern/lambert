@@ -1,3 +1,4 @@
+import type { AdjustmentDefaults } from "../field/adjustments";
 import type { DetailField } from "../field/detail";
 import { flattenLayers } from "../field/flatten";
 import { GpuFieldRenderer } from "../field/gpu/pipeline";
@@ -7,7 +8,7 @@ import type { LambertDoc } from "../document/schema";
 let renderer: GpuFieldRenderer | null = null;
 
 /** ss2 export render on a lazily-created renderer (independent of the preview's). */
-export async function gpuExportRender(doc: LambertDoc, detail?: DetailField | null): Promise<RenderResult> {
+export async function gpuExportRender(doc: LambertDoc, detail?: DetailField | null, defaults?: AdjustmentDefaults): Promise<RenderResult> {
   if (!renderer) {
     const adapter = await navigator.gpu.requestAdapter();
     if (!adapter) throw new Error("no WebGPU adapter");
@@ -20,5 +21,5 @@ export async function gpuExportRender(doc: LambertDoc, detail?: DetailField | nu
     });
     renderer = await GpuFieldRenderer.create(device);
   }
-  return renderer.evaluate(flattenLayers(doc.layers), doc.source.width, doc.source.height, { supersample: 2, detail });
+  return renderer.evaluate(flattenLayers(doc.layers), doc.source.width, doc.source.height, { supersample: 2, detail, defaults });
 }

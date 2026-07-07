@@ -1,6 +1,6 @@
 import { DismissRegular, EyeOffRegular, EyeRegular } from "@fluentui/react-icons";
-import { IconButton, Select, SpinSlider, humanizeLabel } from "@carapace/shell";
-import { ADJUSTMENT_KINDS, adjustmentKind, createAdjustment } from "../field/adjustments";
+import { FormToggle, IconButton, Select, SpinSlider, humanizeLabel } from "@carapace/shell";
+import { ADJUSTMENT_KINDS, adjustmentKind, adjustmentParam, createAdjustment, type AdjustmentDefaults } from "../field/adjustments";
 import { updateObject } from "../document/docOps";
 import type { DocumentStore } from "../document/store";
 import type { Adjustment, ObjectInstance } from "../field/types";
@@ -15,8 +15,10 @@ export function AdjustmentList(props: {
   store: DocumentStore;
   nodeId: string;
   adjustments: Adjustment[];
+  /** Project default params (project.lambert) — what inheriting entries show and apply. */
+  defaults?: AdjustmentDefaults;
 }): React.JSX.Element {
-  const { store, nodeId, adjustments } = props;
+  const { store, nodeId, adjustments, defaults } = props;
   const patch = (fn: (list: Adjustment[]) => Adjustment[], coalesce?: string): void => {
     store.update((d) => updateObject(d, nodeId, (s: ObjectInstance) => ({ ...s, adjustments: fn(s.adjustments ?? []) })), coalesce ? { coalesce: `${coalesce}:${nodeId}` } : undefined);
     if (!coalesce) store.endGesture();
@@ -48,10 +50,29 @@ export function AdjustmentList(props: {
           {adjustments.map((a) => {
             const kind = adjustmentKind(a.kind);
             const visible = a.visible !== false;
+            const overridden = a.params !== undefined;
             return (
               <div key={a.id} className={cx("border border-border p-1.5", !visible && "opacity-50")}>
                 <div className="mb-1 flex items-center gap-2">
                   <span className="flex-1 truncate text-base text-fg">{kind?.name ?? a.kind}</span>
+                  {/* off = follow the project's Adjustment Defaults LIVE; on = keep own values in the .lmb */}
+                  <span className="text-sm text-fg-mid">override</span>
+                  <FormToggle
+                    ariaLabel="Override project defaults"
+                    value={overridden}
+                    onChange={(on) =>
+                      patchOne(a.id, (x) => {
+                        if (on) {
+                          const params = kind
+                            ? Object.fromEntries(Object.keys(kind.params).map((k) => [k, adjustmentParam(x, kind, defaults, k)]))
+                            : {};
+                          return { ...x, params };
+                        }
+                        const { params: _drop, ...rest } = x;
+                        return rest;
+                      })
+                    }
+                  />
                   <IconButton
                     tooltip
                     label={visible ? "Bypass this adjustment" : "Enable this adjustment"}
@@ -84,16 +105,18 @@ export function AdjustmentList(props: {
                           <span key={`${a.id}:${key}:l`} className="text-sm text-fg-mid">
                             {humanizeLabel(key).toLowerCase()}
                           </span>
-                          <SpinSlider
-                            key={`${a.id}:${key}`}
-                            value={typeof a.params[key] === "number" ? a.params[key]! : spec.default}
-                            min={spec.min}
-                            max={spec.max}
-                            integer={!spec.float}
-                            hideSlider={spec.min === undefined || spec.max === undefined}
-                            onChange={(v) => patchOne(a.id, (x) => ({ ...x, params: { ...x.params, [key]: v } }), `adj-${key}`)}
-                            onCommit={() => store.endGesture()}
-                          />
+                          <div key={`${a.id}:${key}`} className={cx(!overridden && "pointer-events-none opacity-60")}>
+                            <SpinSlider
+                              value={adjustmentParam(a, kind, defaults, key)}
+                              min={spec.min}
+                              max={spec.max}
+                              integer={!spec.float}
+                              hideSlider={spec.min === undefined || spec.max === undefined}
+                              readOnly={!overridden}
+                              onChange={(v) => patchOne(a.id, (x) => ({ ...x, params: { ...x.params, [key]: v } }), `adj-${key}`)}
+                              onCommit={() => store.endGesture()}
+                            />
+                          </div>
                         </>
                       ))
                     : null}
