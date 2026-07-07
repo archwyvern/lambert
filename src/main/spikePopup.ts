@@ -90,14 +90,16 @@ export function autoRunPopupSpike(parent: BrowserWindow): void {
     });
   }
   parent.webContents.once("did-finish-load", () => {
+    // 6s grace: drag the parent into a screen corner first — the popup's landing spot then tells
+    // us whether the compositor centers transients on the PARENT or on the SCREEN.
     setTimeout(() => {
       void parent.webContents.executeJavaScript(
         `window.lambertHost.spikePopupOpen({ dx: 300, dy: 200, w: 320, h: 240, payload: "hello-from-query" })`,
       );
-    }, 1500);
+    }, 6000);
     setTimeout(() => {
       console.log("[spike] auto-run complete, exiting");
       parent.destroy();
-    }, 9000);
+    }, 16000);
   });
 }
