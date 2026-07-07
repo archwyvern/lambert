@@ -274,6 +274,10 @@ app.whenReady().then(() => {
   ipcMain.handle("session:save", async (_e, json: string) => {
     await atomicWrite(sessionPath, json);
   });
+  // "Open Containing Folder" (tab context menu): highlight the file in the OS file manager
+  ipcMain.handle("path:reveal", (_e, p: string) => {
+    shell.showItemInFolder(p);
+  });
 
   // the renderer pulls any OS-requested project (double-clicked project.lambert) once, on mount
   ipcMain.handle("project:take-pending-open", () => {
@@ -424,6 +428,7 @@ app.whenReady().then(() => {
             { type: "separator" },
             item("Save", "save"),
             item("Save All", "save-all"),
+            item("Close Tab", "close-tab"),
             { type: "separator" },
             item("Export NX", "export-nx"),
             item("Export Height Map", "export-height"),

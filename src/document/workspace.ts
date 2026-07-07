@@ -19,6 +19,8 @@ export interface Tab {
   docPath: string | null;
   store: DocumentStore;
   diffuse: { bytes: Uint8Array; unresolved?: boolean };
+  /** Pinned tab (compact strip rendering, survives Close Others/Right/Saved; session-persisted). */
+  pinned?: boolean;
 }
 
 /**

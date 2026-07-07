@@ -38,6 +38,7 @@ export function buildMenuModel(opts: {
         { separator: true },
         { label: "Save", shortcut: keys("save"), enabled: hasActive, run: () => action("save") },
         { label: "Save All", shortcut: keys("save-all"), enabled: hasWorkspace, run: () => action("save-all") },
+        { label: "Close Tab", shortcut: keys("close-tab"), enabled: hasActive, run: () => action("close-tab") },
         { separator: true },
         { label: "Export NX", shortcut: keys("export-nx"), enabled: hasActive, run: () => action("export-nx") },
         { label: "Export Height Map", shortcut: keys("export-height"), enabled: hasActive, run: () => action("export-height") },
