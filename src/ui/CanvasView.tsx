@@ -108,6 +108,8 @@ export function CanvasView(props: {
   normalDirs: NormalDirs;
   /** Project default params for inheriting adjustment entries (project.lambert). */
   adjustmentDefaults?: AdjustmentDefaults;
+  /** The effective (rebindable) delete chord, for the mask gizmo's anchor-delete. */
+  deleteKeys: string | null;
   /** The doc overrides the project convention (the tint widget labels itself accordingly). */
   overridesNormalDirs: boolean;
   /** Open the Settings dialog at a screen (the tint widget links to the normal-dirs screens). */
@@ -133,7 +135,7 @@ export function CanvasView(props: {
   const { store, state, view, tool, diffuseBytes, selVerts, setSelVerts, onLightChange, onEnergyChange, canvas3dRef, orbit3d, normalDirs, swapped } =
     props;
   const { tabId, savedViewport, onViewportChange, setTool, snap, rulers, resolvePaletteObject, maskFocus } = props;
-  const { overridesNormalDirs, openSettings, pixelGrid, normalAlphaGate, boxMode, boxLitViewport, adjustmentDefaults } = props;
+  const { overridesNormalDirs, openSettings, pixelGrid, normalAlphaGate, boxMode, boxLitViewport, adjustmentDefaults, deleteKeys } = props;
   const inset = rulers ? RULER : 0;
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -983,6 +985,7 @@ export function CanvasView(props: {
         setPlacing={setPlacing}
         snap={snap}
         maskFocus={maskFocus}
+        deleteKeys={deleteKeys}
       />
       {/* click-to-place ghost: dashed tether from the anchor to the cursor + a hollow dot */}
       {(() => {

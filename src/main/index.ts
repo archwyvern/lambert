@@ -444,6 +444,7 @@ app.whenReady().then(() => {
             { type: "separator" },
             item("Duplicate", "duplicate"),
             { label: "Delete", click: send("delete") }, // no accelerator: Del must stay safe in inputs
+            { label: "Rename", click: send("rename") }, // no accelerator: F2 fires via the window keymap
             { type: "separator" },
             item("Group", "group"),
             item("Ungroup", "ungroup"),

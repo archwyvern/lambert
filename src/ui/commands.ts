@@ -49,6 +49,7 @@ export const COMMANDS: CommandSpec[] = [
   { id: "duplicate", label: "Duplicate", category: "Edit", keys: "Ctrl+D", scope: "global", enable: "sel" },
   { id: "save-preset", label: "Save as Preset", category: "Edit", keys: null, scope: "global", enable: "sel" },
   { id: "delete", label: "Delete", category: "Edit", keys: "Delete", scope: "editor", enable: "sel" },
+  { id: "rename", label: "Rename", category: "Edit", keys: "F2", scope: "editor", enable: "sel" },
   { id: "group", label: "Group", category: "Edit", keys: "Ctrl+G", scope: "global", enable: "sel" },
   { id: "ungroup", label: "Ungroup", category: "Edit", keys: "Ctrl+Shift+G", scope: "global", enable: "sel" },
 

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { matchEvent, parseChord } from "@carapace/shell";
 import { Vector2 } from "@carapace/primitives";
 import type { DocumentStore } from "../document/store";
 import type { LambertDoc } from "../document/schema";
@@ -46,8 +47,10 @@ export function MaskGizmo(props: {
   store: DocumentStore;
   /** Inspector "select this mask": seq bumps per click so re-selecting the same mask re-applies. */
   focus: { maskId: string; seq: number } | null;
+  /** The effective (rebindable) delete chord — this gizmo owns it while a mask anchor is selected. */
+  deleteKeys: string | null;
 }): React.JSX.Element {
-  const { nodeId, masks, doc, viewport, snap, store, focus } = props;
+  const { nodeId, masks, doc, viewport, snap, store, focus, deleteKeys } = props;
   const [maskSel, setMaskSel] = useState<{ mi: number; anchors: number[] } | null>(null);
   // apply an inspector mask-selection: pick the mask and select ALL its anchors
   useEffect(() => {
@@ -83,7 +86,9 @@ export function MaskGizmo(props: {
   useEffect(() => {
     if (!maskSel) return;
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      // the rebindable delete chord (single-step; effective binding from App) + the fixed Backspace alias
+      const chord = deleteKeys ? parseChord(deleteKeys) : null;
+      if (!(chord && matchEvent(chord, e)) && e.key !== "Backspace") return;
       const m = masks[maskSel.mi];
       if (m && m.anchors.length - maskSel.anchors.length >= 3) {
         const drop = new Set(maskSel.anchors);
@@ -103,7 +108,7 @@ export function MaskGizmo(props: {
       window.removeEventListener("keydown", onKey, true);
       window.removeEventListener("pointerdown", onDown);
     };
-  }, [maskSel, masks, nodeId]);
+  }, [maskSel, masks, nodeId, deleteKeys]);
 
   // flip a mask's follow flag, converting its anchors through the node's WORLD frame so it doesn't jump
   const toggleFollow = (m: Mask): Mask => setMaskSpace(m, !m.follow, worldAffine, invWorld);
