@@ -9,6 +9,8 @@ interface LaunchScreenProps {
   onRemoveRecent: (path: string) => void;
   onNew: () => void;
   onOpen: () => void;
+  /** Clone Remote Project (WebDAV) — opens the clone dialog. */
+  onRemote: () => void;
 }
 
 /**
@@ -17,7 +19,7 @@ interface LaunchScreenProps {
  * actions, with the one-click recent-projects list filling the space directly beneath it.
  */
 export function LaunchScreen(props: LaunchScreenProps): React.JSX.Element {
-  const { recents, onOpenRecent, onRemoveRecent, onNew, onOpen } = props;
+  const { recents, onOpenRecent, onRemoveRecent, onNew, onOpen, onRemote } = props;
   return (
     <div className="flex h-full w-full overflow-hidden bg-[var(--color-viewport-bg)]">
       <aside className="flex w-[260px] shrink-0 flex-col border-r border-border bg-bg p-4">
@@ -40,6 +42,9 @@ export function LaunchScreen(props: LaunchScreenProps): React.JSX.Element {
           </Button>
           <Button variant="ghost" onClick={onOpen}>
             Open Project…
+          </Button>
+          <Button variant="ghost" onClick={onRemote}>
+            Clone Remote…
           </Button>
         </div>
 
