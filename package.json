@@ -17,6 +17,7 @@
     "selftest": "electron-vite build && electron . --selftest",
     "test": "vitest run",
     "test:watch": "vitest",
+    "dav:serve": "tsx tests/webdav/serve.ts",
     "typecheck": "tsc --noEmit",
     "eval": "tsx src/cli/evaluate.ts",
     "gen-goldens": "tsx tests/golden/gen.ts",
