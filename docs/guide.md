@@ -54,7 +54,9 @@ raw field instead. Arrows nudge (Shift ×10), Esc cancels a drag in progress (re
 deselects. The `?  Shortcuts` pill (bottom-right) shows the full contextual list.
 
 Every menu action is a **command**: Ctrl+Shift+P opens the palette (fuzzy search, Enter runs),
-and Preferences ▸ Shortcuts rebinds any of them (click a row, press the new chord).
+and Preferences ▸ Shortcuts rebinds any of them — including widget shortcuts like the tree's
+F2/Delete, and two-step chords (press a second combination while recording to bind e.g.
+Ctrl+K U; the status bar shows the pending prefix while a chord waits for its second key).
 
 Edit: Ctrl+C/V copies objects (works across tabs), Ctrl+D duplicates, Ctrl+G groups,
 Ctrl+Shift+G ungroups, Delete removes. The **Arrange** menu aligns (left/center/right,
