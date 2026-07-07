@@ -24,8 +24,8 @@ export interface FixtureOptions {
 export interface FixtureHandle {
   url: string;
   close(): Promise<void>;
-  /** The next request (any verb) returns this status with an empty body. */
-  failNext(status: number): void;
+  /** The next request returns this status with an empty body; `method` scopes it to one verb. */
+  failNext(status: number, method?: string): void;
   /** While on, PUT responses omit the ETag header (client must fall back to PROPFIND). */
   omitPutEtag(on: boolean): void;
 }
@@ -64,7 +64,7 @@ function readBody(req: IncomingMessage): Promise<Buffer> {
 }
 
 export async function startFixture(opts: FixtureOptions): Promise<FixtureHandle> {
-  let failStatus: number | null = null;
+  let failStatus: { status: number; method?: string } | null = null;
   let noPutEtag = false;
 
   const etagOf = async (path: string): Promise<string> => {
@@ -88,8 +88,8 @@ export async function startFixture(opts: FixtureOptions): Promise<FixtureHandle>
       res.writeHead(401, { "WWW-Authenticate": 'Basic realm="dav"' });
       return void res.end();
     }
-    if (failStatus !== null) {
-      const status = failStatus;
+    if (failStatus !== null && (!failStatus.method || failStatus.method === req.method)) {
+      const status = failStatus.status;
       failStatus = null;
       res.writeHead(status);
       return void res.end();
@@ -213,7 +213,7 @@ export async function startFixture(opts: FixtureOptions): Promise<FixtureHandle>
   return {
     url: `http://127.0.0.1:${addr.port}/`,
     close: () => new Promise((resolve, reject) => server.close((e) => (e ? reject(e) : resolve()))),
-    failNext: (status) => { failStatus = status; },
+    failNext: (status, method) => { failStatus = { status, method }; },
     omitPutEtag: (on) => { noPutEtag = on; },
   };
 }
