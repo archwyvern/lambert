@@ -1,4 +1,4 @@
-import { BrowserWindow, MessageChannelMain, ipcMain } from "electron";
+import { BrowserWindow, Menu, MessageChannelMain, ipcMain } from "electron";
 import path from "node:path";
 
 /**
@@ -10,6 +10,9 @@ import path from "node:path";
  *  4. data passing: query payload in, ipc out, and a DIRECT renderer<->renderer MessagePort.
  * Run: `electron . --spike` (after a build). Every finding logs as [spike] lines on stdout.
  */
+/** autoRun chains its phase 2 off the native menu's dismissal. */
+let onMenuDismissed: (() => void) | null = null;
+
 export function registerPopupSpike(getParent: () => BrowserWindow | null): void {
   let popup: BrowserWindow | null = null;
 
@@ -69,6 +72,36 @@ export function registerPopupSpike(getParent: () => BrowserWindow | null): void 
     return win.getBounds();
   });
 
+  // native Menu.popup — Chromium renders these as xdg_popup, the ONE positioned surface Wayland
+  // allows. A representative feature spread so the look can be judged against carapace's menus.
+  ipcMain.handle("spike:native-menu", (_e, at: { x: number; y: number }) => {
+    const parent = getParent();
+    if (!parent) return;
+    const menu = Menu.buildFromTemplate([
+      { label: "Close", accelerator: "Ctrl+W", click: () => log("native menu click", { item: "close" }) },
+      { label: "Close Others", accelerator: "Ctrl+Alt+P", enabled: false },
+      { type: "separator" },
+      { label: "Pinned", type: "checkbox", checked: true, click: () => log("native menu click", { item: "pinned" }) },
+      { label: "View Mode", submenu: [
+        { label: "Diffuse", type: "radio", checked: false },
+        { label: "Normal", type: "radio", checked: true },
+        { label: "Coverage", type: "radio", checked: false },
+      ] },
+      { type: "separator" },
+      { label: "Reveal in Explorer View", click: () => log("native menu click", { item: "reveal" }) },
+    ]);
+    log("native menu popup at", at);
+    menu.popup({
+      window: parent,
+      x: at.x,
+      y: at.y,
+      callback: () => {
+        log("native menu closed", {});
+        onMenuDismissed?.();
+      },
+    });
+  });
+
   ipcMain.handle("spike:popup-close", () => popup?.close());
   // classic via-main relay, both directions (the boring path that always works)
   ipcMain.on("spike:relay-to-parent", (_e, data: unknown) => {
@@ -90,16 +123,25 @@ export function autoRunPopupSpike(parent: BrowserWindow): void {
     });
   }
   parent.webContents.once("did-finish-load", () => {
-    // 6s grace: drag the parent into a screen corner first — the popup's landing spot then tells
-    // us whether the compositor centers transients on the PARENT or on the SCREEN.
+    // phase 1 (2s): native Menu.popup at (300,200) window-relative — judge position + LOOK.
+    // It stays up until dismissed (click an item / click away), then phase 2 (transient window)
+    // runs 2s later; everything tears down 10s after that.
     setTimeout(() => {
-      void parent.webContents.executeJavaScript(
-        `window.lambertHost.spikePopupOpen({ dx: 300, dy: 200, w: 320, h: 240, payload: "hello-from-query" })`,
-      );
-    }, 6000);
-    setTimeout(() => {
-      console.log("[spike] auto-run complete, exiting");
-      parent.destroy();
-    }, 16000);
+      void parent.webContents.executeJavaScript(`window.lambertHost.spikeNativeMenu({ x: 300, y: 200 })`);
+    }, 2000);
+    let phase2 = false;
+    onMenuDismissed = () => {
+      if (phase2) return;
+      phase2 = true;
+      setTimeout(() => {
+        void parent.webContents.executeJavaScript(
+          `window.lambertHost.spikePopupOpen({ dx: 300, dy: 200, w: 320, h: 240, payload: "hello-from-query" })`,
+        );
+      }, 2000);
+      setTimeout(() => {
+        console.log("[spike] auto-run complete, exiting");
+        parent.destroy();
+      }, 12000);
+    };
   });
 }
