@@ -78,7 +78,8 @@ Any server that implements this subset works (Nextcloud and `rclone serve webdav
 | `GET <base>/<project>/<file>` | file bytes |
 | `PUT <base>/<project>/<file>` | create/replace; honors `If-Match` and `If-None-Match: *` (412 on failure); SHOULD return `ETag` |
 
-Auth is HTTP Basic. Etags are treated as opaque validators — any stable content validator works.
+Auth is per-server: HTTP Basic (username + password) or a fixed API-key header you name (for
+key-gated servers). Etags are treated as opaque validators — any stable content validator works.
 For development, `pnpm dav:serve <dir>` serves a directory (child folders = projects) with the
 reference implementation of exactly this subset, and
 `electron . --capture out.png --query "davcheck=<url>&dir=<empty-dir>"` runs an end-to-end

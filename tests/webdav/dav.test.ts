@@ -24,7 +24,7 @@ function seed(): string {
 }
 
 function clientFor(fx: FixtureHandle, password = "p"): DavClient {
-  return new DavClient(fetchTransport, fx.url, { username: "u", password });
+  return new DavClient(fetchTransport, fx.url, { Authorization: `Basic ${btoa(`u:${password}`)}` });
 }
 
 describe("DavClient against sha256 fixture", () => {
@@ -86,6 +86,23 @@ describe("DavClient against sha256 fixture", () => {
     const err = await clientFor(fx, "wrong").listProjects().then(() => null, (e: unknown) => e);
     expect(err).toBeInstanceOf(DavError);
     expect((err as DavError).status).toBe(401);
+  });
+
+  it("authenticates via a custom API-key header instead of Basic", async () => {
+    const keyed = await startFixture({
+      root: seed(), username: "u", password: "p",
+      apiHeader: { name: "X-Skyrat-Api-Key", value: "sekrit" },
+      etagMode: "sha256",
+    });
+    try {
+      const good = new DavClient(fetchTransport, keyed.url, { "X-Skyrat-Api-Key": "sekrit" });
+      expect((await good.listProjects()).sort()).toEqual(["empty", "proj one"]);
+      const bad = new DavClient(fetchTransport, keyed.url, { "X-Skyrat-Api-Key": "wrong" });
+      const err = await bad.listProjects().then(() => null, (e: unknown) => e);
+      expect((err as DavError).status).toBe(401);
+    } finally {
+      await keyed.close();
+    }
   });
 
   it("server failures surface as DavError with the status", async () => {

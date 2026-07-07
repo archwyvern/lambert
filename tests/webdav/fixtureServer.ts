@@ -16,6 +16,9 @@ export interface FixtureOptions {
   root: string;
   username: string;
   password: string;
+  /** When set, a request carrying this exact header ALSO authenticates (API-key mode) —
+   *  mirrors servers like the skyrat facade that gate on a custom header instead of Basic. */
+  apiHeader?: { name: string; value: string };
   etagMode: "sha256" | "opaque";
   /** Fixed port for the standalone serve script; tests omit it (ephemeral). */
   port?: number;
@@ -84,7 +87,9 @@ export async function startFixture(opts: FixtureOptions): Promise<FixtureHandle>
 
   const handler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const expected = `Basic ${Buffer.from(`${opts.username}:${opts.password}`).toString("base64")}`;
-    if (req.headers.authorization !== expected) {
+    const basicOk = req.headers.authorization === expected;
+    const headerOk = opts.apiHeader !== undefined && req.headers[opts.apiHeader.name.toLowerCase()] === opts.apiHeader.value;
+    if (!basicOk && !headerOk) {
       res.writeHead(401, { "WWW-Authenticate": 'Basic realm="dav"' });
       return void res.end();
     }

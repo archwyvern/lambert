@@ -47,7 +47,16 @@ export async function runDavCheck(): Promise<void> {
   };
 
   const host = getHost();
-  const server = { id: "davcheck", name: "davcheck", baseUrl, username: params.get("user") ?? "dev", password: params.get("pass") ?? "dev" };
+  // &header=Name&key=value selects API-key auth; default is Basic dev/dev (the fixture's default)
+  const headerName = params.get("header");
+  const server = {
+    id: "davcheck",
+    name: "davcheck",
+    baseUrl,
+    auth: headerName
+      ? ({ kind: "header", header: headerName, key: params.get("key") ?? "" } as const)
+      : ({ kind: "basic", username: params.get("user") ?? "dev", password: params.get("pass") ?? "dev" } as const),
+  };
   const dav = makeDavClient(davTransport(host), server);
 
   try {

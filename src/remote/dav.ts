@@ -97,21 +97,21 @@ function parseMultistatus(xml: string): ParsedResponse[] {
 
 export class DavClient {
   private readonly base: string;
-  private readonly authorization: string;
 
+  /** `authHeaders` are sent on every request — Basic, an API-key header, whatever the server
+   *  config produced (see servers.ts). The client itself is auth-agnostic. */
   constructor(
     private readonly transport: DavTransport,
     baseUrl: string,
-    auth: { username: string; password: string },
+    private readonly authHeaders: Record<string, string>,
   ) {
     this.base = baseUrl.replace(/\/+$/, "");
-    this.authorization = `Basic ${btoa(`${auth.username}:${auth.password}`)}`;
   }
 
   private async send(op: string, target: string, req: Omit<DavRequest, "headers"> & { headers?: Record<string, string> }): Promise<DavResponse> {
     const res = await this.transport({
       ...req,
-      headers: { Authorization: this.authorization, ...req.headers },
+      headers: { ...this.authHeaders, ...req.headers },
     });
     if (res.status === 207 || (res.status >= 200 && res.status < 300)) return res;
     throw new DavError(res.status, op, target);
