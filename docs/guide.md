@@ -24,6 +24,11 @@ normal-channel directions, saved presets). Every image you author gets a `.lmb` 
 to it (JSON — friendly to git). The Explorer (left panel, below Layers — drag the divider to
 resize) lists the project's documents; double-click to open. Sessions restore your open tabs.
 
+Right-click a tab for the tab verbs: Close (**Ctrl+W**), Close Others (**Ctrl+Alt+P**), Close
+to the Right, Close Saved, Close All (**Ctrl+Alt+W**), plus Copy Path / Copy Relative Path /
+Open Containing Folder / Reveal in Explorer View for saved documents, and **Pin** — a pinned
+tab renders compact, sorts first, and survives every batch close except Close All.
+
 The diffuse is referenced by URI (`file://` or `http(s)://`) and is never copied; use
 **File ▸ Reload Diffuse** after editing it elsewhere.
 
