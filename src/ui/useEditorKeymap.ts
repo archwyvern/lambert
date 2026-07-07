@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { matchEvent, parseChord } from "@carapace/shell";
+import { createChordMatcher, parseChord } from "@carapace/shell";
 import type { Chord } from "@carapace/shell";
 import { removeObject, removeObjectVertices, updateObject } from "../document/docOps";
 import { findNode, updateNode } from "../document/layerOps";
@@ -20,10 +20,20 @@ export interface EditorBinding {
 
 /**
  * The window-level editor keymap. Editor-scope commands (tools, view cycle/swap, copy/paste,
- * delete, and anything the user binds) match through the REBINDABLE chord list (bindingsRef,
- * derived from the command model + user overrides); what stays hardcoded is the modal, non-command
- * layer: Ctrl+Shift+Z as a redo alias, Space swallow (hold-to-pan), Esc (drag-cancel/deselect),
- * Backspace as a Delete alias, and arrow nudges (coalesced into one undo entry per burst).
+ * delete, rename, and anything the user binds) match through the REBINDABLE chord list
+ * (bindingsRef, derived from the command model + user overrides), including two-step chords via
+ * the carapace chord matcher.
+ *
+ * DOCUMENTED CARVE-OUTS — the keys that deliberately stay hardcoded, because they're modal,
+ * gestural, or focus-scoped rather than commands:
+ *  - Esc: drag-cancel / deselect (and chord-prefix cancel, via the matcher);
+ *  - Space: hold-to-pan modifier (swallowed here, tracked by CanvasView);
+ *  - arrow keys: nudge (coalesced per burst) — widget navigation elsewhere;
+ *  - Ctrl+Shift+Z: fixed redo alias alongside the rebindable Ctrl+Y;
+ *  - Backspace: fixed delete alias alongside the rebindable Delete;
+ *  - dialog/input-local keys (dialog Enter, rename inputs, LightPad arrows, pen-draft Esc/Enter)
+ *    and carapace widget navigation (arrows/Home/End/Enter/Ctrl+A) — those handlers preventDefault
+ *    and this keymap yields to defaultPrevented.
  * Everything comes in through refs/setState so the single mount-time listener never goes stale.
  */
 export function useEditorKeymap(opts: {
@@ -37,8 +47,10 @@ export function useEditorKeymap(opts: {
   setSelVerts: (v: number[]) => void;
   setTool: (t: ToolMode) => void;
   setActiveView: (fn: (v: ViewState) => ViewState) => void;
+  /** A two-step chord prefix is pending (string) or resolved (null) — drives the status hint. */
+  onChordPending?: (prefix: string | null) => void;
 }): void {
-  const { workspaceRef, runMenuActionRef, bindingsRef, selVertsRef, nudgeEndTimer, setSwapped, setSelVerts, setTool, setActiveView } = opts;
+  const { workspaceRef, runMenuActionRef, bindingsRef, selVertsRef, nudgeEndTimer, setSwapped, setSelVerts, setTool, setActiveView, onChordPending } = opts;
   useEffect(() => {
     // the modal Delete: selected anchors -> selected vertices -> selected layers
     const deleteSelection = (): void => {
@@ -85,6 +97,15 @@ export function useEditorKeymap(opts: {
       }
     };
 
+    // two-step chord state (Ctrl+K U style): while a prefix is pending, the NEXT keystroke belongs
+    // to the matcher — before any fixed handling (Esc must cancel the chord, not deselect).
+    const matcher = createChordMatcher();
+    let chordPending = false;
+    const resolvePending = (): void => {
+      chordPending = false;
+      onChordPending?.(null);
+    };
+
     const onKey = (e: KeyboardEvent): void => {
       const tgt = e.target;
       if (
@@ -94,6 +115,16 @@ export function useEditorKeymap(opts: {
         (tgt instanceof HTMLElement && tgt.isContentEditable)
       )
         return;
+      // a focused widget (carapace tree, mask gizmo) that consumed the key wins — never double-fire
+      if (e.defaultPrevented) return;
+      if (chordPending) {
+        const m = matcher.feed(bindingsRef.current, e);
+        if (m.type === "none") return; // bare modifier — the prefix stays pending
+        resolvePending();
+        e.preventDefault();
+        if (m.type === "run") runEditorCommand(m.id);
+        return; // cancel: swallowed, nothing dispatched
+      }
       // Ctrl/Cmd+Shift+Z = redo (Photoshop-style), a fixed alias alongside the rebindable Ctrl+Y.
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "z") {
         e.preventDefault();
@@ -130,13 +161,18 @@ export function useEditorKeymap(opts: {
         deleteSelection();
         return;
       }
-      // rebindable editor-scope commands
-      for (const b of bindingsRef.current) {
-        if (matchEvent(b.chord, e)) {
-          e.preventDefault();
-          runEditorCommand(b.id);
-          return;
-        }
+      // rebindable editor-scope commands (single-step runs; a chord prefix goes pending)
+      const m = matcher.feed(bindingsRef.current, e);
+      if (m.type === "run") {
+        e.preventDefault();
+        runEditorCommand(m.id);
+        return;
+      }
+      if (m.type === "pending") {
+        e.preventDefault();
+        chordPending = true;
+        onChordPending?.(m.prefix);
+        return;
       }
       const id = store.state.selectedId;
       if (e.key.startsWith("Arrow") && id && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -190,8 +226,16 @@ export function useEditorKeymap(opts: {
         nudgeEndTimer.current = setTimeout(() => store.endGesture(), 500);
       }
     };
+    const onBlur = (): void => {
+      matcher.reset();
+      resolvePending();
+    };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("blur", onBlur);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 }
