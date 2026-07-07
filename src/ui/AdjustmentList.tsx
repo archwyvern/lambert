@@ -55,24 +55,6 @@ export function AdjustmentList(props: {
               <div key={a.id} className={cx("border border-border p-1.5", !visible && "opacity-50")}>
                 <div className="mb-1 flex items-center gap-2">
                   <span className="flex-1 truncate text-base text-fg">{kind?.name ?? a.kind}</span>
-                  {/* off = follow the project's Adjustment Defaults LIVE; on = keep own values in the .lmb */}
-                  <span className="text-sm text-fg-mid">override</span>
-                  <FormToggle
-                    ariaLabel="Override project defaults"
-                    value={overridden}
-                    onChange={(on) =>
-                      patchOne(a.id, (x) => {
-                        if (on) {
-                          const params = kind
-                            ? Object.fromEntries(Object.keys(kind.params).map((k) => [k, adjustmentParam(x, kind, defaults, k)]))
-                            : {};
-                          return { ...x, params };
-                        }
-                        const { params: _drop, ...rest } = x;
-                        return rest;
-                      })
-                    }
-                  />
                   <IconButton
                     tooltip
                     label={visible ? "Bypass this adjustment" : "Enable this adjustment"}
@@ -88,6 +70,26 @@ export function AdjustmentList(props: {
                   />
                 </div>
                 <div className="grid grid-cols-[5.5rem_1fr] items-center gap-x-2 gap-y-1">
+                  {/* off = follow the project's Adjustment Defaults LIVE; on = keep own values in the .lmb */}
+                  <span className="text-sm text-fg-mid">override</span>
+                  <div className="justify-self-start">
+                    <FormToggle
+                      ariaLabel="Override project defaults"
+                      value={overridden}
+                      onChange={(on) =>
+                        patchOne(a.id, (x) => {
+                          if (on) {
+                            const params = kind
+                              ? Object.fromEntries(Object.keys(kind.params).map((k) => [k, adjustmentParam(x, kind, defaults, k)]))
+                              : {};
+                            return { ...x, params };
+                          }
+                          const { params: _drop, ...rest } = x;
+                          return rest;
+                        })
+                      }
+                    />
+                  </div>
                   <span className="text-sm text-fg-mid">blend</span>
                   <SpinSlider
                     value={Math.round(a.strength * 100)}

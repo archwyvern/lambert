@@ -101,9 +101,9 @@ dark-high). Each entry has a blend slider and a bypass eye. See the
 Three dialogs under the File menu, each searchable and instant-apply (the canvas peeks around
 the modal): **Preferences** (**Ctrl+,**) holds the per-machine application settings — the
 shortcut editor and the update check; **Project Settings** holds the normal-channel directions
-(a visual ball editor, with rotation presets for engine conventions) and the default output
-format, stored in `project.lambert`; **Document Settings** overrides both per-`.lmb`, plus the
-canvas origin.
+(a visual ball editor, with rotation presets for engine conventions), the default output
+format, and per-kind adjustment defaults, stored in `project.lambert`; **Document Settings**
+overrides the first two per-`.lmb`, plus the canvas origin.
 
 ## Presets
 
