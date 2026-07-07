@@ -45,7 +45,9 @@ smooth at any zoom.
 **Adjustment** (Special palette) is a *filter* layer: a closed region (full-canvas by default —
 reshape it with the vertex tool, holes supported) hosting an ordered list of height transforms
 applied to everything below it. Every entry has a **blend** slider (mix between untouched and
-transformed). Kinds:
+transformed). New entries follow the project's per-kind defaults live (Project Settings ▸
+Adjustment Defaults); flip an entry's **override** switch to keep its own values in the `.lmb`
+instead. Kinds:
 
 | Kind | What it does |
 |---|---|
