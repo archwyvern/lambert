@@ -1,5 +1,6 @@
 import { FormToggle, humanizeLabel, Segmented, SettingsModal, ShortcutEditor, SpinSlider } from "@carapace/shell";
 import type { SettingsScreen, ShortcutRow } from "@carapace/shell";
+import { allComponentBindings, effectiveComponentKeys } from "@carapace/shell";
 import { ADJUSTMENT_KINDS } from "../field/adjustments";
 import type { DocumentStore, EditorState } from "../document/store";
 import { BindingOverrides, COMMANDS, effectiveKeys } from "./commands";
@@ -112,14 +113,24 @@ export function PreferencesDialog(props: {
 }): React.JSX.Element {
   const { bindingOverrides, onBindingOverrides, autoUpdateCheck, onAutoUpdateCheck, initialScreen, onScreenChange, onClose } = props;
 
-  const shortcutRows: ShortcutRow[] = COMMANDS.map((c) => ({
-    id: c.id,
-    command: `${c.category}: ${c.label.replace(/…$/, "")}`,
-    keys: effectiveKeys(c, bindingOverrides),
-    when: c.scope === "editor" ? "editor" : undefined,
-    source: c.id in bindingOverrides ? "user" : "default",
-    mouse: c.mouse,
-  }));
+  const shortcutRows: ShortcutRow[] = [
+    ...COMMANDS.map((c) => ({
+      id: c.id,
+      command: `${c.category}: ${c.label.replace(/…$/, "")}`,
+      keys: effectiveKeys(c, bindingOverrides),
+      when: c.scope === "editor" ? ("editor" as const) : undefined,
+      source: (c.id in bindingOverrides ? "user" : "default") as ShortcutRow["source"],
+      mouse: c.mouse,
+    })),
+    // carapace component verbs (tree rename/delete, ...) — same override store, dotted ids
+    ...allComponentBindings().map((b) => ({
+      id: b.id,
+      command: `Component: ${b.label}`,
+      keys: effectiveComponentKeys(b.id, { overrides: bindingOverrides }),
+      when: b.when,
+      source: (b.id in bindingOverrides ? "user" : "default") as ShortcutRow["source"],
+    })),
+  ];
 
   const screens: SettingsScreen[] = [
     {
@@ -137,7 +148,7 @@ export function PreferencesDialog(props: {
             rows={shortcutRows}
             onChange={(id, keys) =>
               onBindingOverrides((prev) => {
-                const def = COMMANDS.find((c) => c.id === id)?.keys ?? null;
+                const def = COMMANDS.find((c) => c.id === id)?.keys ?? allComponentBindings().find((b) => b.id === id)?.keys ?? null;
                 if (keys === def) {
                   // rebinding back to the default = no override
                   const { [id]: _drop, ...rest } = prev;
