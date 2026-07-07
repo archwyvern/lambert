@@ -34,20 +34,20 @@ The diffuse is referenced by URI (`file://` or `http(s)://`) and is never copied
 origin. Form variants (cone, crater, capsule, frustum…) are *parameters*: place the base type
 and switch its `profile`/`cap` in the Inspector.
 
-Tools (Godot-style):
+Tools (Photoshop-style keys):
 
 | Key | Tool | Notes |
 |---|---|---|
-| Q | Select | full gizmo: move body, corner/edge scale, rotate arm. Alt-drag duplicates; Shift-click multi-selects; empty drag box-selects; empty click deselects |
-| W / E / R | Move / Rotate / Scale | drag anywhere; Shift = axis-lock / 15° snap / uniform |
-| T | Vertex | edit control points / Bézier anchors; drag empty = vertex box-select |
+| V | Select | full gizmo: move body, corner/edge scale, rotate arm. Alt-drag duplicates; Shift-click multi-selects; empty drag box-selects; empty click deselects |
+| W / R / S | Move / Rotate / Scale | drag anywhere; Shift = axis-lock / 15° snap / uniform |
+| A | Vertex | edit control points / Bézier anchors; drag empty = vertex box-select |
 | P | Mask pen | draw a trim mask on the selected object (see Masks) |
-| M | Measure | drag between two points: length, Δx/Δy, angle |
+| I | Measure | drag between two points: length, Δx/Δy, angle |
 
-View: wheel zooms, middle-drag or **hold Space + drag** pans, **V** cycles
+View: wheel zooms, middle-drag or **hold Space + drag** pans, **F** cycles
 Diffuse/Normal/Lit/Coverage (coverage paints red wherever the diffuse is opaque but no shape has
 touched — the "what haven't I covered yet" audit), **X** swaps the 2D/3D views, Ctrl+0 fit,
-Ctrl+Shift+0 fit selection, Ctrl+1 100%. Past ~800% zoom a faint pixel grid fades in (View menu
+Ctrl+Shift+0 fit selection, Ctrl+1 100%, Ctrl+= / Ctrl+- zoom in/out. Past ~800% zoom a faint pixel grid fades in (View menu
 toggles it). In normal view, the encode is hidden where the diffuse is transparent by default —
 matching what the export ships; the checker-square toggle next to the opacity field shows the
 raw field instead. Arrows nudge (Shift ×10), Esc cancels a drag in progress (reverting it) or
@@ -58,7 +58,8 @@ and Preferences ▸ Shortcuts rebinds any of them — including widget shortcuts
 F2/Delete, and two-step chords (press a second combination while recording to bind e.g.
 Ctrl+K U; the status bar shows the pending prefix while a chord waits for its second key).
 
-Edit: Ctrl+C/V copies objects (works across tabs), Ctrl+D duplicates, Ctrl+G groups,
+Edit: Ctrl+C/V copies objects (works across tabs), Ctrl+J duplicates, Ctrl+D deselects,
+Ctrl+G groups,
 Ctrl+Shift+G ungroups, Delete removes. The **Arrange** menu aligns (left/center/right,
 top/middle/bottom) and distributes a multi-selection.
 
@@ -101,7 +102,7 @@ dark-high). Each entry has a blend slider and a bypass eye. See the
 ## Settings
 
 Three dialogs under the File menu, each searchable and instant-apply (the canvas peeks around
-the modal): **Preferences** (**Ctrl+,**) holds the per-machine application settings — the
+the modal): **Preferences** (**Ctrl+K**) holds the per-machine application settings — the
 shortcut editor and the update check; **Project Settings** holds the normal-channel directions
 (a visual ball editor, with rotation presets for engine conventions), the default output
 format, and per-kind adjustment defaults, stored in `project.lambert`; **Document Settings**

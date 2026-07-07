@@ -445,6 +445,7 @@ app.whenReady().then(() => {
             item("Duplicate", "duplicate"),
             { label: "Delete", click: send("delete") }, // no accelerator: Del must stay safe in inputs
             { label: "Rename", click: send("rename") }, // no accelerator: F2 fires via the window keymap
+            { label: "Deselect", click: send("deselect") }, // no accelerator: editor-scope, window keymap
             { type: "separator" },
             item("Group", "group"),
             item("Ungroup", "ungroup"),
@@ -456,6 +457,11 @@ app.whenReady().then(() => {
             item("Fit", "zoom-fit"),
             item("Fit Selection", "zoom-fit-selection"),
             item("100%", "zoom-100"),
+            item("Zoom In", "zoom-in"),
+            item("Zoom Out", "zoom-out"),
+            { type: "separator" },
+            item("Next Tab", "tab-next"),
+            item("Previous Tab", "tab-prev"),
             { type: "separator" },
             item("Rulers", "toggle-rulers"),
             item("Pixel Grid", "toggle-pixel-grid"),

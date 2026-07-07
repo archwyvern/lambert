@@ -29,7 +29,7 @@ export interface EditorBinding {
  *  - Esc: drag-cancel / deselect (and chord-prefix cancel, via the matcher);
  *  - Space: hold-to-pan modifier (swallowed here, tracked by CanvasView);
  *  - arrow keys: nudge (coalesced per burst) — widget navigation elsewhere;
- *  - Ctrl+Shift+Z: fixed redo alias alongside the rebindable Ctrl+Y;
+ *  - Ctrl+Y: fixed legacy redo alias alongside the rebindable Ctrl+Shift+Z;
  *  - Backspace: fixed delete alias alongside the rebindable Delete;
  *  - dialog/input-local keys (dialog Enter, rename inputs, LightPad arrows, pen-draft Esc/Enter)
  *    and carapace widget navigation (arrows/Home/End/Enter/Ctrl+A) — those handlers preventDefault
@@ -125,8 +125,8 @@ export function useEditorKeymap(opts: {
         if (m.type === "run") runEditorCommand(m.id);
         return; // cancel: swallowed, nothing dispatched
       }
-      // Ctrl/Cmd+Shift+Z = redo (Photoshop-style), a fixed alias alongside the rebindable Ctrl+Y.
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "z") {
+      // Ctrl/Cmd+Y = redo, a fixed legacy alias alongside the rebindable Ctrl+Shift+Z (Photoshop).
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "y") {
         e.preventDefault();
         workspaceRef.current?.active?.store.redo();
         return;

@@ -1,16 +1,19 @@
-/** Godot-style canvas tools: Q select, W move, E rotate, R scale, T vertex, M measure. Select-
- *  mode drag overrides (godot parity): Alt = move, Ctrl = rotate, Ctrl+Alt = scale.
+/** The canvas tools (Photoshop-style keys: V select, W move, R rotate, S scale, A vertex, P pen,
+ *  I measure — defaults live in commands.ts). Select-mode drag overrides (godot parity):
+ *  Alt = move, Ctrl = rotate, Ctrl+Alt = scale.
  *  Vertex tool: the object body never grabs drags, so any drag is a vertex marquee. */
 export type ToolMode = "select" | "move" | "rotate" | "scale" | "vertex" | "pen" | "measure";
 
+/** DEFAULT key -> tool (capture aid: useDemoBootstrap's `tool=` query letter; live bindings
+ *  come from the command registry, not this table). */
 export const TOOL_KEYS: Record<string, ToolMode> = {
-  q: "select",
+  v: "select",
   w: "move",
-  e: "rotate",
-  r: "scale",
-  t: "vertex",
+  r: "rotate",
+  s: "scale",
+  a: "vertex",
   p: "pen",
-  m: "measure",
+  i: "measure",
 };
 
 /** Click-to-place ("pen") mode: a new point rubber-bands from an anchor and the next left-click
