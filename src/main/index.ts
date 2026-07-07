@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
 import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
@@ -16,15 +16,15 @@ const { autoUpdater } = electronUpdater;
 app.setName("lambert");
 
 const isAutomation = process.argv.includes("--selftest") || process.argv.includes("--capture");
-if (isAutomation) {
-  // Automated runs must not share the live instance's profile: LevelDB/Dawn cache locks make captures
-  // flaky-black and stall GPU init when an editor is open. Each run gets a FRESH unique dir by default
-  // (a fixed, never-cleared dir let stale session/state leak between runs and collided when two ran at
-  // once); pass --profile <dir> to use a prepared profile instead (the seeded-session workflow).
-  const profileIndex = process.argv.indexOf("--profile");
-  const profileDir = profileIndex >= 0 ? process.argv[profileIndex + 1] : undefined;
-  app.setPath("userData", profileDir ?? mkdtempSync(path.join(os.tmpdir(), "lambert-automation-")));
-}
+// --profile <dir>: run against an explicit userData dir. Two users: automation with a prepared
+// profile (the seeded-session workflow), and "open in new window" siblings on disposable profiles
+// (two instances must never share Chromium storage locks or the session file). Automation without
+// an explicit profile still gets a FRESH temp dir: sharing the live profile makes captures
+// flaky-black (LevelDB/Dawn cache locks) and stalls GPU init when an editor is open.
+const profileIndex = process.argv.indexOf("--profile");
+const profileDir = profileIndex >= 0 ? process.argv[profileIndex + 1] : undefined;
+if (profileDir) app.setPath("userData", profileDir);
+else if (isAutomation) app.setPath("userData", mkdtempSync(path.join(os.tmpdir(), "lambert-automation-")));
 
 // WebGPU is default-on for Windows/macOS Chromium but flag-gated on Linux. `enable-unsafe-webgpu`
 // is backend-neutral and safe everywhere (relaxes limits / exposes experimental bits). The Vulkan
@@ -61,7 +61,7 @@ function projectArgFromArgv(argv: string[]): string | null {
   const args = argv.slice(1);
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
-    if (a === "--query" || a === "--capture") {
+    if (a === "--query" || a === "--capture" || a === "--profile") {
       i++; // skip the flag's value too
       continue;
     }
@@ -295,6 +295,29 @@ app.whenReady().then(() => {
   });
   ipcMain.handle("session:save", async (_e, json: string) => {
     await atomicWrite(sessionPath, json);
+  });
+
+  // "Open in new window": spawn a SIBLING INSTANCE on a disposable profile — no shared Chromium
+  // storage locks, no session.json contention; the primary window keeps owning session restore.
+  // The renderer's localStorage prefs (keybinds, remote servers, panel sizes) ride along as a
+  // snapshot file in the profile; the sibling's preload replays them (see session:spawn-seed).
+  ipcMain.handle("window:openNew", async (_e, dir: string, prefsJson: string) => {
+    const profile = mkdtempSync(path.join(os.tmpdir(), "lambert-window-"));
+    await writeFile(path.join(profile, "spawn-seed.json"), prefsJson);
+    // AppImage: relaunch the image itself, not the extracted inner binary (which dies with the mount)
+    const exe = process.env.APPIMAGE ?? process.execPath;
+    const args = [...(app.isPackaged ? [] : [app.getAppPath()]), dir, "--profile", profile];
+    spawn(exe, args, { detached: true, stdio: "ignore" }).unref();
+  });
+
+  // Sync on purpose: the preload must seed localStorage BEFORE any renderer code reads prefs, and
+  // it's one tiny file read exactly once per spawned window.
+  ipcMain.on("session:spawn-seed", (e) => {
+    try {
+      e.returnValue = readFileSync(path.join(app.getPath("userData"), "spawn-seed.json"), "utf8");
+    } catch {
+      e.returnValue = null;
+    }
   });
   // "Open Containing Folder" (tab context menu): highlight the file in the OS file manager
   ipcMain.handle("path:reveal", (_e, p: string) => {

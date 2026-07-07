@@ -64,6 +64,9 @@ export interface Host {
   setMenuAccelerators(map: Record<string, string | null>): Promise<void>;
   /** Tell main a project opened, so it can grow the compact welcome window to the remembered editor size. */
   notifyProjectOpened(): void;
+  /** Spawn a sibling instance on a disposable profile, opening `dir`, with prefs seeded from
+   *  `prefsJson` (a localStorage snapshot). The primary window keeps owning session restore. */
+  openInNewWindow(dir: string, prefsJson: string): Promise<void>;
   /** A project folder the OS asked us to open while running (double-clicked project.lambert). */
   onOpenProjectPath(cb: (dir: string) => void): void;
   /** Pull (once, on mount) any project folder the OS asked us to open at launch; null if none. */

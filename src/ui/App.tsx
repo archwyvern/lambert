@@ -278,12 +278,45 @@ export function App(): React.JSX.Element {
     return `Opened ${opened.projectPath}`;
   };
 
+  /** Snapshot every persisted lambert:* pref to seed a spawned window's fresh profile. Update
+   *  checks are forced off in the copy — exactly one window (the primary) should drive updates. */
+  const snapshotPrefs = (): string => {
+    const out: Record<string, string> = {};
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)!;
+      if (k.startsWith("lambert:")) out[k] = localStorage.getItem(k)!;
+    }
+    out["lambert:autoUpdateCheck"] = "false";
+    return JSON.stringify(out);
+  };
+
+  /** Open `opened` here, or — when a project is already up — offer this window / a new window.
+   *  With no workspace there's nothing to displace, so it opens right here without asking. */
+  const enterProjectRouted = async (opened: OpenedProject): Promise<string | null> => {
+    if (!workspaceRef.current) return enterProject(opened);
+    const name = basename(opened.projectPath.replace(/\/+$/, "")) || opened.projectPath;
+    const r = await confirm({
+      title: `Open ${name}`,
+      message: "Open it in this window (the current project's tabs are set aside), or in a new window?",
+      confirmLabel: "This Window",
+      tertiaryLabel: "New Window",
+      cancelLabel: "Cancel",
+    });
+    if (r === "cancel") return null;
+    if (r === "tertiary") {
+      recordRecent(opened.projectPath);
+      await getHost().openInNewWindow(opened.projectPath, snapshotPrefs());
+      return `Opened ${name} in a new window`;
+    }
+    return enterProject(opened);
+  };
+
   const openProject = (which: "open" | "new"): void =>
     run(
       (async () => {
         const opened = await (which === "new" ? newProjectFlow : openProjectFlow)(getHost(), lastDir ?? undefined);
         if (!opened) return;
-        return enterProject(opened);
+        return enterProjectRouted(opened);
       })(),
     );
 
@@ -292,7 +325,7 @@ export function App(): React.JSX.Element {
     run(
       (async () => {
         try {
-          return enterProject(await openProjectByPath(getHost(), path));
+          return await enterProjectRouted(await openProjectByPath(getHost(), path));
         } catch {
           removeRecentProject(path);
           throw new Error(`${basename(path)} is no longer available — removed from recent projects`);
@@ -301,7 +334,7 @@ export function App(): React.JSX.Element {
     );
 
   // open a project from an explicit folder path — the OS handing us a double-clicked project.lambert
-  const openPath = (dir: string): void => run((async () => enterProject(await openProjectByPath(getHost(), dir)))());
+  const openPath = (dir: string): void => run((async () => enterProjectRouted(await openProjectByPath(getHost(), dir)))());
   const openPathRef = useRef(openPath);
   openPathRef.current = openPath;
 
@@ -495,7 +528,7 @@ export function App(): React.JSX.Element {
       openDoc(lmb);
       return undefined; // openDoc reports its own status
     };
-    if (basename(path) === PROJECT_FILE) return enterProject(await openProjectByPath(host, dirname(path)));
+    if (basename(path) === PROJECT_FILE) return (await enterProjectRouted(await openProjectByPath(host, dirname(path)))) ?? undefined;
     if (/\.lmb$/i.test(path)) return openDocIn(path);
     if (/\.png$/i.test(path)) {
       const ws = workspaceRef.current;
@@ -508,7 +541,7 @@ export function App(): React.JSX.Element {
       return undefined;
     }
     // anything else: a directory is a project candidate; otherwise reject clearly
-    if (await host.pathExists(joinPath(path, PROJECT_FILE))) return enterProject(await openProjectByPath(host, path));
+    if (await host.pathExists(joinPath(path, PROJECT_FILE))) return (await enterProjectRouted(await openProjectByPath(host, path))) ?? undefined;
     throw new Error(`${basename(path)} isn't something Lambert opens (drop a project folder, .lmb, or .png)`);
   };
   const handleDroppedPathRef = useRef(handleDroppedPath);
