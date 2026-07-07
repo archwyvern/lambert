@@ -43,6 +43,11 @@ import { FileExplorer } from "@carapace/shell";
 import type { DirEntry, FileExplorerActions, FileExplorerProps, MenuModel } from "@carapace/shell";
 import { DocumentRegular, FolderRegular, ImageRegular } from "@fluentui/react-icons";
 import { usePersistentState } from "./persist";
+import { loadSidecar, saveSidecar } from "../remote/sidecar";
+import type { Sidecar } from "../remote/sync";
+import { runPull, runPush, type SyncUi } from "../remote/runner";
+import { makeDavClient, type RemoteServer } from "../remote/servers";
+import { davTransport, localIo, sidecarIo } from "./remoteGlue";
 import { Sash, SplitView, EditorTabs, tabVerbIds, StatusBar, formatKeys, KeybindingProvider, useConfirm, EmptyState, parseGitPorcelainZ, scmDecoration, type ScmDecoration, type MenuItem, type TabMenuVerb } from "@carapace/shell";
 import { Toolbar } from "./Toolbar";
 import { ViewControls } from "./ViewControls";
@@ -166,6 +171,12 @@ export function App(): React.JSX.Element {
   const [normalAlphaGate, setNormalAlphaGate] = usePersistentState("normalAlphaGate", true);
   const [autoUpdateCheck, setAutoUpdateCheck] = usePersistentState("autoUpdateCheck", true); // startup update check (Settings › Updates)
   const [recents, setRecents] = usePersistentState<RecentProject[]>("recentProjects", []); // launch-screen MRU
+  // remote projects: configured WebDAV servers (app-level) + the open project's sync state (null =
+  // not a remote project). sidecarRef keeps the command registry's stable closures honest.
+  const [remoteServers, setRemoteServers] = usePersistentState<RemoteServer[]>("remoteServers", []);
+  const [sidecar, setSidecar] = useState<Sidecar | null>(null);
+  const sidecarRef = useRef<Sidecar | null>(null);
+  sidecarRef.current = sidecar;
   const [lastDir, setLastDir] = usePersistentState<string | null>("lastProjectDir", null); // open-dialog defaultPath
   const [leftWidth, setLeftWidth] = usePersistentState("panel:left", 220);
   const [layersHeight, setLayersHeight] = usePersistentState("panel:layers", 280);
@@ -251,6 +262,12 @@ export function App(): React.JSX.Element {
   const enterProject = (opened: OpenedProject): string => {
     setWorkspace(new Workspace(opened.projectPath, opened.config));
     setViews({});
+    // remote projects: a project is remote iff its sidecar exists; corruption is soft (re-clone recovers)
+    setSidecar(null);
+    void loadSidecar(sidecarIo(getHost()), opened.projectPath).then((s) => {
+      if (s === "corrupt") notify("Remote sync state is corrupted — re-clone the project to restore syncing", "error");
+      else if (s) setSidecar(s);
+    });
     recordRecent(opened.projectPath);
     setLastDir(dirname(opened.projectPath)); // reopen the dialog at the project's containing folder next time
     getHost().notifyProjectOpened(); // grow the welcome window to the remembered editor size
@@ -686,6 +703,84 @@ export function App(): React.JSX.Element {
     })();
   };
 
+  // --- remote projects: sync (pull) / export (push) against the project's WebDAV server ---
+  // Runners + conflict semantics live in src/remote (fixture-tested); this is IO/UI binding only.
+
+  /** Resolve the open remote project's server entry + sidecar, or explain what's missing. */
+  const remoteConnection = (): { server: RemoteServer; sc: Sidecar } | null => {
+    const sc = sidecarRef.current;
+    if (!sc) return null; // commands are disabled without a sidecar; belt-and-braces
+    const server = remoteServers.find((s) => s.id === sc.serverId);
+    if (!server) {
+      notify("This project's remote server is missing — re-add it in Preferences > Remote Servers", "error");
+      return null;
+    }
+    return { server, sc };
+  };
+
+  const remoteSyncUi = (verb: string): SyncUi => ({
+    progress: (name, done, total) => setStatus({ text: `${verb} ${name} (${done}/${total})`, tone: "info" }),
+    confirmOverwriteLocal: async (name) =>
+      (await confirm({
+        title: `${name} changed on the server and locally`,
+        message: "Overwrite your local copy with the server version? Your local edits to this file will be lost.",
+        confirmLabel: "Overwrite local",
+        cancelLabel: "Keep mine",
+        danger: true,
+      })) === "confirm",
+    info: (m) => notify(m),
+  });
+
+  /** Count fragments like "3 new" — only non-zero parts make the summary. */
+  const countPart = (n: number, label: string): string | null => (n > 0 ? `${n} ${label}` : null);
+
+  const remoteSync = (): void => {
+    const conn = remoteConnection();
+    const ws = workspaceRef.current;
+    if (!conn || !ws) return;
+    run(
+      (async () => {
+        const dav = makeDavClient(davTransport(getHost()), conn.server);
+        const io = localIo(getHost(), (d) => carapaceHost.fs!.list(d), ws.projectPath);
+        const { sidecar: next, summary } = await runPull(dav, conn.sc, io, remoteSyncUi("Syncing"));
+        await saveSidecar(sidecarIo(getHost()), ws.projectPath, next);
+        setSidecar(next);
+        refreshGitStatus();
+        const parts = [
+          countPart(summary.downloaded.length, "downloaded"),
+          countPart(summary.fastForwarded.length, "updated"),
+          countPart(summary.conflictsOverwritten.length, "overwritten"),
+          countPart(summary.conflictsKept.length, "kept (conflict)"),
+          countPart(summary.keptLocal.length, "local ahead"),
+          countPart(summary.failed.length, "failed"),
+        ].filter((p): p is string => p !== null);
+        return `Sync: ${parts.length ? parts.join(", ") : "everything up to date"}`;
+      })(),
+    );
+  };
+
+  const remoteExport = (): void => {
+    const conn = remoteConnection();
+    const ws = workspaceRef.current;
+    if (!conn || !ws) return;
+    run(
+      (async () => {
+        const dav = makeDavClient(davTransport(getHost()), conn.server);
+        const io = localIo(getHost(), (d) => carapaceHost.fs!.list(d), ws.projectPath);
+        const { sidecar: next, summary } = await runPush(dav, conn.sc, io, remoteSyncUi("Uploading"));
+        await saveSidecar(sidecarIo(getHost()), ws.projectPath, next);
+        setSidecar(next);
+        const parts = [
+          countPart(summary.uploaded.length, "uploaded"),
+          countPart(summary.skipped.length, "unchanged"),
+          countPart(summary.blocked.length, "blocked — Sync first"),
+          countPart(summary.failed.length, "failed"),
+        ].filter((p): p is string => p !== null);
+        return `Export: ${parts.length ? parts.join(", ") : "nothing to export"}`;
+      })(),
+    );
+  };
+
   // update + persist project.lambert (normal dirs, saved presets, ...)
   const persistConfig = (config: ProjectConfig): void => {
     const ws = workspaceRef.current;
@@ -894,6 +989,10 @@ export function App(): React.JSX.Element {
         return exportHeightmap();
       case "export-all":
         return exportAll();
+      case "remote-sync":
+        return remoteSync();
+      case "remote-export":
+        return remoteExport();
       case "save-preset":
         return savePresetFromSelection();
       case "import-presets":
@@ -1106,6 +1205,8 @@ export function App(): React.JSX.Element {
                 return !!t?.store.canRedo;
               case "presets":
                 return (ws?.config.presets?.length ?? 0) > 0;
+              case "remote":
+                return sidecarRef.current !== null;
               default:
                 return false;
             }
@@ -1303,6 +1404,7 @@ export function App(): React.JSX.Element {
     hasWorkspace: !!workspace,
     hasActive: !!active,
     hasSel,
+    hasRemote: sidecar !== null,
     canAlign,
     canDistribute,
     canUndo: !!active?.store.canUndo,

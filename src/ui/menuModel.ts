@@ -17,6 +17,8 @@ export function buildMenuModel(opts: {
   /** A document tab is active. */
   hasActive: boolean;
   hasSel: boolean;
+  /** The open project is a remote (WebDAV) clone — enables Sync / Export to Remote. */
+  hasRemote: boolean;
   canAlign: boolean;
   canDistribute: boolean;
   canUndo: boolean;
@@ -25,7 +27,7 @@ export function buildMenuModel(opts: {
   rulers: boolean;
   pixelGrid: boolean;
 }): MenuModel {
-  const { action, about, keys, hasWorkspace, hasActive, hasSel, canAlign, canDistribute, canUndo, canRedo, hasPresets, rulers, pixelGrid } = opts;
+  const { action, about, keys, hasWorkspace, hasActive, hasSel, hasRemote, canAlign, canDistribute, canUndo, canRedo, hasPresets, rulers, pixelGrid } = opts;
   return [
     {
       label: "&&File",
@@ -43,6 +45,9 @@ export function buildMenuModel(opts: {
         { label: "Export NX", shortcut: keys("export-nx"), enabled: hasActive, run: () => action("export-nx") },
         { label: "Export Height Map", shortcut: keys("export-height"), enabled: hasActive, run: () => action("export-height") },
         { label: "Export All NX", shortcut: keys("export-all"), enabled: hasWorkspace, run: () => action("export-all") },
+        { separator: true },
+        { label: "Sync from Remote", shortcut: keys("remote-sync"), enabled: hasRemote, run: () => action("remote-sync") },
+        { label: "Export to Remote", shortcut: keys("remote-export"), enabled: hasRemote, run: () => action("remote-export") },
         { separator: true },
         { label: "Import Presets…", enabled: hasWorkspace, run: () => action("import-presets") },
         { label: "Export Presets…", enabled: hasWorkspace && hasPresets, run: () => action("export-presets") },
