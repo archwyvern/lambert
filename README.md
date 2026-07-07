@@ -54,6 +54,36 @@ A project is a folder with a `project.lambert` config; each image gets a `.lmb` 
 pnpm eval path/to/file.lmb   # headless export: writes {stem}.nx.png + debug height/normal maps
 ```
 
+## Remote projects
+
+Lambert can clone a project from any WebDAV server into a local folder and sync it back:
+**Clone Remote…** on the launch screen (or File › Clone Remote Project) downloads the project's
+images and documents; you work locally — offline included — then **File › Export to Remote**
+uploads your `.lmb` documents and `project.lambert`, and **File › Sync from Remote** pulls new or
+changed files down. The server copy is the durable one: delete the local folder and re-cloning
+restores everything you exported. Servers are configured under Preferences › Remote Servers.
+
+Sync is conflict-safe: files you haven't touched fast-forward silently, files that changed on both
+sides prompt per file, uploads are compare-and-swap (`If-Match`) so two machines can't silently
+overwrite each other, and nothing ever deletes a local file. Machine-local sync state lives in
+`.lambert-remote.json` in the project root (never uploaded).
+
+Any server that implements this subset works (Nextcloud and `rclone serve webdav` both qualify):
+
+| Request | Behavior |
+| --- | --- |
+| `PROPFIND <base>/` (Depth 1) | 207 multistatus; child collections are the projects |
+| `PROPFIND <base>/<project>/` (Depth 1) | 207; child files with `getcontentlength`, `getlastmodified`, `getetag` |
+| `PROPFIND <base>/<project>/<file>` (Depth 0) | 207 for that one file |
+| `GET <base>/<project>/<file>` | file bytes |
+| `PUT <base>/<project>/<file>` | create/replace; honors `If-Match` and `If-None-Match: *` (412 on failure); SHOULD return `ETag` |
+
+Auth is HTTP Basic. Etags are treated as opaque validators — any stable content validator works.
+For development, `pnpm dav:serve <dir>` serves a directory (child folders = projects) with the
+reference implementation of exactly this subset, and
+`electron . --capture out.png --query "davcheck=<url>&dir=<empty-dir>"` runs an end-to-end
+clone/push/pull check against it through the real app.
+
 ## Development
 
 ```bash
