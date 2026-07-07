@@ -22,7 +22,8 @@ import { buildSessionJson, parseSessionJson } from "../document/session";
 import { PROJECT_FILE, Tab, Workspace } from "../document/workspace";
 import { alignNodes, distributeNodes, type AlignMode } from "./alignOps";
 import { buildMenuModel } from "./menuModel";
-import { BindingOverrides, COMMANDS, effectiveKeys } from "./commands";
+import { BindingOverrides, COMMANDS, effectiveKeys, migrateLegacyOverrides } from "./commands";
+import { SETTINGS_DEFAULT_SCREEN, settingsDialogFor, type SettingsDialogKind } from "./settingsRouting";
 import { useDemoBootstrap } from "./useDemoBootstrap";
 import { parseEditorBindings, useEditorKeymap, type EditorBinding } from "./useEditorKeymap";
 import { CommandPalette, CommandProvider, createCommandRegistry } from "@carapace/shell";
@@ -49,7 +50,7 @@ import { LambertMark } from "./LambertMark";
 import { LaunchScreen } from "./LaunchScreen";
 import { NewDocumentDialog } from "./NewDocumentDialog";
 import { AboutDialog } from "./AboutDialog";
-import { SettingsDialog } from "./SettingsDialog";
+import { DocumentSettingsDialog, PreferencesDialog, ProjectSettingsDialog } from "./SettingsDialog";
 import type { ViewMode, PointLight } from "./preview";
 import { VIEW_MODES } from "./preview";
 import { TOOL_KEYS, ToolMode } from "./tools";
@@ -110,13 +111,17 @@ export function App(): React.JSX.Element {
   const [tool, setTool] = useState<ToolMode>("select");
   const [selVerts, setSelVerts] = useState<number[]>([]);
   const [showAbout, setShowAbout] = useState(false);
-  // Settings dialog: null = closed, else the screen it's showing. The last-viewed screen persists
-  // so File > Settings reopens where you left off.
-  const [settingsScreen, setSettingsScreen] = useState<string | null>(null);
-  const [lastSettingsScreen, setLastSettingsScreen] = usePersistentState("settings:screen", "project-normals");
+  // Settings family: which of the three dialogs is open (null = none); each remembers its
+  // last-viewed screen per-machine so reopening lands where you left off.
+  const [settingsOpen, setSettingsOpen] = useState<SettingsDialogKind | null>(null);
+  const [prefsScreen, setPrefsScreen] = usePersistentState("prefs:screen", SETTINGS_DEFAULT_SCREEN.prefs);
+  const [projectScreen, setProjectScreen] = usePersistentState("projectSettings:screen", SETTINGS_DEFAULT_SCREEN.project);
+  const [docScreen, setDocScreen] = usePersistentState("docSettings:screen", SETTINGS_DEFAULT_SCREEN.doc);
   const [paletteOpen, setPaletteOpen] = useState(false);
   // Rebindable shortcuts: user overrides by command id (chord rebinds, null unbinds, absent = default).
   const [bindingOverrides, setBindingOverrides] = usePersistentState<BindingOverrides>("keybindings", {});
+  // pre-v0.5 stored rebinds against the single "settings" command — rename once on startup
+  useEffect(() => setBindingOverrides(migrateLegacyOverrides), []);
   const bindings = useMemo(
     () => new Map(COMMANDS.map((c) => [c.id, effectiveKeys(c, bindingOverrides)])),
     [bindingOverrides],
@@ -683,12 +688,15 @@ export function App(): React.JSX.Element {
     );
   };
 
-  // open the Settings dialog at a screen (defaults to the last-viewed one)
-  const openSettings = (screen?: string): void => {
+  // open one of the settings dialogs, optionally at a screen (defaults to its last-viewed one)
+  const openSettingsDialog = (dialog: SettingsDialogKind, screen?: string): void => {
     if (!workspaceRef.current) return;
-    if (screen) setLastSettingsScreen(screen);
-    setSettingsScreen(screen ?? lastSettingsScreen);
+    if (dialog === "doc" && !workspaceRef.current.active) return;
+    if (screen) ({ prefs: setPrefsScreen, project: setProjectScreen, doc: setDocScreen })[dialog](screen);
+    setSettingsOpen(dialog);
   };
+  // deep-link entry: the screen id encodes which dialog it lives in
+  const openSettings = (screen: string): void => openSettingsDialog(settingsDialogFor(screen), screen);
 
   /** Instantiate a saved preset template: deep-clone (the store must never alias the template),
    *  hydrate the plain-JSON vectors, fresh id, drop-point position (z/elevation kept). */
@@ -968,8 +976,12 @@ export function App(): React.JSX.Element {
         return setRulers((r) => !r);
       case "toggle-pixel-grid":
         return setPixelGrid((g) => !g);
-      case "settings":
-        return openSettings();
+      case "preferences":
+        return openSettingsDialog("prefs");
+      case "project-settings":
+        return openSettingsDialog("project");
+      case "document-settings":
+        return openSettingsDialog("doc");
       case "command-palette":
         return setPaletteOpen(true);
       case "view-cycle":
@@ -1250,19 +1262,34 @@ export function App(): React.JSX.Element {
       <CommandProvider registry={registry}>
         <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       </CommandProvider>
-      {settingsScreen !== null && workspace ? (
-        <SettingsDialog
-          config={workspace.config}
-          onConfig={persistConfig}
-          store={active?.store ?? null}
-          state={state}
+      {settingsOpen === "prefs" && workspace ? (
+        <PreferencesDialog
           bindingOverrides={bindingOverrides}
           onBindingOverrides={setBindingOverrides}
           autoUpdateCheck={autoUpdateCheck}
           onAutoUpdateCheck={setAutoUpdateCheck}
-          initialScreen={settingsScreen}
-          onScreenChange={setLastSettingsScreen}
-          onClose={() => setSettingsScreen(null)}
+          initialScreen={prefsScreen}
+          onScreenChange={setPrefsScreen}
+          onClose={() => setSettingsOpen(null)}
+        />
+      ) : null}
+      {settingsOpen === "project" && workspace ? (
+        <ProjectSettingsDialog
+          config={workspace.config}
+          onConfig={persistConfig}
+          initialScreen={projectScreen}
+          onScreenChange={setProjectScreen}
+          onClose={() => setSettingsOpen(null)}
+        />
+      ) : null}
+      {settingsOpen === "doc" && workspace && active && state ? (
+        <DocumentSettingsDialog
+          config={workspace.config}
+          store={active.store}
+          state={state}
+          initialScreen={docScreen}
+          onScreenChange={setDocScreen}
+          onClose={() => setSettingsOpen(null)}
         />
       ) : null}
       {newDocPath !== null ? (

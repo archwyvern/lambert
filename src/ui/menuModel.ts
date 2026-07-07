@@ -46,7 +46,9 @@ export function buildMenuModel(opts: {
         { label: "Import Presets…", enabled: hasWorkspace, run: () => action("import-presets") },
         { label: "Export Presets…", enabled: hasWorkspace && hasPresets, run: () => action("export-presets") },
         { separator: true },
-        { label: "Settings…", shortcut: keys("settings"), enabled: hasWorkspace, run: () => action("settings") },
+        { label: "Preferences…", shortcut: keys("preferences"), enabled: hasWorkspace, run: () => action("preferences") },
+        { label: "Project Settings…", shortcut: keys("project-settings"), enabled: hasWorkspace, run: () => action("project-settings") },
+        { label: "Document Settings…", shortcut: keys("document-settings"), enabled: hasActive, run: () => action("document-settings") },
       ],
     },
     {
