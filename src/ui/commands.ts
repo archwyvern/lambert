@@ -32,6 +32,13 @@ export const COMMANDS: CommandSpec[] = [
   { id: "reload-diffuse", label: "Reload Diffuse", category: "File", keys: null, scope: "global", enable: "active" },
   { id: "save", label: "Save", category: "File", keys: "Ctrl+S", scope: "global", enable: "active" },
   { id: "save-all", label: "Save All", category: "File", keys: "Ctrl+Shift+S", scope: "global", enable: "workspace" },
+  // tab verbs (Photoshop chords; carapace EditorTabs supplies the context menu, these back the keys)
+  { id: "close-tab", label: "Close Tab", category: "File", keys: "Ctrl+W", scope: "global", enable: "active" },
+  { id: "close-others", label: "Close Other Tabs", category: "File", keys: "Ctrl+Alt+P", scope: "global", enable: "active" },
+  { id: "close-right", label: "Close Tabs to the Right", category: "File", keys: null, scope: "global", enable: "active" },
+  { id: "close-saved", label: "Close Saved Tabs", category: "File", keys: null, scope: "global", enable: "active" },
+  { id: "close-all", label: "Close All Tabs", category: "File", keys: "Ctrl+Alt+W", scope: "global", enable: "active" },
+  { id: "pin-tab", label: "Pin / Unpin Tab", category: "File", keys: null, scope: "global", enable: "active" },
   { id: "export-nx", label: "Export NX", category: "File", keys: "Ctrl+E", scope: "global", enable: "active" },
   { id: "export-height", label: "Export Height Map", category: "File", keys: null, scope: "global", enable: "active" },
   { id: "export-all", label: "Export All NX", category: "File", keys: "Ctrl+Shift+E", scope: "global", enable: "workspace" },

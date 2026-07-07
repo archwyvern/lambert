@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld("lambertHost", {
   windowIsMaximized: () => ipcRenderer.invoke("window:isMaximized"),
   loadSession: () => ipcRenderer.invoke("session:load"),
   saveSession: (json: string) => ipcRenderer.invoke("session:save", json),
+  revealPath: (path: string) => ipcRenderer.invoke("path:reveal", path),
   onMenuAction: (cb: (action: string) => void) =>
     ipcRenderer.on("menu:action", (_e, action: string) => cb(action)),
   setMenuAccelerators: (map: Record<string, string | null>) => ipcRenderer.invoke("menu:accelerators", map),

@@ -21,6 +21,7 @@ const tabSchema = z.object({
   doc: docSchema,
   view: viewSchema,
   selectedId: z.string().nullable().catch(null), // restored on reopen so the selection survives
+  pinned: z.boolean().optional(), // pinned tab strip state; absent in old sessions
   // per-tab 2D pan/zoom; optional so old sessions (and never-fitted tabs) just re-fit on open
   viewport: z.object({ zoom: z.number(), panX: z.number(), panY: z.number() }).optional(),
   // per-tab 3D camera; optional so old sessions / never-orbited tabs open at the default framing

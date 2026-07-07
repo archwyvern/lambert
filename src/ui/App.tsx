@@ -43,7 +43,7 @@ import { FileExplorer } from "@carapace/shell";
 import type { DirEntry, FileExplorerActions, FileExplorerProps, MenuModel } from "@carapace/shell";
 import { DocumentRegular, FolderRegular, ImageRegular } from "@fluentui/react-icons";
 import { usePersistentState } from "./persist";
-import { Sash, SplitView, EditorTabs, StatusBar, formatKeys, KeybindingProvider, useConfirm, EmptyState, parseGitPorcelainZ, scmDecoration, type ScmDecoration } from "@carapace/shell";
+import { Sash, SplitView, EditorTabs, tabVerbIds, StatusBar, formatKeys, KeybindingProvider, useConfirm, EmptyState, parseGitPorcelainZ, scmDecoration, type ScmDecoration, type MenuItem, type TabMenuVerb } from "@carapace/shell";
 import { Toolbar } from "./Toolbar";
 import { ViewControls } from "./ViewControls";
 import { LambertMark } from "./LambertMark";
@@ -848,8 +848,25 @@ export function App(): React.JSX.Element {
         selectedId: t.store.state.selectedId,
         viewport: vpts[t.id],
         orbit: obs[t.id],
+        pinned: t.pinned,
       })),
     });
+  };
+
+  // Batch close (menu verbs / commands): sequential so each dirty tab gets its own confirm; a
+  // cancel skips just that tab.
+  const closeMany = async (ids: string[]): Promise<void> => {
+    for (const id of ids) await closeDoc(id);
+  };
+
+  // Pin/unpin + keep the strip pinned-first (the host owns tab ordering; carapace just renders).
+  const setTabPinned = (id: string, pinned: boolean): void => {
+    const ws = workspaceRef.current;
+    const t = ws?.tabs[ws.indexById(id)];
+    if (!ws || !t) return;
+    t.pinned = pinned || undefined;
+    ws.notify(); // pinned alone changes rendering even when the order is already right
+    ws.moveTab(id, ws.tabs.filter((x) => x.pinned && x.id !== id).length);
   };
 
   // application-menu actions — shared by the OS-menu accelerators (via onMenuAction) and the
@@ -989,6 +1006,21 @@ export function App(): React.JSX.Element {
           setSelVerts([]);
           t.store.select(null);
         }
+        return;
+      case "close-tab":
+      case "close-others":
+      case "close-right":
+      case "close-saved":
+      case "close-all": {
+        const ws = workspaceRef.current;
+        if (!ws || !t) return;
+        const verb = (action === "close-tab" ? "close" : action) as Exclude<TabMenuVerb, "pin">;
+        const infos = ws.tabs.map((x) => ({ id: x.id, title: "", dirty: x.store.state.dirty, pinned: x.pinned }));
+        void closeMany(tabVerbIds(verb, infos, t.id));
+        return;
+      }
+      case "pin-tab":
+        if (t) setTabPinned(t.id, !t.pinned);
         return;
       case "tab-next":
       case "tab-prev": {
@@ -1180,7 +1212,7 @@ export function App(): React.JSX.Element {
           const store = new DocumentStore(doc, ts.docPath);
           if (ts.dirty) store.reset(doc, ts.docPath, { dirty: true });
           if (ts.selectedId && findNode(doc.layers, ts.selectedId)) store.select(ts.selectedId);
-          const tab: Tab = { id: ts.id, docPath: ts.docPath, store, diffuse: { bytes, unresolved } };
+          const tab: Tab = { id: ts.id, docPath: ts.docPath, store, diffuse: { bytes, unresolved }, pinned: ts.pinned };
           ws.openTab(tab);
           // backfill fields added since the session was saved; migrate the retired editor "lit" mode to normal
           restoredViews[ts.id] = { ...DEFAULT_VIEW, ...ts.view, mode: ts.view.mode === "lit" ? "normal" : ts.view.mode };
@@ -1242,8 +1274,24 @@ export function App(): React.JSX.Element {
         id: t.id,
         name: t.docPath ? basename(t.docPath) : "untitled",
         dirty: t.store.state.dirty,
+        pinned: t.pinned,
+        docPath: t.docPath,
       }))
     : [];
+
+  // tab context-menu extensions: path + reveal verbs (only for saved docs — untitled has no path)
+  const tabExtraItems = (tab: { id: string }): MenuItem[] => {
+    const ws = workspaceRef.current;
+    const docPath = ws?.tabs[ws.indexById(tab.id)]?.docPath;
+    if (!ws || !docPath) return [];
+    const relative = docPath.startsWith(ws.projectPath) ? docPath.slice(ws.projectPath.length).replace(/^\//, "") : docPath;
+    return [
+      { label: "Copy Path", run: () => void navigator.clipboard.writeText(docPath) },
+      { label: "Copy Relative Path", run: () => void navigator.clipboard.writeText(relative) },
+      { label: "Open Containing Folder", run: () => void getHost().revealPath(docPath) },
+      { label: "Reveal in Explorer View", run: () => explorerActions.current?.reveal(docPath) },
+    ];
+  };
 
   const hasSel = !!state && state.selectedIds.length > 0;
   const canAlign = !!state && state.selectedIds.length >= 2;
@@ -1393,10 +1441,14 @@ export function App(): React.JSX.Element {
         <div className="flex min-w-0 flex-1 flex-col">
           {tabInfos.length > 0 ? (
             <EditorTabs
-              tabs={tabInfos.map((t) => ({ id: t.id, title: t.name, dirty: t.dirty }))}
+              tabs={tabInfos.map((t) => ({ id: t.id, title: t.name, dirty: t.dirty, pinned: t.pinned }))}
               activeId={tabInfos[workspace?.activeIndex ?? -1]?.id ?? null}
               onSelect={(id) => workspaceRef.current?.focus(id)}
               onClose={closeDoc}
+              onCloseMany={(ids) => void closeMany(ids)}
+              onPin={setTabPinned}
+              extraMenuItems={tabExtraItems}
+              menuShortcut={(v) => bindings.get(v === "close" ? "close-tab" : v === "pin" ? "pin-tab" : v) ?? undefined}
               onReorder={(id, toIndex) => workspaceRef.current?.moveTab(id, toIndex)}
             />
           ) : null}

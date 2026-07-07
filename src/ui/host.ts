@@ -51,6 +51,8 @@ export interface Host {
   /** Session memory in Electron userData; null when no prior session exists. */
   loadSession(): Promise<string | null>;
   saveSession(json: string): Promise<void>;
+  /** Highlight a file in the OS file manager ("Open Containing Folder"). */
+  revealPath(path: string): Promise<void>;
   /** Application-menu actions (open-image/save/export-nx/undo/zoom-fit/...). */
   onMenuAction(cb: (action: string) => void): void;
   /** Push the effective command bindings; main rebuilds the native menu so accelerators track rebinds. */
