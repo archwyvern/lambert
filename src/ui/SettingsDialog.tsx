@@ -93,16 +93,12 @@ function OutputFormatEditor(props: { value: OutputSettings; onChange: (o: Output
 }
 
 /**
- * The Settings dialog (File > Settings): project-wide screens always, plus per-document screens
- * when a document is active. Instant-apply — project screens persist straight to project.lambert,
- * document screens edit the doc through its store (undoable, saved with the .lmb).
+ * The three settings dialogs, each a SettingsModal instance over its own screen set. All
+ * instant-apply, but with different persistence stories: Preferences screens are per-machine
+ * (localStorage), Project Settings persist straight to project.lambert, and Document Settings
+ * edit the active doc through its store (undoable, saved with the .lmb).
  */
-export function SettingsDialog(props: {
-  config: ProjectConfig;
-  onConfig: (config: ProjectConfig) => void;
-  /** Active document, or null when no tab is open (Document screens hidden). */
-  store: DocumentStore | null;
-  state: EditorState | null;
+export function PreferencesDialog(props: {
   /** User keybinding overrides (app-level, not per-project). */
   bindingOverrides: BindingOverrides;
   onBindingOverrides: (fn: (prev: BindingOverrides) => BindingOverrides) => void;
@@ -113,7 +109,7 @@ export function SettingsDialog(props: {
   onScreenChange?: (id: string) => void;
   onClose: () => void;
 }): React.JSX.Element {
-  const { config, onConfig, store, state, bindingOverrides, onBindingOverrides, autoUpdateCheck, onAutoUpdateCheck, initialScreen, onScreenChange, onClose } = props;
+  const { bindingOverrides, onBindingOverrides, autoUpdateCheck, onAutoUpdateCheck, initialScreen, onScreenChange, onClose } = props;
 
   const shortcutRows: ShortcutRow[] = COMMANDS.map((c) => ({
     id: c.id,
@@ -126,40 +122,8 @@ export function SettingsDialog(props: {
 
   const screens: SettingsScreen[] = [
     {
-      id: "project-normals",
-      label: "Normal Directions",
-      group: "Project",
-      keywords: ["red", "green", "rotation", "opengl", "directx", "channels", "convention"],
-      render: () => (
-        <div>
-          <Blurb>
-            Which way the encoded red/green channels point. Project-wide: every document renders and
-            exports with this convention unless it sets its own override (Document › Normal Directions).
-          </Blurb>
-          <NormalDirsEditor dirs={config.normalDirs} onChange={(d) => onConfig({ ...config, normalDirs: d })} />
-        </div>
-      ),
-    },
-    {
-      id: "project-output",
-      label: "Output Format",
-      group: "Project",
-      keywords: ["export", "png", "exr", "hdr", "bit depth", "channels", "rgba"],
-      render: () => (
-        <div>
-          <Blurb>
-            What Export NX writes: channel layout, bit depth, and file container. Project-wide, stored
-            in project.lambert so exports are reproducible; a document can override it (Document ›
-            Output Format). The default is 16-bit RGBA PNG.
-          </Blurb>
-          <OutputFormatEditor value={config.output} onChange={(output) => onConfig({ ...config, output })} />
-        </div>
-      ),
-    },
-    {
       id: "app-shortcuts",
       label: "Shortcuts",
-      group: "Application",
       keywords: ["keyboard", "keybinding", "hotkey", "commands", "mouse"],
       render: () => (
         <div>
@@ -194,7 +158,6 @@ export function SettingsDialog(props: {
     {
       id: "app-updates",
       label: "Updates",
-      group: "Application",
       keywords: ["update", "auto-update", "version", "download", "release", "check", "startup"],
       render: () => (
         <div>
@@ -212,121 +175,170 @@ export function SettingsDialog(props: {
     },
   ];
 
-  if (store && state) {
-    const doc = state.doc;
-    const setOrigin = (origin: { x: number; y: number }, coalesce?: string): void => {
-      store.update((d) => ({ ...d, canvas: { ...d.canvas, origin } }), coalesce ? { coalesce } : undefined);
-      if (!coalesce) store.endGesture();
-    };
-    const setDocDirs = (dirs: NormalDirs | undefined): void => {
-      store.update((d) => ({ ...d, normalDirs: dirs }));
-      store.endGesture();
-    };
-    const setDocOutput = (output: OutputSettings | undefined): void => {
-      store.update((d) => ({ ...d, output }));
-      store.endGesture();
-    };
-    screens.push(
-      {
-        id: "doc-canvas",
-        label: "Canvas",
-        group: "Document",
-        keywords: ["origin", "centre", "position"],
-        render: () => (
-          <div>
-            <Blurb>
-              Where this document's origin sits, in image pixels. Positions in the inspector display
-              relative to it.
-            </Blurb>
-            <Row label="Origin">
-              <div className="w-24">
-                <SpinSlider
-                  value={doc.canvas.origin.x}
-                  onChange={(x) => setOrigin({ x, y: doc.canvas.origin.y }, "origin")}
-                  onCommit={() => store.endGesture()}
-                />
-              </div>
-              <div className="w-24">
-                <SpinSlider
-                  value={doc.canvas.origin.y}
-                  onChange={(y) => setOrigin({ x: doc.canvas.origin.x, y }, "origin")}
-                  onCommit={() => store.endGesture()}
-                />
-              </div>
-            </Row>
-            <Row label="Presets">
-              <Button onClick={() => setOrigin({ x: doc.source.width / 2, y: doc.source.height / 2 })}>Centre</Button>
-              <Button onClick={() => setOrigin({ x: doc.source.width / 2, y: 0 })}>Top Centre</Button>
-              <Button onClick={() => setOrigin({ x: 0, y: 0 })}>Top Left</Button>
-            </Row>
-          </div>
-        ),
-      },
-      {
-        id: "doc-normals",
-        label: "Normal Directions",
-        group: "Document",
-        keywords: ["red", "green", "rotation", "override"],
-        render: () => (
-          <div>
-            <Blurb>
-              Override the project's channel convention for this document only. Stored in the .lmb, so
-              it travels with the file.
-            </Blurb>
-            <div className="mb-3">
-              <FormToggle
-                label="Override project setting"
-                value={doc.normalDirs !== undefined}
-                onChange={(on) => setDocDirs(on ? { ...(doc.normalDirs ?? config.normalDirs ?? DEFAULT_NORMAL_DIRS) } : undefined)}
+  return <SettingsModal screens={screens} initialScreen={initialScreen} onScreenChange={onScreenChange} onClose={onClose} />;
+}
+
+export function ProjectSettingsDialog(props: {
+  config: ProjectConfig;
+  onConfig: (config: ProjectConfig) => void;
+  initialScreen?: string;
+  onScreenChange?: (id: string) => void;
+  onClose: () => void;
+}): React.JSX.Element {
+  const { config, onConfig, initialScreen, onScreenChange, onClose } = props;
+
+  const screens: SettingsScreen[] = [
+    {
+      id: "project-normals",
+      label: "Normal Directions",
+      keywords: ["red", "green", "rotation", "opengl", "directx", "channels", "convention"],
+      render: () => (
+        <div>
+          <Blurb>
+            Which way the encoded red/green channels point. Project-wide: every document renders and
+            exports with this convention unless it sets its own override (Document Settings › Normal
+            Directions).
+          </Blurb>
+          <NormalDirsEditor dirs={config.normalDirs} onChange={(d) => onConfig({ ...config, normalDirs: d })} />
+        </div>
+      ),
+    },
+    {
+      id: "project-output",
+      label: "Output Format",
+      keywords: ["export", "png", "exr", "hdr", "bit depth", "channels", "rgba"],
+      render: () => (
+        <div>
+          <Blurb>
+            What Export NX writes: channel layout, bit depth, and file container. Project-wide, stored
+            in project.lambert so exports are reproducible; a document can override it (Document
+            Settings › Output Format). The default is 16-bit RGBA PNG.
+          </Blurb>
+          <OutputFormatEditor value={config.output} onChange={(output) => onConfig({ ...config, output })} />
+        </div>
+      ),
+    },
+  ];
+
+  return <SettingsModal screens={screens} initialScreen={initialScreen} onScreenChange={onScreenChange} onClose={onClose} />;
+}
+
+export function DocumentSettingsDialog(props: {
+  /** Project config, for the inherited values the override screens display. */
+  config: ProjectConfig;
+  /** The active document — the dialog only renders while a tab is open. */
+  store: DocumentStore;
+  state: EditorState;
+  initialScreen?: string;
+  onScreenChange?: (id: string) => void;
+  onClose: () => void;
+}): React.JSX.Element {
+  const { config, store, state, initialScreen, onScreenChange, onClose } = props;
+
+  const doc = state.doc;
+  const setOrigin = (origin: { x: number; y: number }, coalesce?: string): void => {
+    store.update((d) => ({ ...d, canvas: { ...d.canvas, origin } }), coalesce ? { coalesce } : undefined);
+    if (!coalesce) store.endGesture();
+  };
+  const setDocDirs = (dirs: NormalDirs | undefined): void => {
+    store.update((d) => ({ ...d, normalDirs: dirs }));
+    store.endGesture();
+  };
+  const setDocOutput = (output: OutputSettings | undefined): void => {
+    store.update((d) => ({ ...d, output }));
+    store.endGesture();
+  };
+
+  const screens: SettingsScreen[] = [
+    {
+      id: "doc-canvas",
+      label: "Canvas",
+      keywords: ["origin", "centre", "position"],
+      render: () => (
+        <div>
+          <Blurb>
+            Where this document's origin sits, in image pixels. Positions in the inspector display
+            relative to it.
+          </Blurb>
+          <Row label="Origin">
+            <div className="w-24">
+              <SpinSlider
+                value={doc.canvas.origin.x}
+                onChange={(x) => setOrigin({ x, y: doc.canvas.origin.y }, "origin")}
+                onCommit={() => store.endGesture()}
               />
             </div>
-            <NormalDirsEditor
-              dirs={doc.normalDirs ?? config.normalDirs}
-              disabled={doc.normalDirs === undefined}
-              onChange={(d) => setDocDirs(d)}
+            <div className="w-24">
+              <SpinSlider
+                value={doc.canvas.origin.y}
+                onChange={(y) => setOrigin({ x: doc.canvas.origin.x, y }, "origin")}
+                onCommit={() => store.endGesture()}
+              />
+            </div>
+          </Row>
+          <Row label="Presets">
+            <Button onClick={() => setOrigin({ x: doc.source.width / 2, y: doc.source.height / 2 })}>Centre</Button>
+            <Button onClick={() => setOrigin({ x: doc.source.width / 2, y: 0 })}>Top Centre</Button>
+            <Button onClick={() => setOrigin({ x: 0, y: 0 })}>Top Left</Button>
+          </Row>
+        </div>
+      ),
+    },
+    {
+      id: "doc-normals",
+      label: "Normal Directions",
+      keywords: ["red", "green", "rotation", "override"],
+      render: () => (
+        <div>
+          <Blurb>
+            Override the project's channel convention for this document only. Stored in the .lmb, so
+            it travels with the file.
+          </Blurb>
+          <div className="mb-3">
+            <FormToggle
+              label="Override project setting"
+              value={doc.normalDirs !== undefined}
+              onChange={(on) => setDocDirs(on ? { ...(doc.normalDirs ?? config.normalDirs ?? DEFAULT_NORMAL_DIRS) } : undefined)}
             />
           </div>
-        ),
-      },
-      {
-        id: "doc-output",
-        label: "Output Format",
-        group: "Document",
-        keywords: ["export", "png", "exr", "hdr", "bit depth", "override"],
-        render: () => (
-          <div>
-            <Blurb>
-              Override the project's output format for this document only. Stored in the .lmb, so it
-              travels with the file.
-            </Blurb>
-            <div className="mb-3">
-              <FormToggle
-                label="Override project setting"
-                value={doc.output !== undefined}
-                onChange={(on) => setDocOutput(on ? { ...(doc.output ?? config.output) } : undefined)}
-              />
-            </div>
-            {doc.output !== undefined ? (
-              <OutputFormatEditor value={doc.output} onChange={(o) => setDocOutput(o)} />
-            ) : (
-              <p className="max-w-lg text-base text-fg-mid">
-                Using the project setting: {config.output.channels.toUpperCase()},{" "}
-                {config.output.format === "png" ? `${config.output.depth}-bit ` : ""}
-                {config.output.format.toUpperCase()}.
-              </p>
-            )}
+          <NormalDirsEditor
+            dirs={doc.normalDirs ?? config.normalDirs}
+            disabled={doc.normalDirs === undefined}
+            onChange={(d) => setDocDirs(d)}
+          />
+        </div>
+      ),
+    },
+    {
+      id: "doc-output",
+      label: "Output Format",
+      keywords: ["export", "png", "exr", "hdr", "bit depth", "override"],
+      render: () => (
+        <div>
+          <Blurb>
+            Override the project's output format for this document only. Stored in the .lmb, so it
+            travels with the file.
+          </Blurb>
+          <div className="mb-3">
+            <FormToggle
+              label="Override project setting"
+              value={doc.output !== undefined}
+              onChange={(on) => setDocOutput(on ? { ...(doc.output ?? config.output) } : undefined)}
+            />
           </div>
-        ),
-      },
-    );
-  }
+          {doc.output !== undefined ? (
+            <OutputFormatEditor value={doc.output} onChange={(o) => setDocOutput(o)} />
+          ) : (
+            <p className="max-w-lg text-base text-fg-mid">
+              Using the project setting: {config.output.channels.toUpperCase()},{" "}
+              {config.output.format === "png" ? `${config.output.depth}-bit ` : ""}
+              {config.output.format.toUpperCase()}.
+            </p>
+          )}
+        </div>
+      ),
+    },
+  ];
 
-  return (
-    <SettingsModal
-      screens={screens}
-      initialScreen={initialScreen}
-      onScreenChange={onScreenChange}
-      onClose={onClose}
-    />
-  );
+  return <SettingsModal screens={screens} initialScreen={initialScreen} onScreenChange={onScreenChange} onClose={onClose} />;
 }
