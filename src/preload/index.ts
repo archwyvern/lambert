@@ -39,6 +39,7 @@ contextBridge.exposeInMainWorld("lambertHost", {
   // --- #2 transient-window SPIKE (branch-only; see src/main/spikePopup.ts) ---
   spikePopupOpen: (opts: { dx: number; dy: number; w: number; h: number; payload: string }) => ipcRenderer.invoke("spike:popup-open", opts),
   spikePopupClose: () => ipcRenderer.invoke("spike:popup-close"),
+  spikeNativeMenu: (at: { x: number; y: number }) => ipcRenderer.invoke("spike:native-menu", at),
   spikeRelayToParent: (data: unknown) => ipcRenderer.send("spike:relay-to-parent", data),
   spikeRelayToPopup: (data: unknown) => ipcRenderer.send("spike:relay-to-popup", data),
   spikeOnEvent: (cb: (ev: unknown) => void) => ipcRenderer.on("spike:event", (_e, ev) => cb(ev)),
