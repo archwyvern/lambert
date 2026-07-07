@@ -70,7 +70,7 @@ describe("runners against the fixture", () => {
   it("clone downloads everything and records etag+sha256 per file", async () => {
     const io = memLocal();
     const ui = scriptedUi();
-    const { sidecar, failed } = await cloneProject(dav, "zarha", "srv1", io, ui);
+    const { sidecar, failed } = await cloneProject(dav, "zarha", { id: "srv1", baseUrl: fx.url }, io, ui);
     expect(failed).toEqual([]);
     expect(Array.from(io.store.keys()).sort()).toEqual(["a.png", "b.lmb", "project.lambert"]);
     expect(sidecar.serverId).toBe("srv1");
@@ -84,7 +84,7 @@ describe("runners against the fixture", () => {
   it("clone survives a failed download and reports it", async () => {
     const io = memLocal();
     fx.failNext(500, "GET"); // scoped to a download — the listing PROPFIND must succeed
-    const { sidecar, failed } = await cloneProject(dav, "zarha", "srv1", io, scriptedUi());
+    const { sidecar, failed } = await cloneProject(dav, "zarha", { id: "srv1", baseUrl: fx.url }, io, scriptedUi());
     // one file failed (whichever hit the injected 500 after listFiles), the others landed
     expect(failed).toHaveLength(1);
     expect(io.store.size).toBe(2);
@@ -93,7 +93,7 @@ describe("runners against the fixture", () => {
 
   it("pull fast-forwards a remote change over an untouched local file, silently", async () => {
     const io = memLocal();
-    const { sidecar } = await cloneProject(dav, "zarha", "srv1", io, scriptedUi());
+    const { sidecar } = await cloneProject(dav, "zarha", { id: "srv1", baseUrl: fx.url }, io, scriptedUi());
     const current = (await dav.listFiles("zarha")).find((f) => f.name === "b.lmb")!;
     await dav.putFile("zarha", "b.lmb", text("doc-b-v2"), { ifMatch: current.etag });
     const ui = scriptedUi();
@@ -106,7 +106,7 @@ describe("runners against the fixture", () => {
 
   it("pull conflict: overwrite answer replaces local; decline keeps it AND keeps the old record", async () => {
     const io = memLocal();
-    const { sidecar } = await cloneProject(dav, "zarha", "srv1", io, scriptedUi());
+    const { sidecar } = await cloneProject(dav, "zarha", { id: "srv1", baseUrl: fx.url }, io, scriptedUi());
     const current = (await dav.listFiles("zarha")).find((f) => f.name === "b.lmb")!;
     await dav.putFile("zarha", "b.lmb", text("remote-edit"), { ifMatch: current.etag });
     io.store.set("b.lmb", text("local-edit"));
@@ -124,9 +124,20 @@ describe("runners against the fixture", () => {
     expect(accept.prompts).toEqual(["b.lmb"]);
   });
 
+  it("clone and pull ignore a remote file wearing the sidecar's name", async () => {
+    writeFileSync(join(root, "zarha", ".lambert-remote.json"), '{"malicious":true}');
+    const io = memLocal();
+    const { sidecar } = await cloneProject(dav, "zarha", { id: "srv1", baseUrl: fx.url }, io, scriptedUi());
+    expect(io.store.has(".lambert-remote.json")).toBe(false);
+    expect(sidecar.files[".lambert-remote.json"]).toBeUndefined();
+    const { summary } = await runPull(dav, sidecar, io, scriptedUi());
+    expect(io.store.has(".lambert-remote.json")).toBe(false);
+    expect(summary.downloaded).toEqual([]);
+  });
+
   it("pull restores a locally deleted file", async () => {
     const io = memLocal();
-    const { sidecar } = await cloneProject(dav, "zarha", "srv1", io, scriptedUi());
+    const { sidecar } = await cloneProject(dav, "zarha", { id: "srv1", baseUrl: fx.url }, io, scriptedUi());
     io.store.delete("b.lmb");
     const { summary } = await runPull(dav, sidecar, io, scriptedUi());
     expect(asText(io.store.get("b.lmb")!)).toBe("doc-b");
@@ -135,7 +146,7 @@ describe("runners against the fixture", () => {
 
   it("push uploads changes with If-Match, creates new files, skips unchanged", async () => {
     const io = memLocal();
-    const { sidecar } = await cloneProject(dav, "zarha", "srv1", io, scriptedUi());
+    const { sidecar } = await cloneProject(dav, "zarha", { id: "srv1", baseUrl: fx.url }, io, scriptedUi());
     io.store.set("b.lmb", text("edited"));
     io.store.set("new.lmb", text("fresh"));
     const { sidecar: next, summary } = await runPush(dav, sidecar, io, scriptedUi());
@@ -149,7 +160,7 @@ describe("runners against the fixture", () => {
 
   it("push blocks (412) when the remote moved since last pull, leaving the record untouched", async () => {
     const io = memLocal();
-    const { sidecar } = await cloneProject(dav, "zarha", "srv1", io, scriptedUi());
+    const { sidecar } = await cloneProject(dav, "zarha", { id: "srv1", baseUrl: fx.url }, io, scriptedUi());
     const current = (await dav.listFiles("zarha")).find((f) => f.name === "b.lmb")!;
     await dav.putFile("zarha", "b.lmb", text("someone-else"), { ifMatch: current.etag });
     io.store.set("b.lmb", text("mine"));
@@ -162,7 +173,7 @@ describe("runners against the fixture", () => {
 
   it("push records the correct etag even when the server omits ETag on PUT", async () => {
     const io = memLocal();
-    const { sidecar } = await cloneProject(dav, "zarha", "srv1", io, scriptedUi());
+    const { sidecar } = await cloneProject(dav, "zarha", { id: "srv1", baseUrl: fx.url }, io, scriptedUi());
     io.store.set("b.lmb", text("edited2"));
     fx.omitPutEtag(true);
     const { sidecar: next } = await runPush(dav, sidecar, io, scriptedUi());

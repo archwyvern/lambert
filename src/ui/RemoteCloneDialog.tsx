@@ -46,7 +46,7 @@ export function RemoteCloneDialog(props: {
       );
   };
 
-  const chooseFolderAndClone = async (server: RemoteServer, project: string): Promise<void> => {
+  const chooseFolderAndClone = async (server: RemoteServer, project: string, projects: string[]): Promise<void> => {
     setFolderError(null);
     const host = getHost();
     const dir = await host.openFolderDialog({ title: `Clone "${project}" into folder` });
@@ -60,7 +60,7 @@ export function RemoteCloneDialog(props: {
     const io = localIo(host, (d) => carapaceHost.fs!.list(d), dir);
     setPhase({ kind: "cloning", file: "", done: 0, total: 0 });
     try {
-      const { sidecar, failed } = await cloneProject(dav, project, server.id, io, {
+      const { sidecar, failed } = await cloneProject(dav, project, { id: server.id, baseUrl: server.baseUrl }, io, {
         progress: (file, done, total) => setPhase({ kind: "cloning", file, done, total }),
         confirmOverwriteLocal: () => Promise.resolve(false), // unreachable: clone targets an empty folder
         info: () => {},
@@ -70,11 +70,11 @@ export function RemoteCloneDialog(props: {
       await saveSidecar(sidecarIo(host), dir, sidecar);
       setPhase({ kind: "done", dir, failed });
     } catch (err) {
+      // back to the project list WITH the error visible (a re-list here would wipe it)
       setPhase({
-        kind: "projects", server, projects: [], selected: project,
+        kind: "projects", server, projects, selected: project,
         error: err instanceof Error ? err.message : String(err),
       });
-      loadProjects(server);
     }
   };
 
@@ -162,7 +162,7 @@ export function RemoteCloneDialog(props: {
               <Button
                 variant="primary"
                 disabled={phase.selected === null}
-                onClick={() => void chooseFolderAndClone(phase.server, phase.selected!)}
+                onClick={() => void chooseFolderAndClone(phase.server, phase.selected!, phase.projects)}
               >
                 Choose Folder…
               </Button>

@@ -48,7 +48,7 @@ export const COMMANDS: CommandSpec[] = [
   { id: "export-all", label: "Export All NX", category: "File", keys: "Ctrl+Shift+E", scope: "global", enable: "workspace" },
   { id: "import-presets", label: "Import Presets…", category: "File", keys: null, scope: "global", enable: "workspace" },
   { id: "export-presets", label: "Export Presets…", category: "File", keys: null, scope: "global", enable: "presets" },
-  { id: "preferences", label: "Preferences…", category: "File", keys: "Ctrl+K", scope: "global", enable: "workspace" },
+  { id: "preferences", label: "Preferences…", category: "File", keys: "Ctrl+K", scope: "global", enable: "always" },
   { id: "project-settings", label: "Project Settings…", category: "File", keys: null, scope: "global", enable: "workspace" },
   { id: "document-settings", label: "Document Settings…", category: "File", keys: null, scope: "global", enable: "active" },
 

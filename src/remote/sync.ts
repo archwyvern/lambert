@@ -17,8 +17,11 @@ export interface SidecarFileRecord {
 }
 
 export interface Sidecar {
-  /** Remote Servers entry id (credentials/baseUrl live in app settings, not in the project). */
+  /** Remote Servers entry id (credentials live in app settings, not in the project). */
   serverId: string;
+  /** The server's base URL at clone time — heals the link when the entry was deleted and re-added
+   *  under a new id (ids are random; the URL is the stable identity). */
+  baseUrl: string;
   /** Collection name on the server. */
   projectPath: string;
   /** ISO timestamp of the last successful clone/pull. */
