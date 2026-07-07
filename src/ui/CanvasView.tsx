@@ -13,7 +13,7 @@ import { getObjectType, ObjectTypeId } from "../field/registry";
 import { editSnap } from "./snapPoint";
 import { fromLocal, toLocal } from "../field/transform";
 import type { ObjectInstance } from "../field/types";
-import { detailChainParams } from "../field/adjustments";
+import { detailChainParams, type AdjustmentDefaults } from "../field/adjustments";
 import { detailParamsKey, type DetailField } from "../field/detail";
 import { requestDetail } from "./detailManager";
 import { normalXform, type NormalDirs } from "../document/schema";
@@ -106,6 +106,8 @@ export function CanvasView(props: {
   boxLitViewport: Viewport | null;
   /** EFFECTIVE normal-channel convention (doc override, else project), for the normal-view encode. */
   normalDirs: NormalDirs;
+  /** Project default params for inheriting adjustment entries (project.lambert). */
+  adjustmentDefaults?: AdjustmentDefaults;
   /** The doc overrides the project convention (the tint widget labels itself accordingly). */
   overridesNormalDirs: boolean;
   /** Open the Settings dialog at a screen (the tint widget links to the normal-dirs screens). */
@@ -131,7 +133,7 @@ export function CanvasView(props: {
   const { store, state, view, tool, diffuseBytes, selVerts, setSelVerts, onLightChange, onEnergyChange, canvas3dRef, orbit3d, normalDirs, swapped } =
     props;
   const { tabId, savedViewport, onViewportChange, setTool, snap, rulers, resolvePaletteObject, maskFocus } = props;
-  const { overridesNormalDirs, openSettings, pixelGrid, normalAlphaGate, boxMode, boxLitViewport } = props;
+  const { overridesNormalDirs, openSettings, pixelGrid, normalAlphaGate, boxMode, boxLitViewport, adjustmentDefaults } = props;
   const inset = rulers ? RULER : 0;
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -274,7 +276,7 @@ export function CanvasView(props: {
   // changes — strength scrubs are fold constants and stay free. The compute runs in a worker with
   // a progressive low-res pass (detailManager); the LAST field keeps rendering until a fresher one
   // arrives, so scrubbing a chain param never blocks and the effect resolves gradually.
-  const chainParams = detailChainParams(doc.layers);
+  const chainParams = detailChainParams(doc.layers, adjustmentDefaults);
   const chainKey = chainParams ? detailParamsKey(chainParams) : null;
   const [detail, setDetail] = useState<DetailField | null>(null);
   useEffect(() => {
@@ -299,6 +301,7 @@ export function CanvasView(props: {
       lightEnergy: view.lightEnergy,
       pointLights: view.pointLights,
       normalXform: normalXform(normalDirs),
+      defaults: adjustmentDefaults,
       orbit3d,
       boxMode,
       boxLitViewport,

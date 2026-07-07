@@ -6,7 +6,7 @@ import { getObjectType } from "../registry";
 import { affineApply, affineInvert } from "../affine";
 import { v2 } from "../vec";
 import { localBounds } from "../objectBounds";
-import { ADJUSTMENT_KINDS, adjustmentKindIndex } from "../adjustments";
+import { ADJUSTMENT_KINDS, adjustmentKindIndex, adjustmentParam, type AdjustmentDefaults } from "../adjustments";
 import type { Adjustment } from "../types";
 import { gpuTypeIndex, MAX_PARAMS, PARAMS_OFFSET, RECORD_F32, RECORD_SLOT } from "./wgsl";
 
@@ -31,7 +31,7 @@ export interface PackedObjects {
  * pack in declaration order; enums as option index. WebGPU forbids zero-size bindings, so empty
  * lists still allocate one zeroed record/point.
  */
-export function packObjects(resolved: ResolvedObject[]): PackedObjects {
+export function packObjects(resolved: ResolvedObject[], defaults?: AdjustmentDefaults): PackedObjects {
   const visible = resolved; // flatten already dropped hidden subtrees
   // A vector that evaluates its Bézier ANALYTICALLY (cable) packs 3 vec2 per anchor (p, hIn, hOut) and
   // has no baked controlPoints. Every other object packs its controlPoints — including vectors whose
@@ -190,9 +190,7 @@ export function packObjects(resolved: ResolvedObject[]): PackedObjects {
         const keys = Object.keys(kind.params);
         const val = (i: number): number => {
           const k = keys[i];
-          if (k === undefined) return 0;
-          const v = a.params[k];
-          return typeof v === "number" ? v : kind.params[k]!.default;
+          return k === undefined ? 0 : adjustmentParam(a, kind, defaults, k);
         };
         points[cpStart * 2] = adjustmentKindIndex(a.kind);
         points[cpStart * 2 + 1] = Math.min(1, Math.max(0, a.strength));

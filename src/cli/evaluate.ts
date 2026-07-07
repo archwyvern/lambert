@@ -58,12 +58,12 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const chain = detailChainParams(doc.layers);
+  const config = resolveProjectConfig(docDir);
+  const chain = detailChainParams(doc.layers, config.adjustmentDefaults);
   const detail = chain ? computeDetailField(source, chain) : null;
-  const r = renderField(flattenLayers(doc.layers), doc.source.width, doc.source.height, { supersample: 2, detail });
+  const r = renderField(flattenLayers(doc.layers), doc.source.width, doc.source.height, { supersample: 2, detail, defaults: config.adjustmentDefaults });
   if (r.mask.every((m) => m === 0)) console.warn("warning: authored mask is empty — NX would change nothing");
 
-  const config = resolveProjectConfig(docDir);
   const normalDirs = effectiveNormalDirs(doc, config); // per-doc override wins
   const output = effectiveOutput(doc, config);
   const outDir = outDirArg ? path.resolve(outDirArg) : docDir;

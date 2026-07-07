@@ -1,3 +1,4 @@
+import type { AdjustmentDefaults } from "../adjustments";
 import type { DetailField } from "../detail";
 import type { ResolvedObject } from "../flatten";
 import { downsampleRender, RenderResult, scaleResolvedForSupersample } from "../render";
@@ -118,6 +119,8 @@ export interface GpuEvaluateOptions {
   tileSize?: number;
   /** The Emboss/Detail bands (doc-res); absent = a zero header (samples return 0). */
   detail?: DetailField | null;
+  /** Project default params for inheriting adjustment entries (absent = factory defaults). */
+  defaults?: AdjustmentDefaults;
 }
 
 const APRON = 1; // normal pass needs 1px neighborhood; tiles overlap by this and drop it
@@ -255,7 +258,7 @@ export class GpuFieldRenderer {
     const tileSize = opts.tileSize ?? 2048;
     const hiW = width * f;
     const hiH = height * f;
-    const packed = packObjects(f === 1 ? resolved : scaleResolvedForSupersample(resolved, f));
+    const packed = packObjects(f === 1 ? resolved : scaleResolvedForSupersample(resolved, f), opts.defaults);
     // the detail bands sample in DOC space: scale maps the hi-res eval space back to detail texels
     const detailBuf = detailBuffer(this.device, opts.detail, 1 / f);
 

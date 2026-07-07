@@ -22,10 +22,17 @@ export interface AdjustmentParamSpec {
   float?: boolean;
 }
 
+/** Project-level default params per adjustment kind (sparse): kind id -> param -> value.
+ *  Lives in project.lambert (ProjectConfig.adjustmentDefaults) — typed here because field/ must
+ *  not import from document/. */
+export type AdjustmentDefaults = Record<string, Record<string, number>>;
+
 /** Document-level inputs some kinds sample (threaded through the fold, absent when unused). */
 export interface AdjustContext {
   /** Bilinear detail-band sample at a WORLD point (fine, medium, large) — see field/detail.ts. */
   sampleDetail?: (pw: Vector2) => [number, number, number];
+  /** Project default params for inheriting entries (absent = factory defaults). */
+  defaults?: AdjustmentDefaults;
 }
 
 export interface AdjustmentKindDef {
@@ -123,16 +130,20 @@ export function adjustmentKindIndex(id: string): number {
   return ADJUSTMENT_KINDS.findIndex((k) => k.id === id);
 }
 
-/** A fresh adjustment of the kind, at default params and full strength. */
+/** Effective param for an entry: instance override -> project default -> factory default. */
+export function adjustmentParam(a: Adjustment, kind: AdjustmentKindDef, defaults: AdjustmentDefaults | undefined, key: string): number {
+  const v = a.params?.[key];
+  if (typeof v === "number") return v;
+  const d = defaults?.[kind.id]?.[key];
+  return typeof d === "number" ? d : (kind.params[key]?.default ?? 0);
+}
+
+/** A fresh adjustment of the kind at full strength — no params, so it INHERITS the project
+ *  defaults live; params appear when the user flips its Override on. */
 export function createAdjustment(kindId: string): Adjustment {
   const kind = byId.get(kindId);
   if (!kind) throw new Error(`unknown adjustment kind: ${kindId}`);
-  return {
-    id: crypto.randomUUID(),
-    kind: kindId,
-    strength: 1,
-    params: Object.fromEntries(Object.entries(kind.params).map(([k, spec]) => [k, spec.default])),
-  };
+  return { id: crypto.randomUUID(), kind: kindId, strength: 1 };
 }
 
 /**
@@ -155,10 +166,7 @@ export function applyAdjustments(
     if (a.visible === false) continue;
     const kind = byId.get(a.kind);
     if (!kind) continue;
-    const p = (key: string): number => {
-      const v = a.params[key];
-      return typeof v === "number" ? v : (kind.params[key]?.default ?? 0);
-    };
+    const p = (key: string): number => adjustmentParam(a, kind, ctx.defaults, key);
     out = out + (kind.apply(out, p, pl, pw, region, ctx) - out) * clamp(a.strength, 0, 1) * cover;
   }
   return out;
@@ -167,17 +175,17 @@ export function applyAdjustments(
 /** The chain params of the FIRST active "detail" adjustment in the tree, or null when none —
  *  gates the precompute AND keys its cache. One Emboss chain per document (matching skyrat,
  *  where it is a whole-image pass); additional detail entries reuse the same field. */
-export function detailChainParams(layers: import("./types").LayerNode[]): import("./detail").DetailParams | null {
+export function detailChainParams(layers: import("./types").LayerNode[], defaults?: AdjustmentDefaults): import("./detail").DetailParams | null {
   for (const n of layers) {
     if ("children" in n && Array.isArray(n.children)) {
       if (!n.visible) continue;
-      const hit = detailChainParams(n.children);
+      const hit = detailChainParams(n.children, defaults);
       if (hit) return hit;
     } else if ("adjustments" in n && n.visible) {
       const a = n.adjustments?.find((x) => x.kind === "detail" && x.visible !== false);
       if (a) {
         const kind = byId.get("detail")!;
-        const p = (key: string): number => (typeof a.params[key] === "number" ? a.params[key]! : kind.params[key]!.default);
+        const p = (key: string): number => adjustmentParam(a, kind, defaults, key);
         return { radius: p("radius"), blur: p("blur"), tolerance: p("tolerance") };
       }
     }

@@ -41,7 +41,8 @@ export interface Adjustment {
   kind: string;
   /** Blend 0..1: out = mix(H, f(H), strength) — the fold-opacity lerp model. */
   strength: number;
-  params: Record<string, number>;
+  /** Absent = follow the project's adjustmentDefaults LIVE; present = fully overridden. */
+  params?: Record<string, number>;
   /** Absent = active; false = bypassed (kept but not applied). */
   visible?: boolean;
 }

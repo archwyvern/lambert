@@ -3,6 +3,7 @@ import { updateObject } from "../document/docOps";
 import { findNode, findParentId, nodeFrames, updateNode } from "../document/layerOps";
 import { isGroup, isObject } from "../field/types";
 import { polygonStats, regularPolygon, regularPolygonAligned, resamplePolyline, ringPhase } from "../field/controlPoints";
+import type { AdjustmentDefaults } from "../field/adjustments";
 import { getObjectType, ObjectTypeId } from "../field/registry";
 import { snapObjectToGrid } from "../field/snap";
 import type { GroupLayer, ObjectInstance } from "../field/types";
@@ -45,8 +46,10 @@ export function Inspector(props: {
   onSelectMask: (nodeId: string, maskId: string) => void;
   /** Global ½px grid snap (drives ring-regen snap + spinbox step granularity). */
   snap: boolean;
+  /** Project default params for inheriting adjustment entries (project.lambert). */
+  adjustmentDefaults?: AdjustmentDefaults;
 }): React.JSX.Element {
-  const { store, state, selVerts, openSettings, setTool, snap, onSelectMask } = props;
+  const { store, state, selVerts, openSettings, setTool, snap, onSelectMask, adjustmentDefaults } = props;
   const selNode = state.selectedId ? findNode(state.doc.layers, state.selectedId) : null;
   const object = selNode && isObject(selNode) ? selNode : undefined;
   // when several layers are selected we edit the PRIMARY (last picked) and show a count banner
@@ -458,7 +461,7 @@ export function Inspector(props: {
       <div className="mb-2 border-b border-border pb-1.5 text-md font-semibold text-fg">{type.name}</div>
       {object.typeId === ObjectTypeId.Adjust ? (
         <>
-          <AdjustmentList store={store} nodeId={object.id} adjustments={object.adjustments ?? []} />
+          <AdjustmentList store={store} nodeId={object.id} adjustments={object.adjustments ?? []} defaults={adjustmentDefaults} />
           <div className="my-3 border-t border-border" />
         </>
       ) : null}
