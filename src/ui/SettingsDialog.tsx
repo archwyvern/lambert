@@ -175,7 +175,7 @@ export function PreferencesDialog(props: {
     },
   ];
 
-  return <SettingsModal screens={screens} initialScreen={initialScreen} onScreenChange={onScreenChange} onClose={onClose} />;
+  return <SettingsModal title="Preferences" screens={screens} initialScreen={initialScreen} onScreenChange={onScreenChange} onClose={onClose} />;
 }
 
 export function ProjectSettingsDialog(props: {
@@ -220,7 +220,7 @@ export function ProjectSettingsDialog(props: {
     },
   ];
 
-  return <SettingsModal screens={screens} initialScreen={initialScreen} onScreenChange={onScreenChange} onClose={onClose} />;
+  return <SettingsModal title="Project Settings" screens={screens} initialScreen={initialScreen} onScreenChange={onScreenChange} onClose={onClose} />;
 }
 
 export function DocumentSettingsDialog(props: {
@@ -340,5 +340,5 @@ export function DocumentSettingsDialog(props: {
     },
   ];
 
-  return <SettingsModal screens={screens} initialScreen={initialScreen} onScreenChange={onScreenChange} onClose={onClose} />;
+  return <SettingsModal title="Document Settings" screens={screens} initialScreen={initialScreen} onScreenChange={onScreenChange} onClose={onClose} />;
 }
