@@ -120,6 +120,11 @@ export class DavClient {
   private async propfind(op: string, target: string, url: string, depth: 0 | 1): Promise<ParsedResponse[]> {
     // No body: RFC 4918 treats an empty PROPFIND as allprop, which every server understands.
     const res = await this.send(op, target, { url, method: "PROPFIND", headers: { Depth: String(depth) } });
+    // Strictly require 207: a plain 200 (an HTML page, a non-DAV endpoint) would otherwise parse as
+    // an empty multistatus and read as "server with zero projects" instead of a config error.
+    if (res.status !== 207) {
+      throw new Error(`${target}: not a WebDAV server (expected a 207 multistatus, got HTTP ${res.status})`);
+    }
     return parseMultistatus(new TextDecoder().decode(res.body));
   }
 

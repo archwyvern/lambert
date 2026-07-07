@@ -708,13 +708,14 @@ export function App(): React.JSX.Element {
   // --- remote projects: sync (pull) / export (push) against the project's WebDAV server ---
   // Runners + conflict semantics live in src/remote (fixture-tested); this is IO/UI binding only.
 
-  /** Resolve the open remote project's server entry + sidecar, or explain what's missing. */
+  /** Resolve the open remote project's server entry + sidecar, or explain what's missing. Falls
+   *  back to matching by baseUrl: entry ids are random, so a deleted-and-re-added server heals. */
   const remoteConnection = (): { server: RemoteServer; sc: Sidecar } | null => {
     const sc = sidecarRef.current;
     if (!sc) return null; // commands are disabled without a sidecar; belt-and-braces
-    const server = remoteServers.find((s) => s.id === sc.serverId);
+    const server = remoteServers.find((s) => s.id === sc.serverId) ?? remoteServers.find((s) => s.baseUrl === sc.baseUrl);
     if (!server) {
-      notify("This project's remote server is missing — re-add it in Preferences > Remote Servers", "error");
+      notify(`This project's remote server is missing — re-add ${sc.baseUrl} in Preferences > Remote Servers`, "error");
       return null;
     }
     return { server, sc };

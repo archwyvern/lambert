@@ -60,7 +60,7 @@ export async function runDavCheck(): Promise<void> {
 
     // 2. clone onto the real filesystem via the carapace fs bridge + host writeFile
     const io = localIo(host, (d) => carapaceHost.fs!.list(d), dir);
-    const { sidecar, failed } = await cloneProject(dav, project, server.id, io, silentUi);
+    const { sidecar, failed } = await cloneProject(dav, project, { id: server.id, baseUrl: server.baseUrl }, io, silentUi);
     const fileCount = Object.keys(sidecar.files).length;
     log("cloneProject to real disk", failed.length === 0 && fileCount > 0, `${fileCount} files -> ${dir}`);
 

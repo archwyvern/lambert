@@ -45,9 +45,13 @@ export interface PushSummary {
   failed: { name: string; error: string }[];
 }
 
+/** Sidecar (and its .tmp) never syncs in EITHER direction — it's machine-local state; a remote
+ *  file wearing its name must not clobber it on pull. */
+const isSidecarName = (name: string): boolean => name === SIDECAR_FILE || name.startsWith(SIDECAR_FILE);
+
 /** The push scope: documents + the project file. Everything else travels download-only. */
 export const PUSH_FILTER = (name: string): boolean =>
-  name !== SIDECAR_FILE && !name.startsWith(SIDECAR_FILE) && (/\.lmb$/i.test(name) || name === "project.lambert");
+  !isSidecarName(name) && (/\.lmb$/i.test(name) || name === "project.lambert");
 
 const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -59,11 +63,11 @@ async function record(etag: string, data: Uint8Array): Promise<SidecarFileRecord
 export async function cloneProject(
   dav: DavClient,
   project: string,
-  serverId: string,
+  server: { id: string; baseUrl: string },
   io: LocalIo,
   ui: SyncUi,
 ): Promise<{ sidecar: Sidecar; failed: string[] }> {
-  const remote = await dav.listFiles(project);
+  const remote = (await dav.listFiles(project)).filter((r) => !isSidecarName(r.name));
   const files: Record<string, SidecarFileRecord> = {};
   const failed: string[] = [];
   for (const [i, entry] of remote.entries()) {
@@ -77,7 +81,10 @@ export async function cloneProject(
       ui.info(`Failed to download ${entry.name}: ${errText(e)}`);
     }
   }
-  return { sidecar: { serverId, projectPath: project, lastPull: new Date().toISOString(), files }, failed };
+  return {
+    sidecar: { serverId: server.id, baseUrl: server.baseUrl, projectPath: project, lastPull: new Date().toISOString(), files },
+    failed,
+  };
 }
 
 /** Hash the local side of the given names (missing files are simply absent from the result). */
@@ -96,7 +103,7 @@ export async function runPull(
   io: LocalIo,
   ui: SyncUi,
 ): Promise<{ sidecar: Sidecar; summary: PullSummary }> {
-  const remote = await dav.listFiles(sidecar.projectPath);
+  const remote = (await dav.listFiles(sidecar.projectPath)).filter((r) => !isSidecarName(r.name));
   const local = await scanLocal(io, remote.map((r) => r.name));
   const plan = planPull(remote, local, sidecar);
   const remoteByName = new Map(remote.map((r) => [r.name, r]));

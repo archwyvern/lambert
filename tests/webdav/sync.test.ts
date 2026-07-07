@@ -3,7 +3,7 @@ import { planPull, planPush, sha256Hex, type LocalFile, type Sidecar } from "../
 import type { RemoteEntry } from "../../src/remote/dav";
 
 const sidecar = (files: Sidecar["files"]): Sidecar => ({
-  serverId: "srv", projectPath: "proj", lastPull: "2026-07-07T00:00:00Z", files,
+  serverId: "srv", baseUrl: "http://dav.test/", projectPath: "proj", lastPull: "2026-07-07T00:00:00Z", files,
 });
 const remote = (name: string, etag: string): RemoteEntry => ({ name, etag, size: 1 });
 const local = (name: string, sha256: string): LocalFile => ({ name, sha256 });

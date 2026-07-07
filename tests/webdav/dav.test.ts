@@ -93,6 +93,13 @@ describe("DavClient against sha256 fixture", () => {
     const err = await clientFor(fx).getFile("proj one", "a.png").then(() => null, (e: unknown) => e);
     expect((err as DavError).status).toBe(500);
   });
+
+  it("a 200 where a 207 belongs reads as 'not a WebDAV server', not as zero projects", async () => {
+    fx.failNext(200, "PROPFIND"); // a non-DAV endpoint answering PROPFIND with a plain 200
+    const err = await clientFor(fx).listProjects().then(() => null, (e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toContain("not a WebDAV server");
+  });
 });
 
 describe("DavClient against opaque-etag fixture", () => {

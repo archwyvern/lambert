@@ -32,6 +32,7 @@ function memIo(): SidecarIo & { store: Map<string, Uint8Array>; writes: string[]
 
 const SAMPLE: Sidecar = {
   serverId: "srv1",
+  baseUrl: "http://dav.test/",
   projectPath: "zarha",
   lastPull: "2026-07-07T12:00:00.000Z",
   files: { "a.lmb": { etag: "e1", size: 3, sha256: "h1" } },

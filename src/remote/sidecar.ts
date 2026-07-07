@@ -22,6 +22,7 @@ export interface SidecarIo {
 
 const sidecarSchema = z.object({
   serverId: z.string(),
+  baseUrl: z.string(),
   projectPath: z.string(),
   lastPull: z.string(),
   files: z.record(z.string(), z.object({ etag: z.string(), size: z.number(), sha256: z.string() })),
