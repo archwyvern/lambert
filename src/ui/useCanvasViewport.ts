@@ -51,7 +51,11 @@ export function useCanvasViewport(opts: {
     const onZoom = (e: Event): void => {
       const action = (e as CustomEvent<string>).detail;
       const rect = hostRef.current!.getBoundingClientRect();
-      if (action === "zoom-fit") {
+      if (action === "zoom-in" || action === "zoom-out") {
+        // keyboard zoom steps about the view centre (Photoshop-style Ctrl+= / Ctrl+-)
+        const factor = action === "zoom-in" ? 1.25 : 1 / 1.25;
+        setViewport((v) => zoomAt(v, v2(rect.width / 2, rect.height / 2), factor));
+      } else if (action === "zoom-fit") {
         setViewport(fitViewport(docW, docH, rect.width, rect.height, 40));
       } else if (action === "zoom-100") {
         setViewport({ zoom: 1, panX: (rect.width - docW) / 2, panY: (rect.height - docH) / 2 });

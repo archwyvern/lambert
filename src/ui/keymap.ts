@@ -37,7 +37,7 @@ export function guide2D(ctx: GuideContext): GuideSection[] {
   }
 
   const out: GuideSection[] = [
-    { title: "Tools", items: [{ keys: "Q W E R T M", label: "Select · Move · Rotate · Scale · Vertex · Measure" }] },
+    { title: "Tools", items: [{ keys: "V W R S A I", label: "Select · Move · Rotate · Scale · Vertex · Measure" }] },
   ];
 
   if (ctx.tool === "measure") {
@@ -109,10 +109,10 @@ export function guide2D(ctx: GuideContext): GuideSection[] {
       { keys: "Wheel", label: "Zoom" },
       { keys: "MMB / Space-drag", label: "Pan" },
       { keys: "X", label: "Swap 3D view" },
-      { keys: "V", label: "Cycle view mode" },
+      { keys: "F", label: "Cycle view mode" },
       { keys: "Arrows", label: "Nudge (Shift ×10)" },
-      { keys: "Ctrl+Z / Y", label: "Undo / Redo" },
-      { keys: "Ctrl+D", label: "Duplicate" },
+      { keys: "Ctrl+Z / Ctrl+Shift+Z", label: "Undo / Redo" },
+      { keys: "Ctrl+J", label: "Duplicate" },
     ],
   });
   return out;

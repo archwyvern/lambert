@@ -2,10 +2,10 @@ import "./styles.css";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { decode, encode } from "fast-png";
 import { DocumentStore } from "../document/store";
-import { addInstance, duplicateObject, removeObject, reorderObject, updateObject } from "../document/docOps";
+import { addInstance, duplicateObject, moveObjectTo, removeObject, reorderObject, updateObject } from "../document/docOps";
 import { createFromPreset } from "../field/presets";
 import { bakeRings, bezierAnchor } from "../field/bezier";
-import { addNode, cloneNode, findNode, ungroup, updateNode, wrapInGroup } from "../document/layerOps";
+import { addNode, cloneNode, findNode, siblingsOf, ungroup, updateNode, wrapInGroup } from "../document/layerOps";
 import { flattenLayers } from "../field/flatten";
 import { isGroup, isObject, type LayerNode, type ObjectInstance } from "../field/types";
 import { Vector2, Vector3 } from "@carapace/primitives";
@@ -53,7 +53,7 @@ import { AboutDialog } from "./AboutDialog";
 import { DocumentSettingsDialog, PreferencesDialog, ProjectSettingsDialog } from "./SettingsDialog";
 import type { ViewMode, PointLight } from "./preview";
 import { VIEW_MODES } from "./preview";
-import { TOOL_KEYS, ToolMode } from "./tools";
+import { ToolMode } from "./tools";
 import { v2 } from "../field/vec";
 
 const clampPanel = (w: number): number => Math.min(480, Math.max(160, w));
@@ -976,9 +976,33 @@ export function App(): React.JSX.Element {
           t.store.commit((d) => ids.reduce((dd, sid) => reorderObject(dd, sid, action === "order-front" ? +1 : -1), d));
         }
         return;
+      case "order-top":
+      case "order-bottom":
+        if (t && ids.length) {
+          t.store.commit((d) =>
+            ids.reduce((dd, sid) => moveObjectTo(dd, sid, action === "order-top" ? siblingsOf(dd.layers, sid).length - 1 : 0), d),
+          );
+        }
+        return;
+      case "deselect":
+        if (t) {
+          setSelVerts([]);
+          t.store.select(null);
+        }
+        return;
+      case "tab-next":
+      case "tab-prev": {
+        const ws = workspaceRef.current;
+        if (!ws || !t || ws.tabs.length < 2) return;
+        const cur = ws.indexById(t.id);
+        ws.focus(ws.tabs[(cur + (action === "tab-next" ? 1 : ws.tabs.length - 1)) % ws.tabs.length]!.id);
+        return;
+      }
       case "zoom-fit":
       case "zoom-100":
       case "zoom-fit-selection":
+      case "zoom-in":
+      case "zoom-out":
         window.dispatchEvent(new CustomEvent("lambert-zoom", { detail: action }));
         return;
       case "toggle-rulers":
@@ -1362,7 +1386,7 @@ export function App(): React.JSX.Element {
                 </SplitView>
               </div>
             </aside>
-            {active ? <ToolPalette tool={tool} setTool={setTool} /> : null}
+            {active ? <ToolPalette tool={tool} setTool={setTool} keyFor={(t) => bindings.get(`tool-${t}`)} /> : null}
             <Sash orientation="vertical" onDrag={(dx) => setLeftWidth((w) => clampPanel(w + dx))} />
           </>
         ) : null}
