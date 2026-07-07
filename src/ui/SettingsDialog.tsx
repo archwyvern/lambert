@@ -14,6 +14,8 @@ import {
 } from "../document/schema";
 import { NormalDirsEditor } from "./NormalDirsEditor";
 import { Button } from "./kit";
+import { RemoteServersScreen } from "./RemoteServersScreen";
+import type { RemoteServer } from "../remote/servers";
 
 /** A labelled settings row: label column left, control right — the screens' shared rhythm. */
 function Row(props: { label: string; children: React.ReactNode }): React.JSX.Element {
@@ -107,11 +109,14 @@ export function PreferencesDialog(props: {
   /** App-level "check for updates automatically" toggle (per-machine). */
   autoUpdateCheck: boolean;
   onAutoUpdateCheck: (v: boolean) => void;
+  /** Configured WebDAV servers for remote projects (per-machine). */
+  remoteServers: RemoteServer[];
+  onRemoteServers: (fn: (prev: RemoteServer[]) => RemoteServer[]) => void;
   initialScreen?: string;
   onScreenChange?: (id: string) => void;
   onClose: () => void;
 }): React.JSX.Element {
-  const { bindingOverrides, onBindingOverrides, autoUpdateCheck, onAutoUpdateCheck, initialScreen, onScreenChange, onClose } = props;
+  const { bindingOverrides, onBindingOverrides, autoUpdateCheck, onAutoUpdateCheck, remoteServers, onRemoteServers, initialScreen, onScreenChange, onClose } = props;
 
   const shortcutRows: ShortcutRow[] = [
     ...COMMANDS.map((c) => ({
@@ -166,6 +171,12 @@ export function PreferencesDialog(props: {
           />
         </div>
       ),
+    },
+    {
+      id: "app-remotes",
+      label: "Remote Servers",
+      keywords: ["webdav", "remote", "server", "sync", "clone", "skyrat", "credentials"],
+      render: () => <RemoteServersScreen servers={remoteServers} onServers={onRemoteServers} />,
     },
     {
       id: "app-updates",

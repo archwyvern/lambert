@@ -5,6 +5,7 @@ describe("settingsDialogFor", () => {
   it("routes app screens to preferences", () => {
     expect(settingsDialogFor("app-shortcuts")).toBe("prefs");
     expect(settingsDialogFor("app-updates")).toBe("prefs");
+    expect(settingsDialogFor("app-remotes")).toBe("prefs");
   });
 
   it("routes doc screens to document settings", () => {

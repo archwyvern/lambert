@@ -1456,6 +1456,8 @@ export function App(): React.JSX.Element {
           onBindingOverrides={setBindingOverrides}
           autoUpdateCheck={autoUpdateCheck}
           onAutoUpdateCheck={setAutoUpdateCheck}
+          remoteServers={remoteServers}
+          onRemoteServers={setRemoteServers}
           initialScreen={prefsScreen}
           onScreenChange={setPrefsScreen}
           onClose={() => setSettingsOpen(null)}
