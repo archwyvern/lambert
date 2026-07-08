@@ -1,4 +1,6 @@
 import "./styles.css";
+import "@carapace/shell/seti.css";
+import "./fileIcons";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { decode, encode } from "fast-png";
 import { DocumentStore } from "../document/store";
@@ -43,7 +45,6 @@ import { UpdateNotice } from "./UpdateNotice";
 import { FileExplorer, ImageView } from "@carapace/shell";
 import type { ImageViewInfo } from "@carapace/shell";
 import type { DirEntry, FileExplorerActions, FileExplorerProps, MenuModel } from "@carapace/shell";
-import { DocumentRegular, FolderRegular, ImageRegular } from "@fluentui/react-icons";
 import { usePersistentState } from "./persist";
 import { loadSidecar, saveSidecar } from "../remote/sidecar";
 import type { Sidecar } from "../remote/sync";
@@ -80,14 +81,6 @@ const IMAGE_MIMES: Record<string, string> = {
 function imageMime(path: string): string {
   return IMAGE_MIMES[path.toLowerCase().split(".").pop() ?? ""] ?? "application/octet-stream";
 }
-
-/** Leading glyph for a file-tree entry: folder / image / generic file. */
-const fileIcon = (e: DirEntry): React.ReactNode => {
-  const props = { className: "shrink-0 text-fg-mid", style: { fontSize: ICON.md } };
-  if (e.isDir) return <FolderRegular {...props} />;
-  if (/\.png$/i.test(e.name)) return <ImageRegular {...props} />;
-  return <DocumentRegular {...props} />;
-};
 
 export interface ViewState {
   mode: ViewMode;
@@ -1669,8 +1662,6 @@ export function App(): React.JSX.Element {
                     {/* bump just the file tree to 13px (JetBrains-ish) by scoping carapace's
                         --text-sm token to this subtree; leaves every other text-sm + carapace untouched */}
                     <div className="-mx-1 min-h-0 flex-1 overflow-y-auto" style={{ ["--text-sm" as string]: "0.8125rem" }}>
-                      {/* getIcon cast bridges a duplicate @types/react (carapace pins 19.0, lambert
-                          19.2); the ReactNode objects are identical, only nominally distinct */}
                       <FileExplorer
                         root={workspace.projectPath}
                         rootNode={{
@@ -1688,7 +1679,6 @@ export function App(): React.JSX.Element {
                         onDidRename={reconcileRename}
                         onDidDelete={reconcileDelete}
                         actionsRef={explorerActions}
-                        getIcon={fileIcon as FileExplorerProps["getIcon"]}
                         getDecoration={(e) => gitDecorations.get(e.path)}
                         // .lmb documents, viewable images, folders. project.lambert is hidden (infra) so it
                         // can't be renamed/deleted from the tree, which would break the project.

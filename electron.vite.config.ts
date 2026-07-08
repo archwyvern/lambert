@@ -46,6 +46,7 @@ export default defineConfig({
         // subpath FIRST (vite matches aliases in order; the bare alias maps to a file, so
         // "@carapace/shell/ipc" would otherwise resolve to index.ts/ipc and fail)
         "@carapace/shell/ipc": resolve(import.meta.dirname, "../carapace/packages/shell/src/fs/client.ts"),
+        "@carapace/shell/seti.css": resolve(import.meta.dirname, "../carapace/packages/shell/src/tree/fileIcons/seti.css"),
         "@carapace/shell": resolve(import.meta.dirname, "../carapace/packages/shell/src/index.ts"),
         "@carapace/primitives": resolve(import.meta.dirname, "../carapace/packages/primitives/src/index.ts"),
       },
