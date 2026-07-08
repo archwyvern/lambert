@@ -19,8 +19,6 @@ export function buildMenuModel(opts: {
   /** The active tab is a DOCUMENT (image tabs disable doc-only items). */
   hasDoc: boolean;
   hasSel: boolean;
-  /** The open project is a remote (WebDAV) clone — enables Sync / Export to Remote. */
-  hasRemote: boolean;
   canAlign: boolean;
   canDistribute: boolean;
   canUndo: boolean;
@@ -29,14 +27,13 @@ export function buildMenuModel(opts: {
   rulers: boolean;
   pixelGrid: boolean;
 }): MenuModel {
-  const { action, about, keys, hasWorkspace, hasActive, hasDoc, hasSel, hasRemote, canAlign, canDistribute, canUndo, canRedo, hasPresets, rulers, pixelGrid } = opts;
+  const { action, about, keys, hasWorkspace, hasActive, hasDoc, hasSel, canAlign, canDistribute, canUndo, canRedo, hasPresets, rulers, pixelGrid } = opts;
   return [
     {
       label: "&&File",
       items: [
         { label: "New Project…", shortcut: keys("new-project"), run: () => action("new-project") },
         { label: "Open Project…", shortcut: keys("open-project"), run: () => action("open-project") },
-        { label: "Clone Remote Project…", shortcut: keys("remote-clone"), run: () => action("remote-clone") },
         { separator: true },
         { label: "New Document…", shortcut: keys("new-document"), enabled: hasWorkspace, run: () => action("new-document") },
         { label: "Reload Diffuse", enabled: hasDoc, run: () => action("reload-diffuse") },
@@ -45,12 +42,9 @@ export function buildMenuModel(opts: {
         { label: "Save All", shortcut: keys("save-all"), enabled: hasWorkspace, run: () => action("save-all") },
         { label: "Close Tab", shortcut: keys("close-tab"), enabled: hasActive, run: () => action("close-tab") },
         { separator: true },
-        { label: hasRemote ? "Export NX to Remote" : "Export NX", shortcut: keys("export-nx"), enabled: hasDoc, run: () => action("export-nx") },
+        { label: "Export NX", shortcut: keys("export-nx"), enabled: hasDoc, run: () => action("export-nx") },
         { label: "Export Height Map", shortcut: keys("export-height"), enabled: hasDoc, run: () => action("export-height") },
-        { label: hasRemote ? "Export All NX to Remote" : "Export All NX", shortcut: keys("export-all"), enabled: hasWorkspace, run: () => action("export-all") },
-        { separator: true },
-        { label: "Sync from Remote", shortcut: keys("remote-sync"), enabled: hasRemote, run: () => action("remote-sync") },
-        { label: "Export to Remote", shortcut: keys("remote-export"), enabled: hasRemote, run: () => action("remote-export") },
+        { label: "Export All NX", shortcut: keys("export-all"), enabled: hasWorkspace, run: () => action("export-all") },
         { separator: true },
         { label: "Import Presets…", enabled: hasWorkspace, run: () => action("import-presets") },
         { label: "Export Presets…", enabled: hasWorkspace && hasPresets, run: () => action("export-presets") },

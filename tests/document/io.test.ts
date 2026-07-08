@@ -48,7 +48,6 @@ function fakeHost(files: Record<string, Uint8Array>): Host {
     openFolderDialog: () => Promise.resolve(null),
     setMenuAccelerators: () => Promise.resolve(),
     revealPath: () => Promise.resolve(),
-    request: () => Promise.reject(new Error("no network in fakeHost")),
     openInNewWindow: () => Promise.resolve(),
     rename: (from, to) => {
       const f = files[from];

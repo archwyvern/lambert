@@ -46,17 +46,11 @@ import { FileExplorer, FileTypeIcon, ImageView } from "@carapace/shell";
 import type { ImageViewInfo } from "@carapace/shell";
 import type { DirEntry, FileExplorerActions, FileExplorerProps, MenuModel } from "@carapace/shell";
 import { usePersistentState } from "./persist";
-import { loadSidecar, saveSidecar } from "../remote/sidecar";
-import type { Sidecar } from "../remote/sync";
-import { runPull, runPush, runPushNamed, type SyncUi } from "../remote/runner";
-import { makeDavClient, normalizeServer, type RemoteServer } from "../remote/servers";
-import { davTransport, localIo, sidecarIo } from "./remoteGlue";
 import { Sash, SplitView, EditorTabs, tabVerbIds, StatusBar, formatKeys, KeybindingProvider, useConfirm, EmptyState, parseGitPorcelainZ, scmDecoration, type ScmDecoration, type MenuItem, type TabMenuVerb } from "@carapace/shell";
 import { Toolbar } from "./Toolbar";
 import { ViewControls } from "./ViewControls";
 import { LambertMark } from "./LambertMark";
 import { LaunchScreen } from "./LaunchScreen";
-import { RemoteCloneDialog } from "./RemoteCloneDialog";
 import { NewDocumentDialog } from "./NewDocumentDialog";
 import { AboutDialog } from "./AboutDialog";
 import { DocumentSettingsDialog, PreferencesDialog, ProjectSettingsDialog } from "./SettingsDialog";
@@ -177,15 +171,6 @@ export function App(): React.JSX.Element {
   const [normalAlphaGate, setNormalAlphaGate] = usePersistentState("normalAlphaGate", true);
   const [autoUpdateCheck, setAutoUpdateCheck] = usePersistentState("autoUpdateCheck", true); // startup update check (Settings › Updates)
   const [recents, setRecents] = usePersistentState<RecentProject[]>("recentProjects", []); // launch-screen MRU
-  // remote projects: configured WebDAV servers (app-level) + the open project's sync state (null =
-  // not a remote project). sidecarRef keeps the command registry's stable closures honest.
-  const [remoteServers, setRemoteServers] = usePersistentState<RemoteServer[]>("remoteServers", []);
-  // one-time shape migration: v0.6.0 entries stored flat username/password (pre-auth-modes)
-  useEffect(() => setRemoteServers((prev) => prev.map(normalizeServer)), []); // eslint-disable-line react-hooks/exhaustive-deps
-  const [remoteCloneOpen, setRemoteCloneOpen] = useState(false);
-  const [sidecar, setSidecar] = useState<Sidecar | null>(null);
-  const sidecarRef = useRef<Sidecar | null>(null);
-  sidecarRef.current = sidecar;
   const [lastDir, setLastDir] = usePersistentState<string | null>("lastProjectDir", null); // open-dialog defaultPath
   const [leftWidth, setLeftWidth] = usePersistentState("panel:left", 220);
   const [layersHeight, setLayersHeight] = usePersistentState("panel:layers", 280);
@@ -275,21 +260,9 @@ export function App(): React.JSX.Element {
     setRecents((rs) => pushRecent(rs, path, basename(path.replace(/\/+$/, "")) || path, Date.now()));
   const removeRecentProject = (path: string): void => setRecents((rs) => removeRecent(rs, path));
 
-  // Remote projects: a project is remote iff its sidecar exists; corruption is soft (re-clone
-  // recovers). EVERY way into a project must call this — enterProject and the session restore —
-  // or the remote verbs grey out and the root row loses the server's name.
-  const refreshSidecar = (projectPath: string): void => {
-    setSidecar(null);
-    void loadSidecar(sidecarIo(getHost()), projectPath).then((s) => {
-      if (s === "corrupt") notify("Remote sync state is corrupted — re-clone the project to restore syncing", "error");
-      else if (s) setSidecar(s);
-    });
-  };
-
   const enterProject = (opened: OpenedProject): string => {
     setWorkspace(new Workspace(opened.projectPath, opened.config));
     setViews({});
-    refreshSidecar(opened.projectPath);
     recordRecent(opened.projectPath);
     setLastDir(dirname(opened.projectPath)); // reopen the dialog at the project's containing folder next time
     getHost().notifyProjectOpened(); // grow the welcome window to the remembered editor size
@@ -608,7 +581,7 @@ export function App(): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Reload the active doc's diffuse from its source (refresh remote cache), re-validating dims —
+  // Reload the active doc's diffuse from its source (refresh any network cache), re-validating dims —
   // a size change offers the adopt/scale migration instead of refusing
   const reloadDiffuse = (): void => {
     const ws = workspaceRef.current;
@@ -684,10 +657,6 @@ export function App(): React.JSX.Element {
   };
 
   const exportActive = (): void => {
-    if (sidecarRef.current) {
-      exportActiveRemote(); // remote projects upload straight to the server
-      return;
-    }
     const ws = workspaceRef.current;
     const t = ws?.active;
     if (!ws || t?.kind !== "doc") return;
@@ -731,91 +700,6 @@ export function App(): React.JSX.Element {
     return lmbs;
   };
 
-  // Remote projects: Export NX renders as usual, writes the NX beside the sources at the project
-  // root (the remote is flat; Sync would mirror it there anyway), then uploads it with the usual
-  // If-Match discipline and records it in the sidecar so the next Sync doesn't re-download it.
-  const exportActiveRemote = (): void => {
-    const ws = workspaceRef.current;
-    const t = ws?.active;
-    if (!ws || t?.kind !== "doc") return;
-    if (t.diffuse.unresolved) {
-      notify("Relink the diffuse (Reload Diffuse) before exporting — this document has no diffuse loaded", "error");
-      return;
-    }
-    if (!t.docPath) {
-      notify("Save the document before exporting its NX", "error");
-      return;
-    }
-    run(
-      (async () => {
-        const output = effectiveOutput(t.store.state.doc, ws.config);
-        const out = joinPath(ws.projectPath, basename(t.docPath!).replace(/\.lmb$/i, "") + nxExtension(output));
-        const file = await renderDocNx(getHost(), t.store.state.doc, t.docPath!, ws.config, out, ws.projectPath);
-        await getHost().writeFile(file.path, file.bytes);
-        const pushed = await pushRendered([basename(file.path)]);
-        if (pushed !== null) return pushed;
-        return file.warning ? `Exported ${basename(file.path)} to remote — WARNING: ${file.warning}` : `Exported ${basename(file.path)} to remote`;
-      })(),
-    );
-  };
-
-  const exportAllRemote = (): void => {
-    const ws = workspaceRef.current;
-    if (!ws) return;
-    run(
-      (async () => {
-        const lmbs = await collectProjectLmbs(ws.projectPath);
-        if (lmbs.length === 0) {
-          notify("Nothing to export — the project has no .lmb documents", "error");
-          return;
-        }
-        const liveDocs = new Map(ws.tabs.filter((t): t is DocTab => t.kind === "doc" && t.docPath !== null).map((t) => [t.docPath!, t.store.state.doc]));
-        const names: string[] = [];
-        const renderFailed: string[] = [];
-        for (const lmb of lmbs) {
-          try {
-            const doc = liveDocs.get(lmb) ?? parseDoc(new TextDecoder().decode(await getHost().readFile(lmb)));
-            const ext = nxExtension(effectiveOutput(doc, ws.config));
-            const out = joinPath(ws.projectPath, basename(lmb).replace(/\.lmb$/i, "") + ext);
-            const file = await renderDocNx(getHost(), doc, lmb, ws.config, out, ws.projectPath);
-            await getHost().writeFile(file.path, file.bytes);
-            names.push(basename(file.path));
-          } catch {
-            renderFailed.push(basename(lmb));
-          }
-        }
-        const pushed = names.length > 0 ? await pushRendered(names, { summarize: true }) : null;
-        const parts = [pushed, countPart(renderFailed.length, "failed to render")].filter((x): x is string => x !== null && x.length > 0);
-        return `Export: ${parts.length ? parts.join(", ") : "nothing rendered"}`;
-      })(),
-    );
-  };
-
-  /** Upload freshly rendered NX files and persist the sidecar. Single-name mode returns null on
-   *  clean success (the caller words the message); summarize mode returns the counts string. */
-  const pushRendered = async (names: string[], opts?: { summarize?: boolean }): Promise<string | null> => {
-    const conn = remoteConnection();
-    const ws = workspaceRef.current;
-    if (!conn || !ws) return "Remote connection lost — check Preferences > Remote Servers";
-    const dav = makeDavClient(davTransport(getHost()), conn.server);
-    const io = localIo(getHost(), (d) => carapaceHost.fs!.list(d), ws.projectPath);
-    const { sidecar: next, summary } = await runPushNamed(dav, conn.sc, io, remoteSyncUi("Uploading"), names);
-    await saveSidecar(sidecarIo(getHost()), ws.projectPath, next);
-    setSidecar(next);
-    // NX pushes are authoritative (runPushNamed overwrites; no preconditions), so `blocked`
-    // is impossible here — only real transport/server failures surface.
-    if (opts?.summarize) {
-      const parts = [
-        countPart(summary.uploaded.length, "uploaded"),
-        countPart(summary.skipped.length, "unchanged"),
-        countPart(summary.failed.length, "failed"),
-      ].filter((p): p is string => p !== null);
-      return parts.join(", ");
-    }
-    if (summary.failed.length) return `Failed to upload ${summary.failed[0]!.name}: ${summary.failed[0]!.error}`;
-    return null;
-  };
-
   // height-map export: the authored height field as 16-bit grayscale, next to Export NX
   const exportHeightmap = (): void => {
     const ws = workspaceRef.current;
@@ -842,10 +726,6 @@ export function App(): React.JSX.Element {
   // exports its LIVE doc (what you see is what you get, unsaved edits included); closed files parse
   // from disk. One OS folder picker for the whole batch, defaulting to <project>/dist/.
   const exportAll = (): void => {
-    if (sidecarRef.current) {
-      exportAllRemote();
-      return;
-    }
     const ws = workspaceRef.current;
     if (!ws) return;
     void (async () => {
@@ -881,85 +761,6 @@ export function App(): React.JSX.Element {
     })();
   };
 
-  // --- remote projects: sync (pull) / export (push) against the project's WebDAV server ---
-  // Runners + conflict semantics live in src/remote (fixture-tested); this is IO/UI binding only.
-
-  /** Resolve the open remote project's server entry + sidecar, or explain what's missing. Falls
-   *  back to matching by baseUrl: entry ids are random, so a deleted-and-re-added server heals. */
-  const remoteConnection = (): { server: RemoteServer; sc: Sidecar } | null => {
-    const sc = sidecarRef.current;
-    if (!sc) return null; // commands are disabled without a sidecar; belt-and-braces
-    const server = remoteServers.find((s) => s.id === sc.serverId) ?? remoteServers.find((s) => s.baseUrl === sc.baseUrl);
-    if (!server) {
-      notify(`This project's remote server is missing — re-add ${sc.baseUrl} in Preferences > Remote Servers`, "error");
-      return null;
-    }
-    return { server, sc };
-  };
-
-  const remoteSyncUi = (verb: string): SyncUi => ({
-    progress: (name, done, total) => setStatus({ text: `${verb} ${name} (${done}/${total})`, tone: "info" }),
-    confirmOverwriteLocal: async (name) =>
-      (await confirm({
-        title: `${name} changed on the server and locally`,
-        message: "Overwrite your local copy with the server version? Your local edits to this file will be lost.",
-        confirmLabel: "Overwrite local",
-        cancelLabel: "Keep mine",
-        danger: true,
-      })) === "confirm",
-    info: (m) => notify(m),
-  });
-
-  /** Count fragments like "3 new" — only non-zero parts make the summary. */
-  const countPart = (n: number, label: string): string | null => (n > 0 ? `${n} ${label}` : null);
-
-  const remoteSync = (): void => {
-    const conn = remoteConnection();
-    const ws = workspaceRef.current;
-    if (!conn || !ws) return;
-    run(
-      (async () => {
-        const dav = makeDavClient(davTransport(getHost()), conn.server);
-        const io = localIo(getHost(), (d) => carapaceHost.fs!.list(d), ws.projectPath);
-        const { sidecar: next, summary } = await runPull(dav, conn.sc, io, remoteSyncUi("Syncing"));
-        await saveSidecar(sidecarIo(getHost()), ws.projectPath, next);
-        setSidecar(next);
-        refreshGitStatus();
-        const parts = [
-          countPart(summary.downloaded.length, "downloaded"),
-          countPart(summary.fastForwarded.length, "updated"),
-          countPart(summary.conflictsOverwritten.length, "overwritten"),
-          countPart(summary.conflictsKept.length, "kept (conflict)"),
-          countPart(summary.keptLocal.length, "local ahead"),
-          countPart(summary.failed.length, "failed"),
-        ].filter((p): p is string => p !== null);
-        return `Sync: ${parts.length ? parts.join(", ") : "everything up to date"}`;
-      })(),
-    );
-  };
-
-  const remoteExport = (): void => {
-    const conn = remoteConnection();
-    const ws = workspaceRef.current;
-    if (!conn || !ws) return;
-    run(
-      (async () => {
-        const dav = makeDavClient(davTransport(getHost()), conn.server);
-        const io = localIo(getHost(), (d) => carapaceHost.fs!.list(d), ws.projectPath);
-        const { sidecar: next, summary } = await runPush(dav, conn.sc, io, remoteSyncUi("Uploading"));
-        await saveSidecar(sidecarIo(getHost()), ws.projectPath, next);
-        setSidecar(next);
-        const parts = [
-          countPart(summary.uploaded.length, "uploaded"),
-          countPart(summary.skipped.length, "unchanged"),
-          countPart(summary.blocked.length, "blocked — Sync first"),
-          countPart(summary.failed.length, "failed"),
-        ].filter((p): p is string => p !== null);
-        return `Export: ${parts.length ? parts.join(", ") : "nothing to export"}`;
-      })(),
-    );
-  };
-
   // update + persist project.lambert (normal dirs, saved presets, ...)
   const persistConfig = (config: ProjectConfig): void => {
     const ws = workspaceRef.current;
@@ -972,7 +773,7 @@ export function App(): React.JSX.Element {
   };
 
   // Explorer root-row rename -> the project display name in project.lambert (empty = clear back
-  // to the directory default). Never available on remote clones (the server owns the name).
+  // to the directory default).
   const renameProject = (name: string): void => {
     const ws = workspaceRef.current;
     if (!ws) return;
@@ -1184,12 +985,6 @@ export function App(): React.JSX.Element {
         return exportHeightmap();
       case "export-all":
         return exportAll();
-      case "remote-clone":
-        return setRemoteCloneOpen(true);
-      case "remote-sync":
-        return remoteSync();
-      case "remote-export":
-        return remoteExport();
       case "save-preset":
         return savePresetFromSelection();
       case "import-presets":
@@ -1411,8 +1206,6 @@ export function App(): React.JSX.Element {
                 return !!t?.store.canRedo;
               case "presets":
                 return (ws?.config.presets?.length ?? 0) > 0;
-              case "remote":
-                return sidecarRef.current !== null;
               default:
                 return false;
             }
@@ -1558,7 +1351,6 @@ export function App(): React.JSX.Element {
         }
         if (ws.tabs.length > 0) ws.activeIndex = Math.min(Math.max(0, s.activeIndex), ws.tabs.length - 1);
         setWorkspace(ws);
-        refreshSidecar(s.projectPath); // restored projects keep their remote-ness (sync/export verbs, root name)
         setViews(restoredViews);
         setViewports(restoredViewports);
         setOrbits(restoredOrbits);
@@ -1610,9 +1402,8 @@ export function App(): React.JSX.Element {
   useDemoBootstrap({ setWorkspace, setViews, setSwapped, setNewDocPath, setSelVerts, setTool, setBoxMode, openSettings, runAction: (id) => runMenuActionRef.current(id), defaultView: DEFAULT_VIEW });
   // the window-level editor keymap (tools, Esc, Delete, nudges, copy/paste, X/V) — QC-CARRY-2 extraction
   useEditorKeymap({ workspaceRef, runMenuActionRef, bindingsRef: editorBindingsRef, selVertsRef, nudgeEndTimer, setSwapped, setSelVerts, setTool, setActiveView, onChordPending: setChordPending });
-  // Explorer root-row label: remote clones show the server's project name (rename disabled);
-  // local projects the configured name, else the directory basename.
-  const projectDisplayName = sidecar?.projectPath ?? workspace?.config.name ?? (workspace ? basename(workspace.projectPath) : "");
+  // Explorer root-row label: the configured project name, else the directory basename.
+  const projectDisplayName = workspace?.config.name ?? (workspace ? basename(workspace.projectPath) : "");
 
   const tabInfos = workspace
     ? workspace.tabs.map((t) => {
@@ -1653,7 +1444,6 @@ export function App(): React.JSX.Element {
     hasActive: !!active,
     hasDoc: !!activeDoc,
     hasSel,
-    hasRemote: sidecar !== null,
     canAlign,
     canDistribute,
     canUndo: !!activeDoc?.store.canUndo,
@@ -1699,30 +1489,13 @@ export function App(): React.JSX.Element {
       <CommandProvider registry={registry}>
         <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       </CommandProvider>
-      {remoteCloneOpen ? (
-        <RemoteCloneDialog
-          servers={remoteServers}
-          onAddServer={() => {
-            setRemoteCloneOpen(false);
-            openSettingsDialog("prefs", "app-remotes");
-          }}
-          onCloned={(dir) => {
-            setRemoteCloneOpen(false);
-            openPath(dir);
-          }}
-          onClose={() => setRemoteCloneOpen(false)}
-        />
-      ) : null}
-      {/* prefs are app-level (shortcuts, updates, remote servers) — no workspace required, and the
-          clone-from-launch-screen flow needs Remote Servers reachable before any project exists */}
+      {/* prefs are app-level (shortcuts, updates) — no workspace required */}
       {settingsOpen === "prefs" ? (
         <PreferencesDialog
           bindingOverrides={bindingOverrides}
           onBindingOverrides={setBindingOverrides}
           autoUpdateCheck={autoUpdateCheck}
           onAutoUpdateCheck={setAutoUpdateCheck}
-          remoteServers={remoteServers}
-          onRemoteServers={setRemoteServers}
           initialScreen={prefsScreen}
           onScreenChange={setPrefsScreen}
           onClose={() => setSettingsOpen(null)}
@@ -1789,9 +1562,7 @@ export function App(): React.JSX.Element {
                         }
                         rootNode={{
                           label: projectDisplayName,
-                          // remote clones take the server's project name — renaming is skyrat's
-                          // business (project.lambert syncs, so a local rename would push to everyone)
-                          onRename: sidecar ? undefined : renameProject,
+                          onRename: renameProject,
                         }}
                         onOpen={(p) => {
                           if (/\.lmb$/i.test(p)) openDoc(p);
@@ -1952,7 +1723,6 @@ export function App(): React.JSX.Element {
               onRemoveRecent={removeRecentProject}
               onNew={() => openProject("new")}
               onOpen={() => openProject("open")}
-              onRemote={() => setRemoteCloneOpen(true)}
             />
           )}
         </div>

@@ -222,26 +222,6 @@ app.whenReady().then(() => {
     return bytes;
   });
 
-  // Generic HTTP proxy for the remote-projects WebDAV client: custom methods (PROPFIND) + arbitrary
-  // headers, no renderer CORS. Uncached (unlike net:fetchUrl) — sync correctness needs live answers.
-  ipcMain.handle(
-    "net:request",
-    async (_e, req: { url: string; method: string; headers: Record<string, string>; body?: Uint8Array }) => {
-      const res = await fetch(req.url, {
-        method: req.method,
-        headers: req.headers,
-        // cast: plain Uint8Array params type as <ArrayBufferLike>; fetch's BodyInit wants <ArrayBuffer>
-        body: req.body && req.body.byteLength > 0 ? (req.body as Uint8Array<ArrayBuffer>) : undefined,
-        signal: AbortSignal.timeout(30000),
-      });
-      const headers: Record<string, string> = {};
-      res.headers.forEach((v, k) => {
-        headers[k.toLowerCase()] = v;
-      });
-      return { status: res.status, headers, body: new Uint8Array(await res.arrayBuffer()) };
-    },
-  );
-
   ipcMain.handle("fs:rename", (_e, from: string, to: string) => rename(from, to));
 
   ipcMain.handle("dialog:openFolder", async (_e, opts: { title: string; defaultPath?: string }) => {

@@ -9,7 +9,7 @@ export type CommandScope = "global" | "editor";
 
 /** What must be true for the command to run — mapped to live workspace checks in App. */
 // "active" = any open tab (image included); "doc" = an open DOCUMENT tab
-export type CommandEnable = "always" | "workspace" | "active" | "doc" | "sel" | "align" | "distribute" | "undo" | "redo" | "presets" | "remote" | "never";
+export type CommandEnable = "always" | "workspace" | "active" | "doc" | "sel" | "align" | "distribute" | "undo" | "redo" | "presets" | "never";
 
 export interface CommandSpec {
   id: string;
@@ -29,10 +29,6 @@ export const COMMANDS: CommandSpec[] = [
   // File
   { id: "new-project", label: "New Project…", category: "File", keys: "Ctrl+Shift+N", scope: "global", enable: "always" },
   { id: "open-project", label: "Open Project…", category: "File", keys: "Ctrl+O", scope: "global", enable: "always" },
-  // remote projects (WebDAV): clone is always available; sync/export need an open remote project
-  { id: "remote-clone", label: "Clone Remote Project…", category: "File", keys: null, scope: "global", enable: "always" },
-  { id: "remote-sync", label: "Sync from Remote", category: "File", keys: null, scope: "global", enable: "remote" },
-  { id: "remote-export", label: "Export to Remote", category: "File", keys: null, scope: "global", enable: "remote" },
   { id: "new-document", label: "New Document…", category: "File", keys: "Ctrl+N", scope: "global", enable: "workspace" },
   { id: "reload-diffuse", label: "Reload Diffuse", category: "File", keys: null, scope: "global", enable: "doc" },
   { id: "save", label: "Save", category: "File", keys: "Ctrl+S", scope: "global", enable: "doc" },

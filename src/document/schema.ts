@@ -229,8 +229,7 @@ export const presetLibrarySchema = z.object({
 
 export const projectConfigSchema = z.object({
   schemaVersion: z.literal(1),
-  /** Display name (Explorer root row, status surfaces). Absent = the directory basename.
-   *  Remote clones ignore it in favour of the server's project name. */
+  /** Display name (Explorer root row, status surfaces). Absent = the directory basename. */
   name: z.string().optional(),
   normalDirs: normalDirsSchema,
   /** NX output format (channel layout, bit depth, container). */
