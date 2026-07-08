@@ -17,7 +17,7 @@ import { DimsMismatchError, exportDocNx, exportTabHeightmap, exportTabNx, newPro
 import { nxExtension } from "../document/exports";
 import { migrateDocToDims, type ResizeMode } from "../document/migrate";
 import { ResizeMigrationDialog } from "./ResizeMigrationDialog";
-import { resolveDiffuse } from "../document/diffuseSource";
+import { healDiffuse, relativizeSourceUri, resolveDiffuse } from "../document/diffuseSource";
 import { basename, dirname, joinPath } from "../document/paths";
 import { pushRecent, removeRecent, type RecentProject } from "../document/recents";
 import { buildSessionJson, parseSessionJson } from "../document/session";
@@ -404,7 +404,7 @@ export function App(): React.JSX.Element {
       (async () => {
         let opened: Awaited<ReturnType<typeof openDocTab>>;
         try {
-          opened = await openDocTab(getHost(), docPath);
+          opened = await openDocTab(getHost(), docPath, ws.projectPath);
         } catch (err) {
           if (err instanceof DimsMismatchError) {
             // the diffuse changed size: offer the adopt/scale migration instead of refusing
@@ -537,10 +537,12 @@ export function App(): React.JSX.Element {
         if (await getHost().pathExists(path)) {
           throw new Error(`${basename(path)} already exists — pick a different name`);
         }
-        const bytes = await resolveDiffuse(getHost(), uri); // throws on bad source → nothing written
+        // in-project sources are stored project-relative so the .lmb is portable across clones
+        const portable = relativizeSourceUri(uri, ws.projectPath);
+        const bytes = await resolveDiffuse(getHost(), portable, { baseDir: ws.projectPath }); // throws on bad source → nothing written
         const d = decode(bytes); // validates it's a real image; records dims
-        await getHost().writeFile(path, new TextEncoder().encode(serializeDoc(emptyDoc(uri, d.width, d.height))));
-        const { tab } = await openDocTab(getHost(), path); // fresh emptyDoc → no unknown layers to drop
+        await getHost().writeFile(path, new TextEncoder().encode(serializeDoc(emptyDoc(portable, d.width, d.height))));
+        const { tab } = await openDocTab(getHost(), path, ws.projectPath); // fresh emptyDoc → no unknown layers to drop
         const prevView = (ws.active && viewsRef.current[ws.active.id]) || DEFAULT_VIEW;
         setViews((vs) => ({ ...vs, [tab.id]: { ...prevView } }));
         ws.openTab(tab);
@@ -616,7 +618,7 @@ export function App(): React.JSX.Element {
     run(
       (async () => {
         const doc = t.store.state.doc;
-        const bytes = await resolveDiffuse(getHost(), doc.source.uri, { refresh: true });
+        const bytes = await resolveDiffuse(getHost(), doc.source.uri, { refresh: true, baseDir: ws.projectPath });
         const d = decode(bytes);
         if (d.width !== doc.source.width || d.height !== doc.source.height) {
           setResizeAsk({ kind: "reload", tabId: t.id, bytes, width: d.width, height: d.height, oldW: doc.source.width, oldH: doc.source.height });
@@ -707,7 +709,7 @@ export function App(): React.JSX.Element {
         filters: [{ name: "NX normal map", extensions: [output.format] }],
       });
       if (!out) return;
-      run(exportTabNx(getHost(), t, ws.config, out).then((r) => { refreshGitStatus(); return r; }));
+      run(exportTabNx(getHost(), t, ws.config, out, ws.projectPath).then((r) => { refreshGitStatus(); return r; }));
     })();
   };
 
@@ -764,7 +766,7 @@ export function App(): React.JSX.Element {
           lmbs.map(async (lmb) => {
             const doc = liveDocs.get(lmb) ?? parseDoc(new TextDecoder().decode(await getHost().readFile(lmb)));
             const ext = nxExtension(effectiveOutput(doc, ws.config)); // per-doc override may change the container
-            return exportDocNx(getHost(), doc, lmb, ws.config, joinPath(dir, basename(lmb).replace(/\.lmb$/i, "") + ext));
+            return exportDocNx(getHost(), doc, lmb, ws.config, joinPath(dir, basename(lmb).replace(/\.lmb$/i, "") + ext), ws.projectPath);
           }),
         ).then((results) => {
           refreshGitStatus();
@@ -1424,7 +1426,7 @@ export function App(): React.JSX.Element {
           let bytes: Uint8Array;
           let unresolved = false;
           try {
-            bytes = await resolveDiffuse(host, doc.source.uri); // file:// or cached http(s)
+            bytes = await resolveDiffuse(host, doc.source.uri, { baseDir: s.projectPath }); // relative, file:// or cached http(s)
           } catch {
             // Blank placeholder SIZED TO THE DOC — setDiffuse enforces exact dims, so a 1x1 would throw
             // and (no error boundary) unmount the app to a blank screen. A doc-sized transparent image

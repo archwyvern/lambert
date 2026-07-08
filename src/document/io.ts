@@ -16,7 +16,7 @@ import { PROJECT_FILE, type DocTab } from "./workspace";
 import { countUnknownLayers } from "../field/registry";
 import { buildNxExport } from "./exports";
 import { diffuseOpacity } from "../exporters/nx";
-import { defaultDocName, resolveDiffuse } from "./diffuseSource";
+import { defaultDocName, healDiffuse, resolveDiffuse } from "./diffuseSource";
 
 export interface OpenedProject {
   projectPath: string;
@@ -92,9 +92,20 @@ export class DimsMismatchError extends Error {
  * `droppedUnknown` is how many legacy/removed-type object layers were dropped on load (the drop is
  * intended graceful-degrade; the count lets the caller tell the user it happened).
  */
-export async function openDocTab(host: Host, docPath: string): Promise<{ tab: DocTab; droppedUnknown: number }> {
-  const doc = parseDoc(new TextDecoder().decode(await host.readFile(docPath)));
-  const bytes = await resolveDiffuse(host, doc.source.uri);
+export async function openDocTab(host: Host, docPath: string, projectPath: string): Promise<{ tab: DocTab; droppedUnknown: number }> {
+  let doc = parseDoc(new TextDecoder().decode(await host.readFile(docPath)));
+  let bytes: Uint8Array;
+  try {
+    bytes = await resolveDiffuse(host, doc.source.uri, { baseDir: projectPath });
+  } catch (err) {
+    // A dead absolute path (this .lmb came from another machine's clone, or the folder moved):
+    // re-anchor it under the current project root and carry the portable relative form forward —
+    // it persists on the next save, so the doc self-heals per machine with no prompt.
+    const healed = await healDiffuse(host, doc.source.uri, projectPath);
+    if (!healed) throw err;
+    doc = { ...doc, source: { ...doc.source, uri: healed.uri } };
+    bytes = healed.bytes;
+  }
   const decoded = decode(bytes);
   if (decoded.width !== doc.source.width || decoded.height !== doc.source.height) {
     throw new DimsMismatchError(docPath, doc, bytes, decoded.width, decoded.height);
@@ -130,9 +141,9 @@ export async function saveTab(host: Host, tab: DocTab, projectPath: string): Pro
  * tab-based, so the project-wide sweep can export `.lmb` files that aren't open; `label` names the
  * doc in errors (a path or filename).
  */
-export async function exportDocNx(host: Host, doc: LambertDoc, label: string, config: ProjectConfig, outPath: string): Promise<string> {
+export async function exportDocNx(host: Host, doc: LambertDoc, label: string, config: ProjectConfig, outPath: string, projectPath: string): Promise<string> {
   const { gpuExportRender } = await import("../ui/exportRender");
-  const bytes = await resolveDiffuse(host, doc.source.uri);
+  const bytes = await resolveDiffuse(host, doc.source.uri, { baseDir: projectPath });
   const { detailChainParams } = await import("../field/adjustments");
   const { detailFieldForDiffuse } = await import("../field/detail");
   const chain = detailChainParams(doc.layers, config.adjustmentDefaults);
@@ -154,9 +165,9 @@ export async function exportDocNx(host: Host, doc: LambertDoc, label: string, co
 }
 
 /** Export the active tab's LIVE document (unsaved edits included). Requires a saved doc for naming. */
-export async function exportTabNx(host: Host, tab: DocTab, config: ProjectConfig, outPath: string): Promise<string> {
+export async function exportTabNx(host: Host, tab: DocTab, config: ProjectConfig, outPath: string, projectPath: string): Promise<string> {
   if (!tab.docPath) throw new Error("Save the document before exporting its NX");
-  return exportDocNx(host, tab.store.state.doc, tab.docPath, config, outPath);
+  return exportDocNx(host, tab.store.state.doc, tab.docPath, config, outPath, projectPath);
 }
 
 /** Export the active tab's height field as 16-bit grayscale PNG (heights normalized min->0,

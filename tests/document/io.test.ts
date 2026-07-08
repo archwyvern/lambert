@@ -100,7 +100,7 @@ test("openDocTab resolves a file:// diffuse and builds a tab", async () => {
     "/p/ship.lmb": new TextEncoder().encode(serializeDoc(doc)),
     "/art/ship.df.png": gray(32, 16),
   };
-  const { tab, droppedUnknown } = await openDocTab(fakeHost(files), "/p/ship.lmb");
+  const { tab, droppedUnknown } = await openDocTab(fakeHost(files), "/p/ship.lmb", "/p");
   expect(tab.docPath).toBe("/p/ship.lmb");
   expect(tab.id).toBeTruthy();
   expect(tab.diffuse.bytes.length).toBeGreaterThan(0);
@@ -114,14 +114,14 @@ test("openDocTab rejects on dimension mismatch (NX contract)", async () => {
     "/p/ship.lmb": new TextEncoder().encode(serializeDoc(doc)),
     "/art/ship.df.png": gray(32, 32),
   };
-  await expect(openDocTab(fakeHost(files), "/p/ship.lmb")).rejects.toThrow(/64x64/);
+  await expect(openDocTab(fakeHost(files), "/p/ship.lmb", "/p")).rejects.toThrow(/64x64/);
 });
 
 test("saveTab writes the tab's docPath when it has one", async () => {
   const doc = emptyDoc("file:///art/ship.df.png", 8, 8);
   const files = { "/p/ship.lmb": new TextEncoder().encode(serializeDoc(doc)), "/art/ship.df.png": gray(8, 8) };
   const host = fakeHost(files);
-  const { tab } = await openDocTab(host, "/p/ship.lmb");
+  const { tab } = await openDocTab(host, "/p/ship.lmb", "/p");
   expect(await saveTab(host, tab, "/p")).toBe("/p/ship.lmb");
 });
 
@@ -155,7 +155,7 @@ test("saveTab returns null when the save dialog is cancelled", async () => {
 
 test("exportTabNx refuses an untitled doc (must be saved first)", async () => {
   const tab = untitledTab("file:///art/x.df.png", 8, 8, gray(8, 8));
-  await expect(exportTabNx(fakeHost({}), tab, emptyProjectConfig(), "/out/x.nx.png")).rejects.toThrow(/Save the document/);
+  await expect(exportTabNx(fakeHost({}), tab, emptyProjectConfig(), "/out/x.nx.png", "/p")).rejects.toThrow(/Save the document/);
 });
 
 test("openProjectByPath reads the marker from a known folder, no dialog", async () => {
@@ -217,4 +217,33 @@ test("buildNxExport throws when the render dims don't match the doc (NX contract
   const doc = emptyDoc("file:///art/hull.df.png", 32, 32);
   const wrongSize = renderField(flattenLayers(doc.layers), 16, 16, { supersample: 1 }); // 16x16 != doc 32x32
   expect(() => buildNxExport(doc, wrongSize, "/p/hull.nx.png", DEFAULT_NORMAL_DIRS, DEFAULT_OUTPUT)).toThrow(/16x16.*32x32/);
+});
+
+test("openDocTab heals a dead absolute diffuse path against the project root (clone portability)", async () => {
+  // .lmb exported on another machine: its absolute file:// path doesn't exist here, but the
+  // diffuse came down with the clone — the doc must open AND carry the portable relative uri.
+  const doc = emptyDoc("file:///home/other-artist/zarha/armor.df.png", 8, 8);
+  const files = {
+    "/clone/ship.lmb": new TextEncoder().encode(serializeDoc(doc)),
+    "/clone/armor.df.png": gray(8, 8),
+  };
+  const host = fakeHost(files);
+  const { tab } = await openDocTab(host, "/clone/ship.lmb", "/clone");
+  expect(tab.store.state.doc.source.uri).toBe("armor.df.png");
+  expect(tab.diffuse.bytes.length).toBeGreaterThan(0);
+  // the healed form persists on save
+  await saveTab(host, tab, "/clone");
+  const saved = new TextDecoder().decode(files["/clone/ship.lmb"]);
+  expect(saved).toContain('"armor.df.png"');
+  expect(saved).not.toContain("other-artist");
+});
+
+test("openDocTab resolves a project-relative diffuse", async () => {
+  const doc = emptyDoc("textures/panel.df.png", 8, 8);
+  const files = {
+    "/p/panel.lmb": new TextEncoder().encode(serializeDoc(doc)),
+    "/p/textures/panel.df.png": gray(8, 8),
+  };
+  const { tab } = await openDocTab(fakeHost(files), "/p/panel.lmb", "/p");
+  expect(tab.diffuse.bytes.length).toBeGreaterThan(0);
 });
