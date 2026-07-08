@@ -1,23 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg id="Layer_2" xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="-5 -5 134 134">
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="-5 -5 134 134">
   <defs>
     <linearGradient id="normalTop" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#6effa8"/>
-      <stop offset="0.45" stop-color="#8080ff"/>
-      <stop offset="1" stop-color="#ff7da0"/>
+      <stop offset="0" stop-color="#6effa8"/><stop offset="0.45" stop-color="#8080ff"/><stop offset="1" stop-color="#ff7da0"/>
     </linearGradient>
     <linearGradient id="normalMid" x1="0" y1="1" x2="1" y2="0">
-      <stop offset="0" stop-color="#56c8ff"/>
-      <stop offset="0.5" stop-color="#6a6fe8"/>
-      <stop offset="1" stop-color="#ff7dc8"/>
+      <stop offset="0" stop-color="#56c8ff"/><stop offset="0.5" stop-color="#6a6fe8"/><stop offset="1" stop-color="#ff7dc8"/>
     </linearGradient>
     <filter id="topcast" x="-30%" y="-30%" width="160%" height="160%">
       <feDropShadow dx="1.5" dy="5" stdDeviation="3" flood-color="#000000" flood-opacity="0.5"/>
     </filter>
   </defs>
-  <g id="Layer_4">
-    <polygon points="122.88 32.56 0 19.98 38.23 122.52 122.88 32.56" style="fill: #0d162f;"/>
-    <polygon points="122.88 22.39 0 9.81 38.23 112.35 122.88 22.39" style="fill: url(#normalMid);"/>
-    <polygon points="122.88 12.59 0 0 38.23 102.55 122.88 12.59" style="fill: url(#normalTop);" filter="url(#topcast)"/>
-  </g>
+  <polygon points="126 36 6 24 64 122.5 126 36" fill="#0d162f"/>
+  <polygon points="124 26 4 14 62 112.5 124 26" fill="url(#normalMid)"/>
+  <polygon points="122 16 2 4 60 102.5 122 16" fill="url(#normalTop)" filter="url(#topcast)"/>
 </svg>
