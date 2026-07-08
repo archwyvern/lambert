@@ -3,6 +3,11 @@ import { getHost } from "./host";
 import { Button } from "./kit";
 import { initialUpdateState, reduceUpdate } from "./updateState";
 
+/** Window event for a manual update check. The in-window MenuBar and the command palette dispatch
+ *  through App's runMenuAction (NOT the IPC menu channel, which only native OS menus use), so this
+ *  is how their "Check for Updates…" reaches the banner. */
+export const CHECK_UPDATES_EVENT = "lambert-check-updates";
+
 /** Bottom-right banner driving the update lifecycle: offer → download progress → restart, plus
  *  transient "up to date" / error messages for manual checks. Mounted once near the App root. */
 export function UpdateNotice({ autoCheck }: { autoCheck: boolean }): React.JSX.Element | null {
@@ -11,12 +16,16 @@ export function UpdateNotice({ autoCheck }: { autoCheck: boolean }): React.JSX.E
   useEffect(() => {
     const host = getHost();
     host.onUpdateEvent((ev) => dispatch(ev));
+    const manualCheck = (): void => {
+      dispatch({ type: "check", manual: true });
+      void host.checkForUpdates();
+    };
+    // native OS menu accelerators arrive over IPC; the in-window menu + palette via the window event
     host.onMenuAction((action) => {
-      if (action === "check-updates") {
-        dispatch({ type: "check", manual: true });
-        void host.checkForUpdates();
-      }
+      if (action === "check-updates") manualCheck();
     });
+    window.addEventListener(CHECK_UPDATES_EVENT, manualCheck);
+    return () => window.removeEventListener(CHECK_UPDATES_EVENT, manualCheck);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

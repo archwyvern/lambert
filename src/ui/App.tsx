@@ -41,7 +41,7 @@ import { Inspector } from "./Inspector";
 import { Layers } from "./Layers";
 import { Library } from "./Library";
 import { Button, ICON, SectionLabel } from "./kit";
-import { UpdateNotice } from "./UpdateNotice";
+import { CHECK_UPDATES_EVENT, UpdateNotice } from "./UpdateNotice";
 import { FileExplorer, FileTypeIcon, ImageView } from "@carapace/shell";
 import type { ImageViewInfo } from "@carapace/shell";
 import type { DirEntry, FileExplorerActions, FileExplorerProps, MenuModel } from "@carapace/shell";
@@ -1350,6 +1350,11 @@ export function App(): React.JSX.Element {
         return;
       case "command-palette":
         return setPaletteOpen(true);
+      case "check-updates":
+        // UpdateNotice owns the update lifecycle; hand it the manual check (window event — this
+        // dispatcher serves the in-window menu + palette, which never touch the IPC menu channel)
+        window.dispatchEvent(new Event(CHECK_UPDATES_EVENT));
+        return;
       case "view-cycle":
         return setActiveView((s) => ({ ...s, mode: VIEW_MODES[(VIEW_MODES.indexOf(s.mode) + 1) % VIEW_MODES.length]!, prevMode: s.mode }));
       case "view-toggle-last":
