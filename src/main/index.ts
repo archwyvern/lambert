@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { serveFs, serveOs } from "@carapace/shell/node";
 import electronUpdater from "electron-updater";
+import { syncLinuxDesktopIcon } from "./desktopIcon";
 
 // electron-updater is CJS; its named exports come off the default import under bundling.
 const { autoUpdater } = electronUpdater;
@@ -178,6 +179,8 @@ function setupAutoUpdate(win: BrowserWindow) {
 
 app.whenReady().then(() => {
   if (!gotInstanceLock) return;
+  // fire-and-forget: refresh the Linux launcher icon after auto-updates (see desktopIcon.ts)
+  void syncLinuxDesktopIcon();
   ipcMain.handle("dialog:open", async (_e, opts: { title: string; filters: Electron.FileFilter[] }) => {
     const r = await dialog.showOpenDialog({ title: opts.title, filters: opts.filters, properties: ["openFile"] });
     return r.canceled ? null : r.filePaths[0];
