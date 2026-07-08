@@ -802,16 +802,16 @@ export function App(): React.JSX.Element {
     const { sidecar: next, summary } = await runPushNamed(dav, conn.sc, io, remoteSyncUi("Uploading"), names);
     await saveSidecar(sidecarIo(getHost()), ws.projectPath, next);
     setSidecar(next);
+    // NX pushes are authoritative (runPushNamed overwrites; no preconditions), so `blocked`
+    // is impossible here — only real transport/server failures surface.
     if (opts?.summarize) {
       const parts = [
         countPart(summary.uploaded.length, "uploaded"),
         countPart(summary.skipped.length, "unchanged"),
-        countPart(summary.blocked.length, "blocked — Sync first"),
         countPart(summary.failed.length, "failed"),
       ].filter((p): p is string => p !== null);
       return parts.join(", ");
     }
-    if (summary.blocked.length) return `${summary.blocked[0]} changed on the server — Sync from Remote first`;
     if (summary.failed.length) return `Failed to upload ${summary.failed[0]!.name}: ${summary.failed[0]!.error}`;
     return null;
   };

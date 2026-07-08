@@ -155,14 +155,16 @@ export async function runPush(
   io: LocalIo,
   ui: SyncUi,
 ): Promise<{ sidecar: Sidecar; summary: PushSummary }> {
-  return pushNames(dav, sidecar, io, ui, (await io.list()).filter(PUSH_FILTER));
+  return pushNames(dav, sidecar, io, ui, (await io.list()).filter(PUSH_FILTER), false);
 }
 
 /**
- * Push SPECIFIC local files by name (e.g. freshly rendered NX exports) through the same
- * plan/record machinery as runPush — the caller writes the files first, this uploads them with
- * the sha-skip + If-Match/If-None-Match discipline and records them in the sidecar so the next
- * Sync treats them as already-known instead of re-downloading. The sidecar itself is never
+ * Push SPECIFIC local files by name (freshly rendered NX exports) through the same plan/record
+ * machinery as runPush, with one deliberate difference: the LOCAL FILE IS AUTHORITATIVE. These are
+ * reproducible render artifacts — the .lmb they derive from carries the real conflict guard — so a
+ * remote replace or delete is overwritten, never 412-blocked: changed content PUTs unconditionally,
+ * and unchanged content stats the remote first and re-uploads when it's missing or diverged.
+ * Records land in the sidecar so the next Sync treats them as known; the sidecar itself is never
  * pushable, even when named.
  */
 export async function runPushNamed(
@@ -172,7 +174,7 @@ export async function runPushNamed(
   ui: SyncUi,
   names: string[],
 ): Promise<{ sidecar: Sidecar; summary: PushSummary }> {
-  return pushNames(dav, sidecar, io, ui, names.filter((n) => !isSidecarName(n)));
+  return pushNames(dav, sidecar, io, ui, names.filter((n) => !isSidecarName(n)), true);
 }
 
 async function pushNames(
@@ -181,6 +183,7 @@ async function pushNames(
   io: LocalIo,
   ui: SyncUi,
   names: string[],
+  overwrite: boolean,
 ): Promise<{ sidecar: Sidecar; summary: PushSummary }> {
   const local = await scanLocal(io, names);
   const plan = planPush(local, sidecar);
@@ -190,8 +193,21 @@ async function pushNames(
   for (const [i, action] of plan.entries()) {
     ui.progress(action.name, i + 1, plan.length);
     if (action.kind === "skip") {
-      summary.skipped.push(action.name);
-      continue;
+      if (!overwrite) {
+        summary.skipped.push(action.name);
+        continue;
+      }
+      // Overwrite mode, content unchanged since the last push: the record alone can't prove the
+      // REMOTE still has it (deleted / replaced out-of-band) — stat it, and only skip on a match.
+      try {
+        const remote = await dav.statFile(sidecar.projectPath, action.name);
+        if (remote.etag === files[action.name]?.etag) {
+          summary.skipped.push(action.name);
+          continue;
+        }
+      } catch {
+        // missing or unreadable -> fall through and re-upload
+      }
     }
     try {
       const bytes = await io.read(action.name);
@@ -199,7 +215,8 @@ async function pushNames(
         sidecar.projectPath,
         action.name,
         bytes,
-        action.kind === "update" ? { ifMatch: action.ifMatch } : { ifNoneMatch: true },
+        // overwrite: no preconditions — the artifact wins over any remote state
+        overwrite ? null : action.kind === "update" ? { ifMatch: action.ifMatch } : { ifNoneMatch: true },
       );
       files[action.name] = await record(etag, bytes);
       summary.uploaded.push(action.name);

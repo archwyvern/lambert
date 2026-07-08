@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -211,25 +211,31 @@ describe("runPushNamed (NX export push)", () => {
     expect(again.summary.uploaded).toEqual([]);
   });
 
-  it("re-pushes with If-Match after a local change; 412s as blocked when the remote moved", async () => {
+  it("the local artifact is authoritative: a remote replace or DELETE is overwritten, never blocked", async () => {
     const { sidecar } = await cloneProject(dav, "zarha", { id: "s", baseUrl: fx.url }, memLocal(), scriptedUi());
     const io = memLocal();
     await io.write("b.nx.png", text("v1"));
     const first = await runPushNamed(dav, sidecar, io, scriptedUi(), ["b.nx.png"]);
 
-    // local re-render -> update via If-Match
+    // someone else replaced it remotely -> a re-render still lands (no 412, no "Sync first")
+    const current = (await dav.listFiles("zarha")).find((f) => f.name === "b.nx.png")!;
+    await dav.putFile("zarha", "b.nx.png", text("theirs"), { ifMatch: current.etag });
     await io.write("b.nx.png", text("v2"));
     const second = await runPushNamed(dav, first.sidecar, io, scriptedUi(), ["b.nx.png"]);
     expect(second.summary.uploaded).toEqual(["b.nx.png"]);
+    expect(second.summary.blocked).toEqual([]);
     expect(new TextDecoder().decode(await dav.getFile("zarha", "b.nx.png"))).toBe("v2");
 
-    // someone else replaced it remotely -> our stale etag must 412 into blocked
-    const current = (await dav.listFiles("zarha")).find((f) => f.name === "b.nx.png")!;
-    await dav.putFile("zarha", "b.nx.png", text("theirs"), { ifMatch: current.etag });
-    await io.write("b.nx.png", text("v3"));
+    // deleted remotely + UNCHANGED locally: the sha-skip must not strand it — re-upload
+    rmSync(join(root, "zarha", "b.nx.png"));
     const third = await runPushNamed(dav, second.sidecar, io, scriptedUi(), ["b.nx.png"]);
-    expect(third.summary.blocked).toEqual(["b.nx.png"]);
-    expect(new TextDecoder().decode(await dav.getFile("zarha", "b.nx.png"))).toBe("theirs"); // untouched
+    expect(third.summary.uploaded).toEqual(["b.nx.png"]);
+    expect(new TextDecoder().decode(await dav.getFile("zarha", "b.nx.png"))).toBe("v2");
+
+    // unchanged on BOTH sides: skips without re-uploading
+    const fourth = await runPushNamed(dav, third.sidecar, io, scriptedUi(), ["b.nx.png"]);
+    expect(fourth.summary.skipped).toEqual(["b.nx.png"]);
+    expect(fourth.summary.uploaded).toEqual([]);
   });
 
   it("never pushes the sidecar even when named explicitly", async () => {
