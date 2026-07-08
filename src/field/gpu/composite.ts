@@ -60,15 +60,25 @@ fn minmod(a: f32, b: f32) -> f32 {
   return select(b, a, abs(a) < abs(b));
 }
 
-// coverage-aware axis gradient (see normals.ts coverGrad / the fold normal pass): drop a carved
-// (masked-out) neighbour so a sloped surface keeps its true normal up to a trim/silhouette edge
-// instead of minmod flattening it against the carve cliff (the mask-edge fringe).
-const COVER_EPS = 1e-3;
-fn cover_grad(fwd: f32, bwd: f32, fwdCov: bool, bwdCov: bool) -> f32 {
-  if (fwdCov && bwdCov) { return minmod(fwd, bwd); }
-  if (fwdCov) { return fwd; }
-  if (bwdCov) { return bwd; }
-  return 0.0;
+// smoothness-guided one-sided gradient — the WGSL twin of sideGrad() in normals.ts (see there for
+// the full rationale). Second differences detect a discontinuity per side; the clearly smoother
+// side's slope wins, minmod is the tie fallback. Must match the CPU exactly.
+const SMOOTH_EPS = 1e-4;
+const DOM_LO = 0.333333333;
+const DOM_HI = 0.6;
+const STEP_LO = 0.25;
+const STEP_HI = 1.0;
+fn side_grad(hm2: f32, hm1: f32, h0: f32, hp1: f32, hp2: f32) -> f32 {
+  let fwd = hp1 - h0;
+  let bwd = h0 - hm1;
+  let sf = max(abs(hp2 - 2.0 * hp1 + h0), SMOOTH_EPS);
+  let sb = max(abs(h0 - 2.0 * hm1 + hm2), SMOOTH_EPS);
+  let d = (sb - sf) / (sb + sf); // >0: forward side smoother
+  let dom = clamp((abs(d) - DOM_LO) / (DOM_HI - DOM_LO), 0.0, 1.0);
+  let gate = clamp((max(sf, sb) - STEP_LO) / (STEP_HI - STEP_LO), 0.0, 1.0); // real steps only
+  let side = select(bwd, fwd, d > 0.0);
+  let base = minmod(fwd, bwd);
+  return mix(base, side, dom * gate); // CONTINUOUS blend — hard selects break f32/f64 parity
 }
 
 @vertex
@@ -95,12 +105,15 @@ fn fs(@builtin(position) fragPos: vec4f) -> @location(0) vec4f {
   let center = fold_at(pe, cu.shapeCount);
   let mask = center.y;
   let hc = center.x;
-  // coverage-aware gradient (matches the fold normal pass + CPU): a carved neighbour is excluded so
-  // a sloped surface keeps its true normal at a trim/silhouette edge (no mask-edge fringe).
-  let fxp = fold_at(pe + vec2f(e, 0.0), cu.shapeCount); let fxm = fold_at(pe - vec2f(e, 0.0), cu.shapeCount);
-  let fyp = fold_at(pe + vec2f(0.0, e), cu.shapeCount); let fym = fold_at(pe - vec2f(0.0, e), cu.shapeCount);
-  let dHdx = cover_grad(fxp.x - hc, hc - fxm.x, fxp.y > COVER_EPS, fxm.y > COVER_EPS) / e;
-  let dHdy = cover_grad(fyp.x - hc, hc - fym.x, fyp.y > COVER_EPS, fym.y > COVER_EPS) / e;
+  // smoothness-guided gradient (matches the fold normal pass + CPU deriveNormals): a stencil side
+  // that crosses a discontinuity (silhouette, mask carve, plate seam) is dropped, so sloped
+  // surfaces keep their true normal right up to any edge — no fringe, no seam.
+  let hxp = fold_at(pe + vec2f(e, 0.0), cu.shapeCount).x;  let hxp2 = fold_at(pe + vec2f(2.0 * e, 0.0), cu.shapeCount).x;
+  let hxm = fold_at(pe - vec2f(e, 0.0), cu.shapeCount).x;  let hxm2 = fold_at(pe - vec2f(2.0 * e, 0.0), cu.shapeCount).x;
+  let hyp = fold_at(pe + vec2f(0.0, e), cu.shapeCount).x;  let hyp2 = fold_at(pe + vec2f(0.0, 2.0 * e), cu.shapeCount).x;
+  let hym = fold_at(pe - vec2f(0.0, e), cu.shapeCount).x;  let hym2 = fold_at(pe - vec2f(0.0, 2.0 * e), cu.shapeCount).x;
+  let dHdx = side_grad(hxm2, hxm, hc, hxp, hxp2) / e;
+  let dHdy = side_grad(hym2, hym, hc, hyp, hyp2) / e;
   let inv = inverseSqrt(dHdx * dHdx + dHdy * dHdy + 1.0);
   let n = vec3f(-dHdx * inv, -dHdy * inv, inv);
   if (mode == 3u) {

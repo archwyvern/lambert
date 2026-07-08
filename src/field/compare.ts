@@ -6,7 +6,11 @@ export interface DriftTolerances {
   mask: number;
 }
 
-export const DEFAULT_TOLERANCES: DriftTolerances = { height: 5e-3, normal: 2e-3, mask: 2e-3 };
+// normal tolerance matches height: side_grad's one-sided gradients inherit GPU-vs-CPU height
+// drift ~1:1 near engaged discontinuities (the old always-minmod operator suppressed it by
+// favouring the flatter side and returning exactly 0 at ties, which allowed the tighter 2e-3).
+// 5e-3 on a unit normal is ~1.3 8-bit steps — beneath visibility in the exported NX.
+export const DEFAULT_TOLERANCES: DriftTolerances = { height: 5e-3, normal: 5e-3, mask: 2e-3 };
 
 export interface DriftReport {
   pass: boolean;

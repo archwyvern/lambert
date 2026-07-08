@@ -526,10 +526,10 @@ struct NormalUniforms {
 @group(0) @binding(1) var fieldTex: texture_2d<f32>;
 @group(0) @binding(2) var outNormal: texture_storage_2d<rgba32float, write>;
 
-fn field_at(x: i32, y: i32) -> vec2f {
+fn height_at(x: i32, y: i32) -> f32 {
   let cx = clamp(x, 0, i32(nu.width) - 1);
   let cy = clamp(y, 0, i32(nu.height) - 1);
-  return textureLoad(fieldTex, vec2i(cx, cy), 0).rg; // r=height, g=coverage
+  return textureLoad(fieldTex, vec2i(cx, cy), 0).r;
 }
 
 // minmod of the two one-sided slopes — keeps real slopes, drops cliffs to flat so a vertical wall
@@ -539,15 +539,25 @@ fn minmod(a: f32, b: f32) -> f32 {
   return select(b, a, abs(a) < abs(b));
 }
 
-// coverage-aware axis gradient — the WGSL twin of coverGrad() in normals.ts. A carved (masked-out /
-// off-footprint) neighbour is excluded so a sloped surface keeps its true normal up to a trim edge
-// instead of minmod cancelling it against the carve cliff (the fringe). Must match the CPU exactly.
-const COVER_EPS = 1e-3;
-fn cover_grad(fwd: f32, bwd: f32, fwdCov: bool, bwdCov: bool) -> f32 {
-  if (fwdCov && bwdCov) { return minmod(fwd, bwd); }
-  if (fwdCov) { return fwd; }
-  if (bwdCov) { return bwd; }
-  return 0.0;
+// smoothness-guided one-sided gradient — the WGSL twin of sideGrad() in normals.ts (see there for
+// the full rationale). Second differences detect a discontinuity per side; the clearly smoother
+// side's slope wins, minmod is the tie fallback. Must match the CPU exactly.
+const SMOOTH_EPS = 1e-4;
+const DOM_LO = 0.333333333;
+const DOM_HI = 0.6;
+const STEP_LO = 0.25;
+const STEP_HI = 1.0;
+fn side_grad(hm2: f32, hm1: f32, h0: f32, hp1: f32, hp2: f32) -> f32 {
+  let fwd = hp1 - h0;
+  let bwd = h0 - hm1;
+  let sf = max(abs(hp2 - 2.0 * hp1 + h0), SMOOTH_EPS);
+  let sb = max(abs(h0 - 2.0 * hm1 + hm2), SMOOTH_EPS);
+  let d = (sb - sf) / (sb + sf); // >0: forward side smoother
+  let dom = clamp((abs(d) - DOM_LO) / (DOM_HI - DOM_LO), 0.0, 1.0);
+  let gate = clamp((max(sf, sb) - STEP_LO) / (STEP_HI - STEP_LO), 0.0, 1.0); // real steps only
+  let side = select(bwd, fwd, d > 0.0);
+  let base = minmod(fwd, bwd);
+  return mix(base, side, dom * gate); // CONTINUOUS blend — hard selects break f32/f64 parity
 }
 
 @compute @workgroup_size(8, 8)
@@ -555,13 +565,11 @@ fn normals(@builtin(global_invocation_id) gid: vec3u) {
   if (gid.x >= nu.width || gid.y >= nu.height) { return; }
   let x = i32(gid.x);
   let y = i32(gid.y);
-  let c = field_at(x, y);
-  let xp = field_at(x + 1, y); let xm = field_at(x - 1, y);
-  let yp = field_at(x, y + 1); let ym = field_at(x, y - 1);
-  let dx = cover_grad(xp.x - c.x, c.x - xm.x, xp.y > COVER_EPS, xm.y > COVER_EPS) * nu.slopeScale;
-  let dy = cover_grad(yp.x - c.x, c.x - ym.x, yp.y > COVER_EPS, ym.y > COVER_EPS) * nu.slopeScale;
+  let dx = side_grad(height_at(x - 2, y), height_at(x - 1, y), height_at(x, y), height_at(x + 1, y), height_at(x + 2, y)) * nu.slopeScale;
+  let dy = side_grad(height_at(x, y - 2), height_at(x, y - 1), height_at(x, y), height_at(x, y + 1), height_at(x, y + 2)) * nu.slopeScale;
   let inv = inverseSqrt(dx * dx + dy * dy + 1.0);
-  textureStore(outNormal, vec2u(gid.xy), vec4f(-dx * inv, -dy * inv, inv, c.y));
+  let m = textureLoad(fieldTex, vec2i(x, y), 0).g;
+  textureStore(outNormal, vec2u(gid.xy), vec4f(-dx * inv, -dy * inv, inv, m));
 }
 `;
 

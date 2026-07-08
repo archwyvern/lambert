@@ -44,24 +44,35 @@ fn minmod(a: f32, b: f32) -> f32 {
   return select(b, a, abs(a) < abs(b));
 }
 
-// coverage-aware axis gradient (see normals.ts / composite): exclude carved neighbours so a sloped
-// surface keeps its true normal at a trim/silhouette edge instead of a flattened fringe.
-const COVER_EPS = 1e-3;
-fn cover_grad(fwd: f32, bwd: f32, fwdCov: bool, bwdCov: bool) -> f32 {
-  if (fwdCov && bwdCov) { return minmod(fwd, bwd); }
-  if (fwdCov) { return fwd; }
-  if (bwdCov) { return bwd; }
-  return 0.0;
+// smoothness-guided one-sided gradient — the WGSL twin of sideGrad() in normals.ts (see there for
+// the full rationale). Second differences detect a discontinuity per side; the clearly smoother
+// side's slope wins, minmod is the tie fallback. Must match the CPU exactly.
+const SMOOTH_EPS = 1e-4;
+const DOM_LO = 0.333333333;
+const DOM_HI = 0.6;
+const STEP_LO = 0.25;
+const STEP_HI = 1.0;
+fn side_grad(hm2: f32, hm1: f32, h0: f32, hp1: f32, hp2: f32) -> f32 {
+  let fwd = hp1 - h0;
+  let bwd = h0 - hm1;
+  let sf = max(abs(hp2 - 2.0 * hp1 + h0), SMOOTH_EPS);
+  let sb = max(abs(h0 - 2.0 * hm1 + hm2), SMOOTH_EPS);
+  let d = (sb - sf) / (sb + sf); // >0: forward side smoother
+  let dom = clamp((abs(d) - DOM_LO) / (DOM_HI - DOM_LO), 0.0, 1.0);
+  let gate = clamp((max(sf, sb) - STEP_LO) / (STEP_HI - STEP_LO), 0.0, 1.0); // real steps only
+  let side = select(bwd, fwd, d > 0.0);
+  let base = minmod(fwd, bwd);
+  return mix(base, side, dom * gate); // CONTINUOUS blend — hard selects break f32/f64 parity
 }
 `;
 
 const PREVIEW3D_BODY = /* wgsl */ `
 // Height at a doc pixel center, clamped to the canvas — the analytic equivalent of sampling the old
 // doc-res field texture at integer coords (the fold shader wrote fold_at((x+0.5, y+0.5)) at texel x,y).
-fn field_at_px(ix: i32, iy: i32) -> vec2f {
+fn height_at_px(ix: i32, iy: i32) -> f32 {
   let cx = clamp(ix, 0, i32(u.docW) - 1);
   let cy = clamp(iy, 0, i32(u.docH) - 1);
-  return fold_at(vec2f(f32(cx) + 0.5, f32(cy) + 0.5), u.shapeCount); // x=height, y=coverage
+  return fold_at(vec2f(f32(cx) + 0.5, f32(cy) + 0.5), u.shapeCount).x;
 }
 
 @vertex
@@ -108,11 +119,9 @@ fn fs(in: VOut) -> @location(0) vec4f {
   if (diffuse.a < 0.5) { discard; } // transparent diffuse -> see the floor grid through it
   // analytic image-space normal: minmod of one-sided slopes at this doc pixel — identical math to the
   // 2D lit composite / deriveNormals, so the two previews can never disagree.
-  let c = field_at_px(px.x, px.y);
-  let xp = field_at_px(px.x + 1, px.y); let xm = field_at_px(px.x - 1, px.y);
-  let yp = field_at_px(px.x, px.y + 1); let ym = field_at_px(px.x, px.y - 1);
-  let dx = cover_grad(xp.x - c.x, c.x - xm.x, xp.y > COVER_EPS, xm.y > COVER_EPS) * u.slopeScale;
-  let dy = cover_grad(yp.x - c.x, c.x - ym.x, yp.y > COVER_EPS, ym.y > COVER_EPS) * u.slopeScale;
+  let hc = height_at_px(px.x, px.y);
+  let dx = side_grad(height_at_px(px.x - 2, px.y), height_at_px(px.x - 1, px.y), hc, height_at_px(px.x + 1, px.y), height_at_px(px.x + 2, px.y)) * u.slopeScale;
+  let dy = side_grad(height_at_px(px.x, px.y - 2), height_at_px(px.x, px.y - 1), hc, height_at_px(px.x, px.y + 1), height_at_px(px.x, px.y + 2)) * u.slopeScale;
   let inv = inverseSqrt(dx * dx + dy * dy + 1.0);
   let n2d = vec3f(-dx * inv, -dy * inv, inv);
   // a wall's minmod normal is flat (0), so light cliff faces by the geometric normal instead, remapped
