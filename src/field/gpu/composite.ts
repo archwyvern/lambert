@@ -60,6 +60,17 @@ fn minmod(a: f32, b: f32) -> f32 {
   return select(b, a, abs(a) < abs(b));
 }
 
+// coverage-aware axis gradient (see normals.ts coverGrad / the fold normal pass): drop a carved
+// (masked-out) neighbour so a sloped surface keeps its true normal up to a trim/silhouette edge
+// instead of minmod flattening it against the carve cliff (the mask-edge fringe).
+const COVER_EPS = 1e-3;
+fn cover_grad(fwd: f32, bwd: f32, fwdCov: bool, bwdCov: bool) -> f32 {
+  if (fwdCov && bwdCov) { return minmod(fwd, bwd); }
+  if (fwdCov) { return fwd; }
+  if (bwdCov) { return bwd; }
+  return 0.0;
+}
+
 @vertex
 fn vs(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4f {
   var pos = array<vec2f, 3>(vec2f(-1.0, -3.0), vec2f(3.0, 1.0), vec2f(-1.0, 1.0));
@@ -84,8 +95,12 @@ fn fs(@builtin(position) fragPos: vec4f) -> @location(0) vec4f {
   let center = fold_at(pe, cu.shapeCount);
   let mask = center.y;
   let hc = center.x;
-  let dHdx = minmod(fold_at(pe + vec2f(e, 0.0), cu.shapeCount).x - hc, hc - fold_at(pe - vec2f(e, 0.0), cu.shapeCount).x) / e;
-  let dHdy = minmod(fold_at(pe + vec2f(0.0, e), cu.shapeCount).x - hc, hc - fold_at(pe - vec2f(0.0, e), cu.shapeCount).x) / e;
+  // coverage-aware gradient (matches the fold normal pass + CPU): a carved neighbour is excluded so
+  // a sloped surface keeps its true normal at a trim/silhouette edge (no mask-edge fringe).
+  let fxp = fold_at(pe + vec2f(e, 0.0), cu.shapeCount); let fxm = fold_at(pe - vec2f(e, 0.0), cu.shapeCount);
+  let fyp = fold_at(pe + vec2f(0.0, e), cu.shapeCount); let fym = fold_at(pe - vec2f(0.0, e), cu.shapeCount);
+  let dHdx = cover_grad(fxp.x - hc, hc - fxm.x, fxp.y > COVER_EPS, fxm.y > COVER_EPS) / e;
+  let dHdy = cover_grad(fyp.x - hc, hc - fym.x, fyp.y > COVER_EPS, fym.y > COVER_EPS) / e;
   let inv = inverseSqrt(dHdx * dHdx + dHdy * dHdy + 1.0);
   let n = vec3f(-dHdx * inv, -dHdy * inv, inv);
   if (mode == 3u) {
