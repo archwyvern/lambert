@@ -49,7 +49,7 @@ export function GroupGizmo(props: { group: GroupLayer; viewport: Viewport; store
   const t = group.transform;
   const moveDrag = usePointerDrag<{ start: Vector2; startPos: Vector3 }>();
   const rotDrag = usePointerDrag<{ start: Vector2; startRotation: number; pivot: Vector2 }>();
-  const scaleDrag = usePointerDrag<{ start: Vector2; scale: Vector3; rotation: number; anchorLocal: Vector2; anchorCanvas: Vector2 }>();
+  const scaleDrag = usePointerDrag<{ start: Vector2; scale: Vector3; rotation: number; anchorLocal: Vector2; anchorCanvas: Vector2; anchorCanvasCorner0: Vector2; anchorCanvasCenter0: Vector2; cornerLocal: Vector2; ctrl: boolean }>();
 
   // resolve the group's frames so a NESTED group's gizmo lines up with the field. The group's TRS edits
   // live in its PARENT frame; rendering needs the full world frame. Top-level group => parent identity
@@ -83,7 +83,10 @@ export function GroupGizmo(props: { group: GroupLayer; viewport: Viewport; store
 
   const rotateProps = () =>
     rotDrag({
-      onStart: (e) => ({ start: eventCanvas(e), startRotation: t.rotation, pivot: v2(t.pos.x, t.pos.y) }),
+      onStart: (e) => {
+        if (e.button !== 0) return null; // left only: middle = pan, right = context menu
+        return { start: eventCanvas(e), startRotation: t.rotation, pivot: v2(t.pos.x, t.pos.y) };
+      },
       onMove: (e, rd) => {
         let rot = rotationFromDrag(rd.pivot, rd.start, eventCanvas(e), rd.startRotation);
         if (e.shiftKey) rot = snapAngle(rot, ROTATE_SNAP);
@@ -95,10 +98,28 @@ export function GroupGizmo(props: { group: GroupLayer; viewport: Viewport; store
   const cornerScale = (i: number) =>
     scaleDrag({
       onStart: (e) => {
-        const anchorLocal = e.ctrlKey ? center : boundsCorners[(i + 2) % 4]!;
-        return { start: eventCanvas(e), scale: t.scale, rotation: t.rotation, anchorLocal, anchorCanvas: toCanvas(anchorLocal) };
+        if (e.button !== 0) return null; // left only: middle = pan, right = context menu
+        const corner = boundsCorners[(i + 2) % 4]!;
+        return {
+          start: eventCanvas(e),
+          scale: t.scale,
+          rotation: t.rotation,
+          anchorLocal: e.ctrlKey ? center : corner,
+          anchorCanvas: toCanvas(e.ctrlKey ? center : corner),
+          // pre-drag projections of both candidate anchors: a mid-drag Ctrl toggle
+          // reinterprets the whole drag from the press (retroactive, like the object gizmo)
+          anchorCanvasCorner0: toCanvas(corner),
+          anchorCanvasCenter0: toCanvas(center),
+          cornerLocal: corner,
+          ctrl: e.ctrlKey,
+        };
       },
       onMove: (e, sd) => {
+        if (e.ctrlKey !== sd.ctrl) {
+          sd.ctrl = e.ctrlKey;
+          sd.anchorLocal = e.ctrlKey ? center : sd.cornerLocal;
+          sd.anchorCanvas = e.ctrlKey ? sd.anchorCanvasCenter0 : sd.anchorCanvasCorner0;
+        }
         const sc = axisScaleFromDrag(sd.anchorCanvas, sd.rotation, sd.start, eventCanvas(e), sd.scale, e.shiftKey);
         // pin anchorLocal at anchorCanvas under the new scale
         const c = Math.cos(sd.rotation);

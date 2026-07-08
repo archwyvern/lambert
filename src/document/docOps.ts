@@ -1,10 +1,10 @@
 import { Vector2, Vector3 } from "@carapace/primitives";
 import type { LambertDoc } from "./schema";
-import { duplicateNode, findParentId, moveNode, removeNode, siblingsOf, updateNode } from "./layerOps";
+import { duplicateNode, findNode, findParentId, moveNode, removeNode, siblingsOf, updateNode } from "./layerOps";
 import { deleteVertices } from "../field/controlPoints";
 import { deleteVerts } from "../field/meshOps";
 import { createObjectInstance, getObjectType } from "../field/registry";
-import { isObject, type ObjectInstance } from "../field/types";
+import { isGroup, isObject, type LayerNode, type ObjectInstance } from "../field/types";
 
 /**
  * Remove `verts` from an object, dispatching on its kind and guarding each kind's minimum (returns the
@@ -38,6 +38,28 @@ export function addObject(doc: LambertDoc, typeId: string, pos: Vector2): Lamber
 /** Append a pre-built object instance (e.g. one created from a palette preset). */
 export function addInstance(doc: LambertDoc, object: ObjectInstance): LambertDoc {
   return { ...doc, layers: [...doc.layers, object] };
+}
+
+/** The group a new object should land in for the current selection: the selected group itself,
+ *  or the selected node's parent group; null = top level. */
+function targetGroupId(layers: LayerNode[], selectedId: string | null): string | null {
+  if (!selectedId) return null;
+  const node = findNode(layers, selectedId);
+  if (!node) return null;
+  if (isGroup(node)) return node.id;
+  return findParentId(layers, selectedId) ?? null;
+}
+
+/** Append a pre-built instance INTO the selection's group (the selected group, or the group
+ *  containing the selected object), rebasing so its WORLD placement is what the caller set —
+ *  top-level when the selection isn't group-bound. */
+export function addInstanceNear(doc: LambertDoc, object: ObjectInstance, selectedId: string | null): LambertDoc {
+  const layers = [...doc.layers, object];
+  const group = targetGroupId(doc.layers, selectedId);
+  if (!group) return { ...doc, layers };
+  const g = findNode(layers, group);
+  const end = g && isGroup(g) ? g.children.length : 0;
+  return { ...doc, layers: moveNode(layers, object.id, group, end) };
 }
 
 export function removeObject(doc: LambertDoc, id: string): LambertDoc {

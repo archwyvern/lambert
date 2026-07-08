@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DocumentStore, EditorState } from "../document/store";
-import { addInstance, duplicateObject, moveObjectTo, removeObject, updateObject } from "../document/docOps";
+import { addInstanceNear, duplicateObject, moveObjectTo, removeObject, updateObject } from "../document/docOps";
 import { clearGuides, removeGuide } from "../document/canvasOps";
 import { bezierAnchor } from "../field/bezier";
 import { createMask } from "../field/maskOps";
@@ -54,6 +54,9 @@ type Drag =
       startWorld: Vector2;
       moved?: boolean;
       dupOnMove?: boolean;
+      /** Shift+press: a clean CLICK toggles this id in the multi-selection (deferred to pointer-up);
+       *  a real DRAG moves instead — so shift held BEFORE the press still axis-locks the move. */
+      pendingToggle?: string;
       group: { id: string; startX: number; startY: number; il: { a: number; b: number; c: number; d: number } }[];
     }
   // pivot is the node's WORLD position; detSign flips the spin under a mirrored parent (negative det)
@@ -196,6 +199,12 @@ export function CanvasView(props: {
   const [guideMenu, setGuideMenu] = useState<{ x: number; y: number; index: number } | null>(null);
   const [marquee, setMarquee] = useState<{ a: Vector2; b: Vector2 } | null>(null);
   const [bodyMenu, setBodyMenu] = useState<{ x: number; y: number; id: string } | null>(null); // right-click an object
+  // the tool in use before the mask pen — commitMask returns to it (masks render there)
+  const prevToolRef = useRef<ToolMode>("select");
+  useEffect(() => {
+    if (tool !== "pen") prevToolRef.current = tool;
+  }, [tool]);
+
   // click-to-place (pen-extend) + mask-pen draft state — QC-CARRY-1 extraction
   const { placing, setPlacing, placeCursor, setPlaceCursor, penPts, setPenPts } = usePenDraft({
     tool,
@@ -356,8 +365,10 @@ export function CanvasView(props: {
     store.update((d) => ({ ...d, layers: updateNode(d.layers, target.id, (n) => ({ ...n, masks: [...(n.masks ?? []), mask] })) }));
     store.endGesture();
     setPenPts([]);
-    // stay in the pen tool after completing a mask (draw another) — the active tool only changes via
-    // explicit tool selection or a hotkey, never as a side effect of finishing a gesture
+    // Completing a mask returns to the tool in use before the pen: masks are only VISIBLE in the
+    // select/vertex gizmos (rendering them under the pen would fight its clicks), so staying in the
+    // pen left the fresh mask invisible. Press P again to draw another.
+    setTool(prevToolRef.current);
   };
 
   const onPointerDown = (e: React.PointerEvent): void => {
@@ -430,8 +441,13 @@ export function CanvasView(props: {
     // A grab on a multi-selection member drags the whole selection; dup = Alt-drag a single copy. The
     // includes() guard also covers the caller re-selecting a non-member hit (this closure's selection
     // array is the pre-select snapshot).
-    const beginMove = (hit: ObjectInstance, dup: boolean): void => {
-      const ids = !dup && state.selectedIds.length > 1 && state.selectedIds.includes(hit.id) ? state.selectedIds : [hit.id];
+    const beginMove = (hit: ObjectInstance, dup: boolean, pendingToggle = false): void => {
+      const member = state.selectedIds.includes(hit.id);
+      const ids = !dup && state.selectedIds.length > 1 && member
+        ? state.selectedIds
+        : pendingToggle && !member && state.selectedIds.length > 0
+          ? [...state.selectedIds, hit.id] // shift-drag onto a non-member drags it WITH the selection
+          : [hit.id];
       const group = ids
         .map((sid) => {
           const node = findNode(doc.layers, sid);
@@ -446,6 +462,7 @@ export function CanvasView(props: {
         startCanvas: p,
         startWorld: affineApply(nodeFrames(doc.layers, hit.id).parentAffine, v2(hit.transform.pos.x, hit.transform.pos.y)),
         dupOnMove: dup || undefined,
+        pendingToggle: pendingToggle ? hit.id : undefined,
         group,
       };
     };
@@ -479,7 +496,9 @@ export function CanvasView(props: {
         // the selectedId effect; this also covers re-pressing the already-selected object's body.
         setSelVerts([]);
         if (e.shiftKey) {
-          store.toggleSelect(hit.id); // add/remove from the multi-selection; no drag
+          // Deferred: a clean click toggles multi-selection membership (pointer-up below); a drag
+          // past the threshold MOVES instead — shift held before the press still axis-locks it.
+          beginMove(hit, false, true);
           return;
         }
         if (e.altKey && !hit.locked) {
@@ -632,6 +651,14 @@ export function CanvasView(props: {
       if (!drag.moved) {
         if (Math.hypot(cp.x - drag.startCanvas.x, cp.y - drag.startCanvas.y) * viewport.zoom <= 3) return;
         drag.moved = true;
+        if (drag.kind === "move" && drag.pendingToggle) {
+          // it's a drag, not a click: no toggle — make the selection match what's moving
+          drag.pendingToggle = undefined;
+          const ids = drag.group.map((g) => g.id);
+          if (ids.length !== state.selectedIds.length || ids.some((id) => !state.selectedIds.includes(id))) {
+            store.setSelection(ids);
+          }
+        }
         if (drag.kind === "move" && drag.dupOnMove) {
           // duplicate IN PLACE (sibling at index+1, same group + z-neighbourhood) and hand the drag to
           // the copy. The old top-level `[...d.layers, copy]` append escaped the object's group and
@@ -699,6 +726,9 @@ export function CanvasView(props: {
 
   const endDrag = (): void => {
     const drag = dragRef.current;
+    if (drag?.kind === "move" && !drag.moved && drag.pendingToggle) {
+      store.toggleSelect(drag.pendingToggle); // shift-CLICK (no drag): the deferred selection toggle
+    }
     if (drag?.kind === "marquee" && !drag.moved && !drag.additive) {
       setSelVerts([]);
       // select tool: a plain empty-canvas click deselects the object too (like Esc). The vertex tool
@@ -798,7 +828,7 @@ export function CanvasView(props: {
     if (!presetId) return;
     const rect = hostRef.current!.getBoundingClientRect();
     const p = screenToCanvas(viewport, v2(e.clientX - rect.left, e.clientY - rect.top));
-    store.update((d) => addInstance(d, resolvePaletteObject(presetId, p)));
+    store.update((d) => addInstanceNear(d, resolvePaletteObject(presetId, p), state.selectedId));
     store.endGesture();
   };
 
