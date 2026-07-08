@@ -13,7 +13,7 @@ import { isGroup, isObject, type LayerNode, type ObjectInstance } from "../field
 import { Vector2, Vector3 } from "@carapace/primitives";
 import { effectiveNormalDirs, effectiveOutput, emptyDoc, hydrateObjectRaw, parseDoc, parseProjectConfig, presetLibrarySchema, ProjectConfig, serializeDoc, serializeProjectConfig, type LambertDoc, type SavedPreset } from "../document/schema";
 import { getObjectType, ObjectTypeId } from "../field/registry";
-import { DimsMismatchError, exportDocNx, exportTabHeightmap, exportTabNx, newProjectFlow, openDocTab, openProjectByPath, openProjectFlow, saveTab, type OpenedProject } from "../document/io";
+import { DimsMismatchError, exportDocNx, exportTabHeightmap, exportTabNx, newProjectFlow, openDocTab, openProjectByPath, openProjectFlow, renderDocNx, saveTab, type OpenedProject } from "../document/io";
 import { nxExtension } from "../document/exports";
 import { migrateDocToDims, type ResizeMode } from "../document/migrate";
 import { ResizeMigrationDialog } from "./ResizeMigrationDialog";
@@ -48,7 +48,7 @@ import type { DirEntry, FileExplorerActions, FileExplorerProps, MenuModel } from
 import { usePersistentState } from "./persist";
 import { loadSidecar, saveSidecar } from "../remote/sidecar";
 import type { Sidecar } from "../remote/sync";
-import { runPull, runPush, type SyncUi } from "../remote/runner";
+import { runPull, runPush, runPushNamed, type SyncUi } from "../remote/runner";
 import { makeDavClient, normalizeServer, type RemoteServer } from "../remote/servers";
 import { davTransport, localIo, sidecarIo } from "./remoteGlue";
 import { Sash, SplitView, EditorTabs, tabVerbIds, StatusBar, formatKeys, KeybindingProvider, useConfirm, EmptyState, parseGitPorcelainZ, scmDecoration, type ScmDecoration, type MenuItem, type TabMenuVerb } from "@carapace/shell";
@@ -685,6 +685,10 @@ export function App(): React.JSX.Element {
   };
 
   const exportActive = (): void => {
+    if (sidecarRef.current) {
+      exportActiveRemote(); // remote projects upload straight to the server
+      return;
+    }
     const ws = workspaceRef.current;
     const t = ws?.active;
     if (!ws || t?.kind !== "doc") return;
@@ -713,6 +717,106 @@ export function App(): React.JSX.Element {
     })();
   };
 
+  /** Every .lmb in the project (recursive), skipping dotdirs and the dist output folder. */
+  const collectProjectLmbs = async (projectPath: string): Promise<string[]> => {
+    const lmbs: string[] = [];
+    const walk = async (dir: string): Promise<void> => {
+      const entries = await carapaceHost.fs!.list(dir).catch(() => []);
+      for (const e of entries) {
+        if (e.name.startsWith(".") || e.name === "dist") continue; // .git, dotfiles, export output
+        if (e.isDir) await walk(e.path);
+        else if (/\.lmb$/i.test(e.name)) lmbs.push(e.path);
+      }
+    };
+    await walk(projectPath);
+    return lmbs;
+  };
+
+  // Remote projects: Export NX renders as usual, writes the NX beside the sources at the project
+  // root (the remote is flat; Sync would mirror it there anyway), then uploads it with the usual
+  // If-Match discipline and records it in the sidecar so the next Sync doesn't re-download it.
+  const exportActiveRemote = (): void => {
+    const ws = workspaceRef.current;
+    const t = ws?.active;
+    if (!ws || t?.kind !== "doc") return;
+    if (t.diffuse.unresolved) {
+      notify("Relink the diffuse (Reload Diffuse) before exporting — this document has no diffuse loaded", "error");
+      return;
+    }
+    if (!t.docPath) {
+      notify("Save the document before exporting its NX", "error");
+      return;
+    }
+    run(
+      (async () => {
+        const output = effectiveOutput(t.store.state.doc, ws.config);
+        const out = joinPath(ws.projectPath, basename(t.docPath!).replace(/\.lmb$/i, "") + nxExtension(output));
+        const file = await renderDocNx(getHost(), t.store.state.doc, t.docPath!, ws.config, out, ws.projectPath);
+        await getHost().writeFile(file.path, file.bytes);
+        const pushed = await pushRendered([basename(file.path)]);
+        if (pushed !== null) return pushed;
+        return file.warning ? `Exported ${basename(file.path)} to remote — WARNING: ${file.warning}` : `Exported ${basename(file.path)} to remote`;
+      })(),
+    );
+  };
+
+  const exportAllRemote = (): void => {
+    const ws = workspaceRef.current;
+    if (!ws) return;
+    run(
+      (async () => {
+        const lmbs = await collectProjectLmbs(ws.projectPath);
+        if (lmbs.length === 0) {
+          notify("Nothing to export — the project has no .lmb documents", "error");
+          return;
+        }
+        const liveDocs = new Map(ws.tabs.filter((t): t is DocTab => t.kind === "doc" && t.docPath !== null).map((t) => [t.docPath!, t.store.state.doc]));
+        const names: string[] = [];
+        const renderFailed: string[] = [];
+        for (const lmb of lmbs) {
+          try {
+            const doc = liveDocs.get(lmb) ?? parseDoc(new TextDecoder().decode(await getHost().readFile(lmb)));
+            const ext = nxExtension(effectiveOutput(doc, ws.config));
+            const out = joinPath(ws.projectPath, basename(lmb).replace(/\.lmb$/i, "") + ext);
+            const file = await renderDocNx(getHost(), doc, lmb, ws.config, out, ws.projectPath);
+            await getHost().writeFile(file.path, file.bytes);
+            names.push(basename(file.path));
+          } catch {
+            renderFailed.push(basename(lmb));
+          }
+        }
+        const pushed = names.length > 0 ? await pushRendered(names, { summarize: true }) : null;
+        const parts = [pushed, countPart(renderFailed.length, "failed to render")].filter((x): x is string => x !== null && x.length > 0);
+        return `Export: ${parts.length ? parts.join(", ") : "nothing rendered"}`;
+      })(),
+    );
+  };
+
+  /** Upload freshly rendered NX files and persist the sidecar. Single-name mode returns null on
+   *  clean success (the caller words the message); summarize mode returns the counts string. */
+  const pushRendered = async (names: string[], opts?: { summarize?: boolean }): Promise<string | null> => {
+    const conn = remoteConnection();
+    const ws = workspaceRef.current;
+    if (!conn || !ws) return "Remote connection lost — check Preferences > Remote Servers";
+    const dav = makeDavClient(davTransport(getHost()), conn.server);
+    const io = localIo(getHost(), (d) => carapaceHost.fs!.list(d), ws.projectPath);
+    const { sidecar: next, summary } = await runPushNamed(dav, conn.sc, io, remoteSyncUi("Uploading"), names);
+    await saveSidecar(sidecarIo(getHost()), ws.projectPath, next);
+    setSidecar(next);
+    if (opts?.summarize) {
+      const parts = [
+        countPart(summary.uploaded.length, "uploaded"),
+        countPart(summary.skipped.length, "unchanged"),
+        countPart(summary.blocked.length, "blocked — Sync first"),
+        countPart(summary.failed.length, "failed"),
+      ].filter((p): p is string => p !== null);
+      return parts.join(", ");
+    }
+    if (summary.blocked.length) return `${summary.blocked[0]} changed on the server — Sync from Remote first`;
+    if (summary.failed.length) return `Failed to upload ${summary.failed[0]!.name}: ${summary.failed[0]!.error}`;
+    return null;
+  };
+
   // height-map export: the authored height field as 16-bit grayscale, next to Export NX
   const exportHeightmap = (): void => {
     const ws = workspaceRef.current;
@@ -739,19 +843,14 @@ export function App(): React.JSX.Element {
   // exports its LIVE doc (what you see is what you get, unsaved edits included); closed files parse
   // from disk. One OS folder picker for the whole batch, defaulting to <project>/dist/.
   const exportAll = (): void => {
+    if (sidecarRef.current) {
+      exportAllRemote();
+      return;
+    }
     const ws = workspaceRef.current;
     if (!ws) return;
     void (async () => {
-      const lmbs: string[] = [];
-      const walk = async (dir: string): Promise<void> => {
-        const entries = await carapaceHost.fs!.list(dir).catch(() => []);
-        for (const e of entries) {
-          if (e.name.startsWith(".") || e.name === "dist") continue; // .git, dotfiles, export output
-          if (e.isDir) await walk(e.path);
-          else if (/\.lmb$/i.test(e.name)) lmbs.push(e.path);
-        }
-      };
-      await walk(ws.projectPath);
+      const lmbs = await collectProjectLmbs(ws.projectPath);
       if (lmbs.length === 0) {
         notify("Nothing to export — the project has no .lmb documents", "error");
         return;

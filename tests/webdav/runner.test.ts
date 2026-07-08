@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { startFixture, type FixtureHandle } from "./fixtureServer";
 import { DavClient, type DavTransport } from "../../src/remote/dav";
-import { PUSH_FILTER, cloneProject, runPull, runPush, type LocalIo, type SyncUi } from "../../src/remote/runner";
+import { PUSH_FILTER, cloneProject, runPull, runPush, runPushNamed, type LocalIo, type SyncUi } from "../../src/remote/runner";
 import { sha256Hex, type Sidecar } from "../../src/remote/sync";
 
 const fetchTransport: DavTransport = async (req) => {
@@ -179,6 +179,66 @@ describe("runners against the fixture", () => {
     const { sidecar: next } = await runPush(dav, sidecar, io, scriptedUi());
     fx.omitPutEtag(false);
     expect(next.files["b.lmb"]!.etag).toBe((await dav.listFiles("zarha")).find((f) => f.name === "b.lmb")!.etag);
+  });
+});
+
+describe("runPushNamed (NX export push)", () => {
+  let fx: FixtureHandle;
+  let root: string;
+  let dav: DavClient;
+
+  beforeEach(async () => {
+    root = mkdtempSync(join(tmpdir(), "davnx-"));
+    mkdirSync(join(root, "zarha"));
+    writeFileSync(join(root, "zarha", "b.lmb"), "doc-b");
+    fx = await startFixture({ root, username: "u", password: "p", etagMode: "sha256" });
+    dav = new DavClient(fetchTransport, fx.url, { Authorization: `Basic ${btoa("u:p")}` });
+  });
+  afterEach(() => fx.close());
+
+  it("pushes a named file OUTSIDE the lmb filter, records it, and re-push skips unchanged", async () => {
+    const { sidecar } = await cloneProject(dav, "zarha", { id: "s", baseUrl: fx.url }, memLocal(), scriptedUi());
+    const io = memLocal();
+    await io.write("b.nx.png", text("nx-bytes-1"));
+
+    const first = await runPushNamed(dav, sidecar, io, scriptedUi(), ["b.nx.png"]);
+    expect(first.summary.uploaded).toEqual(["b.nx.png"]);
+    expect(new TextDecoder().decode(await dav.getFile("zarha", "b.nx.png"))).toBe("nx-bytes-1");
+    expect(first.sidecar.files["b.nx.png"]!.sha256).toBe(await sha256Hex(text("nx-bytes-1")));
+
+    const again = await runPushNamed(dav, first.sidecar, io, scriptedUi(), ["b.nx.png"]);
+    expect(again.summary.skipped).toEqual(["b.nx.png"]);
+    expect(again.summary.uploaded).toEqual([]);
+  });
+
+  it("re-pushes with If-Match after a local change; 412s as blocked when the remote moved", async () => {
+    const { sidecar } = await cloneProject(dav, "zarha", { id: "s", baseUrl: fx.url }, memLocal(), scriptedUi());
+    const io = memLocal();
+    await io.write("b.nx.png", text("v1"));
+    const first = await runPushNamed(dav, sidecar, io, scriptedUi(), ["b.nx.png"]);
+
+    // local re-render -> update via If-Match
+    await io.write("b.nx.png", text("v2"));
+    const second = await runPushNamed(dav, first.sidecar, io, scriptedUi(), ["b.nx.png"]);
+    expect(second.summary.uploaded).toEqual(["b.nx.png"]);
+    expect(new TextDecoder().decode(await dav.getFile("zarha", "b.nx.png"))).toBe("v2");
+
+    // someone else replaced it remotely -> our stale etag must 412 into blocked
+    const current = (await dav.listFiles("zarha")).find((f) => f.name === "b.nx.png")!;
+    await dav.putFile("zarha", "b.nx.png", text("theirs"), { ifMatch: current.etag });
+    await io.write("b.nx.png", text("v3"));
+    const third = await runPushNamed(dav, second.sidecar, io, scriptedUi(), ["b.nx.png"]);
+    expect(third.summary.blocked).toEqual(["b.nx.png"]);
+    expect(new TextDecoder().decode(await dav.getFile("zarha", "b.nx.png"))).toBe("theirs"); // untouched
+  });
+
+  it("never pushes the sidecar even when named explicitly", async () => {
+    const { sidecar } = await cloneProject(dav, "zarha", { id: "s", baseUrl: fx.url }, memLocal(), scriptedUi());
+    const io = memLocal();
+    await io.write(".lambert-remote.json", text("secrets"));
+    const res = await runPushNamed(dav, sidecar, io, scriptedUi(), [".lambert-remote.json"]);
+    expect(res.summary.uploaded).toEqual([]);
+    expect((await dav.listFiles("zarha")).map((f) => f.name)).not.toContain(".lambert-remote.json");
   });
 });
 

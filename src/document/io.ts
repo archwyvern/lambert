@@ -14,7 +14,7 @@ import { type LambertDoc,
 import { basename, dirname, joinPath } from "./paths";
 import { PROJECT_FILE, type DocTab } from "./workspace";
 import { countUnknownLayers } from "../field/registry";
-import { buildNxExport } from "./exports";
+import { buildNxExport, type ExportFile } from "./exports";
 import { diffuseOpacity } from "../exporters/nx";
 import { defaultDocName, healDiffuse, resolveDiffuse } from "./diffuseSource";
 
@@ -141,7 +141,9 @@ export async function saveTab(host: Host, tab: DocTab, projectPath: string): Pro
  * tab-based, so the project-wide sweep can export `.lmb` files that aren't open; `label` names the
  * doc in errors (a path or filename).
  */
-export async function exportDocNx(host: Host, doc: LambertDoc, label: string, config: ProjectConfig, outPath: string, projectPath: string): Promise<string> {
+/** Render a doc's NX to bytes + final path WITHOUT writing — the remote exporter uploads the
+ *  result instead. exportDocNx is the write-to-disk wrapper. */
+export async function renderDocNx(host: Host, doc: LambertDoc, label: string, config: ProjectConfig, outPath: string, projectPath: string): Promise<ExportFile> {
   const { gpuExportRender } = await import("../ui/exportRender");
   const bytes = await resolveDiffuse(host, doc.source.uri, { baseDir: projectPath });
   const { detailChainParams } = await import("../field/adjustments");
@@ -159,7 +161,11 @@ export async function exportDocNx(host: Host, doc: LambertDoc, label: string, co
         `${doc.source.width}x${doc.source.height} — open the document to adopt or scale to the new size`,
     );
   }
-  const file = buildNxExport(doc, render, outPath, effectiveNormalDirs(doc, config), effectiveOutput(doc, config), diffuseOpacity(diffuse));
+  return buildNxExport(doc, render, outPath, effectiveNormalDirs(doc, config), effectiveOutput(doc, config), diffuseOpacity(diffuse));
+}
+
+export async function exportDocNx(host: Host, doc: LambertDoc, label: string, config: ProjectConfig, outPath: string, projectPath: string): Promise<string> {
+  const file = await renderDocNx(host, doc, label, config, outPath, projectPath);
   await host.writeFile(file.path, file.bytes);
   return file.warning ? `${file.path} written — WARNING: ${file.warning}` : `wrote ${file.path}`;
 }

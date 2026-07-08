@@ -155,7 +155,33 @@ export async function runPush(
   io: LocalIo,
   ui: SyncUi,
 ): Promise<{ sidecar: Sidecar; summary: PushSummary }> {
-  const names = (await io.list()).filter(PUSH_FILTER);
+  return pushNames(dav, sidecar, io, ui, (await io.list()).filter(PUSH_FILTER));
+}
+
+/**
+ * Push SPECIFIC local files by name (e.g. freshly rendered NX exports) through the same
+ * plan/record machinery as runPush — the caller writes the files first, this uploads them with
+ * the sha-skip + If-Match/If-None-Match discipline and records them in the sidecar so the next
+ * Sync treats them as already-known instead of re-downloading. The sidecar itself is never
+ * pushable, even when named.
+ */
+export async function runPushNamed(
+  dav: DavClient,
+  sidecar: Sidecar,
+  io: LocalIo,
+  ui: SyncUi,
+  names: string[],
+): Promise<{ sidecar: Sidecar; summary: PushSummary }> {
+  return pushNames(dav, sidecar, io, ui, names.filter((n) => !isSidecarName(n)));
+}
+
+async function pushNames(
+  dav: DavClient,
+  sidecar: Sidecar,
+  io: LocalIo,
+  ui: SyncUi,
+  names: string[],
+): Promise<{ sidecar: Sidecar; summary: PushSummary }> {
   const local = await scanLocal(io, names);
   const plan = planPush(local, sidecar);
   const files = { ...sidecar.files };
