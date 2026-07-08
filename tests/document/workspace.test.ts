@@ -1,12 +1,13 @@
 import { expect, test } from "vitest";
 import { DocumentStore } from "../../src/document/store";
 import { emptyDoc, emptyProjectConfig } from "../../src/document/schema";
-import { Tab, Workspace } from "../../src/document/workspace";
+import { Tab, tabPath, Workspace } from "../../src/document/workspace";
 
 let n = 0;
 function tab(opts?: { id?: string; docPath?: string | null }): Tab {
   const docPath = opts?.docPath ?? null;
   return {
+    kind: "doc",
     id: opts?.id ?? `t${n++}`,
     docPath,
     store: new DocumentStore(emptyDoc("file:///p/x.df.png", 8, 8), docPath),
@@ -34,7 +35,7 @@ test("reopening a tab with the same docPath focuses, no duplicate", () => {
   expect(w.activeIndex).toBe(1);
   w.openTab(tab({ id: "a2", docPath: "/p/a.lmb" })); // same doc again
   expect(w.tabs.length).toBe(2);
-  expect(w.active?.docPath).toBe("/p/a.lmb");
+  expect(w.active && tabPath(w.active)).toBe("/p/a.lmb");
   expect(w.activeIndex).toBe(0); // focused, not duplicated
 });
 

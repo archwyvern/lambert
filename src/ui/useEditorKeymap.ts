@@ -55,7 +55,7 @@ export function useEditorKeymap(opts: {
     // the modal Delete: selected anchors -> selected vertices -> selected layers
     const deleteSelection = (): void => {
       const t = workspaceRef.current?.active;
-      if (!t) return;
+      if (!t || t.kind !== "doc") return; // image tabs have no editable selection
       const store = t.store;
       if (store.state.selectedIds.length === 0) return; // nothing selected: no phantom undo entry
       const id = store.state.selectedId;
@@ -128,7 +128,8 @@ export function useEditorKeymap(opts: {
       // Ctrl/Cmd+Y = redo, a fixed legacy alias alongside the rebindable Ctrl+Shift+Z (Photoshop).
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "y") {
         e.preventDefault();
-        workspaceRef.current?.active?.store.redo();
+        const a = workspaceRef.current?.active;
+        if (a?.kind === "doc") a.store.redo();
         return;
       }
       // Space is the hold-to-pan modifier (CanvasView tracks its own keydown/keyup); swallow it here so
@@ -139,6 +140,20 @@ export function useEditorKeymap(opts: {
       }
       const t = workspaceRef.current?.active;
       if (!t) return;
+      if (t.kind !== "doc") {
+        // image tab: no document editing, but rebindable commands (close-tab, tab-next, …)
+        // still dispatch — doc-only ids no-op in the shared dispatcher.
+        const m = matcher.feed(bindingsRef.current, e);
+        if (m.type === "run") {
+          e.preventDefault();
+          runEditorCommand(m.id);
+        } else if (m.type === "pending") {
+          e.preventDefault();
+          chordPending = true;
+          onChordPending?.(m.prefix);
+        }
+        return;
+      }
       const store = t.store;
       if (e.key === "Escape") {
         // Esc aborts an in-flight drag (revert the partial transform); otherwise it deselects. The cancel

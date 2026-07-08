@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { DocumentStore } from "../document/store";
 import { emptyDoc, emptyProjectConfig } from "../document/schema";
 import { findNode } from "../document/layerOps";
-import { Tab, Workspace } from "../document/workspace";
+import { DocTab, Tab, Workspace } from "../document/workspace";
 import type { ViewState } from "./App";
 import { VIEW_MODES, type ViewMode } from "./preview";
 import { TOOL_KEYS, type ToolMode } from "./tools";
@@ -48,7 +48,8 @@ export function useDemoBootstrap(opts: {
         const objects = q.has("stress") ? stressFieldObjects(w, q.has("overlap")) : q.has("masked") ? maskedObjects() : q.has("mesh") ? meshObjects() : q.has("paths") ? [...pipeObjects(), ...vectorFillObjects()] : q.has("fx") ? surfaceObjects() : q.has("detail") ? detailObjects() : goldenObjects();
         const doc = { ...emptyDoc("file:///demo/demo.df.png", w, h), layers: objects };
         const ws = new Workspace("/demo", emptyProjectConfig());
-        const tab: Tab = {
+        const tab: DocTab = {
+          kind: "doc",
           id: crypto.randomUUID(),
           docPath: null,
           store: new DocumentStore(doc, null),
@@ -58,6 +59,7 @@ export function useDemoBootstrap(opts: {
         if (q.has("secondtab")) {
           // capture aid: a second (pinned, if `pin`) tab so the tab strip/menu verbs are visible
           ws.openTab({
+            kind: "doc",
             id: crypto.randomUUID(),
             docPath: "/demo/second.lmb",
             store: new DocumentStore({ ...emptyDoc("file:///demo/demo.df.png", w, h) }, "/demo/second.lmb"),

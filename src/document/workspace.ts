@@ -14,13 +14,33 @@ export const PROJECT_FILE = "project.lambert";
  * are fully intact and preserved in the stash; the user relinks via Reload Diffuse. Export is blocked
  * until then. This replaces the old behaviour of silently dropping such a tab (losing unsaved work).
  */
-export interface Tab {
+export interface DocTab {
+  kind: "doc";
   id: string;
   docPath: string | null;
   store: DocumentStore;
   diffuse: { bytes: Uint8Array; unresolved?: boolean };
   /** Pinned tab (compact strip rendering, survives Close Others/Right/Saved; session-persisted). */
   pinned?: boolean;
+}
+
+/** A read-only image viewer tab (a source PNG opened from the Explorer). Never dirty;
+ *  persisted path-only and re-read on session restore. */
+export interface ImageTab {
+  kind: "image";
+  id: string;
+  /** Absolute on-disk path of the image. */
+  path: string;
+  bytes: Uint8Array;
+  mimeType: string;
+  pinned?: boolean;
+}
+
+export type Tab = DocTab | ImageTab;
+
+/** The on-disk path a tab is keyed by: a doc's saved .lmb (null while untitled), an image's file. */
+export function tabPath(tab: Tab): string | null {
+  return tab.kind === "doc" ? tab.docPath : tab.path;
 }
 
 /**
@@ -49,9 +69,10 @@ export class Workspace {
     return this.tabs.findIndex((t) => t.id === id);
   }
 
-  /** Index of an open tab by its saved docPath; untitled (null) tabs never match, so they stay distinct. */
+  /** Index of an open tab by its on-disk path (doc .lmb or image file); untitled (null-path)
+   *  tabs never match, so they stay distinct. */
   indexByDocPath(docPath: string): number {
-    return this.tabs.findIndex((t) => t.docPath === docPath);
+    return this.tabs.findIndex((t) => tabPath(t) === docPath);
   }
 
   subscribe(fn: () => void): () => void {
@@ -68,9 +89,10 @@ export class Workspace {
     for (const fn of this.listeners) fn();
   }
 
-  /** Open a tab, or focus the existing one if a saved doc with the same docPath is already open. */
+  /** Open a tab, or focus the existing one if a tab with the same on-disk path is already open. */
   openTab(tab: Tab): void {
-    const existing = tab.docPath !== null ? this.indexByDocPath(tab.docPath) : -1;
+    const path = tabPath(tab);
+    const existing = path !== null ? this.indexByDocPath(path) : -1;
     if (existing >= 0) {
       this.activeIndex = existing;
     } else {

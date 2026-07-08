@@ -12,7 +12,7 @@ import { type LambertDoc,
   serializeProjectConfig,
 } from "./schema";
 import { basename, dirname, joinPath } from "./paths";
-import { PROJECT_FILE, Tab } from "./workspace";
+import { PROJECT_FILE, type DocTab } from "./workspace";
 import { countUnknownLayers } from "../field/registry";
 import { buildNxExport } from "./exports";
 import { diffuseOpacity } from "../exporters/nx";
@@ -92,7 +92,7 @@ export class DimsMismatchError extends Error {
  * `droppedUnknown` is how many legacy/removed-type object layers were dropped on load (the drop is
  * intended graceful-degrade; the count lets the caller tell the user it happened).
  */
-export async function openDocTab(host: Host, docPath: string): Promise<{ tab: Tab; droppedUnknown: number }> {
+export async function openDocTab(host: Host, docPath: string): Promise<{ tab: DocTab; droppedUnknown: number }> {
   const doc = parseDoc(new TextDecoder().decode(await host.readFile(docPath)));
   const bytes = await resolveDiffuse(host, doc.source.uri);
   const decoded = decode(bytes);
@@ -100,7 +100,7 @@ export async function openDocTab(host: Host, docPath: string): Promise<{ tab: Ta
     throw new DimsMismatchError(docPath, doc, bytes, decoded.width, decoded.height);
   }
   const droppedUnknown = countUnknownLayers(doc.layers);
-  const tab: Tab = { id: crypto.randomUUID(), docPath, store: new DocumentStore(doc, docPath), diffuse: { bytes } };
+  const tab: DocTab = { kind: "doc", id: crypto.randomUUID(), docPath, store: new DocumentStore(doc, docPath), diffuse: { bytes } };
   return { tab, droppedUnknown };
 }
 
@@ -109,7 +109,7 @@ export async function openDocTab(host: Host, docPath: string): Promise<{ tab: Ta
  * → `6powercoil.lmb`) in the project folder. Returns the written path, or null if the dialog was
  * cancelled. Subsequent saves overwrite the same `.lmb`.
  */
-export async function saveTab(host: Host, tab: Tab, projectPath: string): Promise<string | null> {
+export async function saveTab(host: Host, tab: DocTab, projectPath: string): Promise<string | null> {
   let path = tab.docPath;
   if (!path) {
     path = await host.saveDialog({
@@ -154,14 +154,14 @@ export async function exportDocNx(host: Host, doc: LambertDoc, label: string, co
 }
 
 /** Export the active tab's LIVE document (unsaved edits included). Requires a saved doc for naming. */
-export async function exportTabNx(host: Host, tab: Tab, config: ProjectConfig, outPath: string): Promise<string> {
+export async function exportTabNx(host: Host, tab: DocTab, config: ProjectConfig, outPath: string): Promise<string> {
   if (!tab.docPath) throw new Error("Save the document before exporting its NX");
   return exportDocNx(host, tab.store.state.doc, tab.docPath, config, outPath);
 }
 
 /** Export the active tab's height field as 16-bit grayscale PNG (heights normalized min->0,
  *  max->65535). Same ss2 render as the NX; no diffuse involvement (the height field is authored). */
-export async function exportTabHeightmap(host: Host, tab: Tab, config: ProjectConfig, outPath: string): Promise<string> {
+export async function exportTabHeightmap(host: Host, tab: DocTab, config: ProjectConfig, outPath: string): Promise<string> {
   if (!tab.docPath) throw new Error("Save the document before exporting its height map");
   const { gpuExportRender } = await import("../ui/exportRender");
   const doc = tab.store.state.doc;
