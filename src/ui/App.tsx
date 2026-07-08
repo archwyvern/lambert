@@ -696,10 +696,10 @@ export function App(): React.JSX.Element {
       notify("Save the document before exporting its NX", "error");
       return;
     }
-    // OS save dialog defaulting into <project>/.exports/ (created on demand); null = cancelled
+    // OS save dialog defaulting into <project>/dist/ (created on demand); null = cancelled
     void (async () => {
       const output = effectiveOutput(t.store.state.doc, ws.config);
-      const exportsDir = joinPath(ws.projectPath, ".exports");
+      const exportsDir = joinPath(ws.projectPath, "dist");
       await getHost().mkdir(exportsDir).catch(() => {});
       const out = await getHost().saveDialog({
         title: "Export NX",
@@ -721,7 +721,7 @@ export function App(): React.JSX.Element {
       return;
     }
     void (async () => {
-      const exportsDir = joinPath(ws.projectPath, ".exports");
+      const exportsDir = joinPath(ws.projectPath, "dist");
       await getHost().mkdir(exportsDir).catch(() => {});
       const out = await getHost().saveDialog({
         title: "Export Height Map",
@@ -735,7 +735,7 @@ export function App(): React.JSX.Element {
 
   // batch NX export: EVERY .lmb in the project (recursive walk), not just open tabs. An open tab
   // exports its LIVE doc (what you see is what you get, unsaved edits included); closed files parse
-  // from disk. One OS folder picker for the whole batch, defaulting to <project>/.exports/.
+  // from disk. One OS folder picker for the whole batch, defaulting to <project>/dist/.
   const exportAll = (): void => {
     const ws = workspaceRef.current;
     if (!ws) return;
@@ -744,7 +744,7 @@ export function App(): React.JSX.Element {
       const walk = async (dir: string): Promise<void> => {
         const entries = await carapaceHost.fs!.list(dir).catch(() => []);
         for (const e of entries) {
-          if (e.name.startsWith(".")) continue; // .git, .exports, dotfiles
+          if (e.name.startsWith(".") || e.name === "dist") continue; // .git, dotfiles, export output
           if (e.isDir) await walk(e.path);
           else if (/\.lmb$/i.test(e.name)) lmbs.push(e.path);
         }
@@ -754,7 +754,7 @@ export function App(): React.JSX.Element {
         notify("Nothing to export — the project has no .lmb documents", "error");
         return;
       }
-      const exportsDir = joinPath(ws.projectPath, ".exports");
+      const exportsDir = joinPath(ws.projectPath, "dist");
       await getHost().mkdir(exportsDir).catch(() => {});
       const dir = await getHost().openFolderDialog({ title: "Export all NX to folder", defaultPath: exportsDir });
       if (!dir) return;
