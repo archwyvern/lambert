@@ -14,52 +14,72 @@ function minmod(a: number, b: number): number {
   return Math.abs(a) < Math.abs(b) ? a : b;
 }
 
-/** A neighbour with coverage at/below this is "carved" (masked-out / off-footprint): its height is
- *  the trim floor, not real surface, so it must not enter a visible texel's gradient. */
-const COVER_EPS = 1e-3;
+/** Smoothness floor: second differences below this are float dust — both sides count as equally
+ *  smooth. Heights are in pixels; real discontinuities are orders of magnitude above this. */
+const SMOOTH_EPS = 1e-4;
+/** Smoothness-dominance band (on (sb-sf)/(sb+sf), i.e. |d|): below D0 the sides are a tie
+ *  (minmod); above D1 the smoother side fully owns the gradient; between them a linear blend.
+ *  D0 = 1/3 is a 2:1 second-difference ratio; D1 = 0.6 is 4:1. */
+const DOM_LO = 1 / 3;
+const DOM_HI = 0.6;
+/** Absolute engagement gate on the rougher side's second difference (px of height): below STEP_LO
+ *  the stencil holds no real discontinuity and pure minmod applies — this keeps the operator inert
+ *  on smooth curvature (sphere/berm/pipe interiors), where the dominance RATIO would otherwise
+ *  amplify sub-tolerance GPU-vs-CPU height noise into visible normal drift. Real seams and mask
+ *  carves step >= ~1px, far above STEP_HI. */
+const STEP_LO = 0.25;
+const STEP_HI = 1.0;
 
 /**
- * One coverage-aware axis gradient. `fwd`/`bwd` are the forward/backward one-sided height diffs and
- * `fwdCov`/`bwdCov` whether each neighbour is covered. Both covered → minmod (edge-preserving as
- * before). One side carved → use the covered side's slope alone, so a genuine surface slope survives
- * up to a trim/silhouette edge instead of minmod cancelling it against the carve cliff (the fringe).
- * Both carved → 0 (a 1px covered sliver has no defined slope).
+ * Smoothness-guided one-sided gradient over the 5-sample stencil hm2..hp2. Each side's second
+ * difference measures whether its stencil crosses a surface DISCONTINUITY — a footprint
+ * silhouette, a trim-mask carve, or the small step where two plates meet. The clearly smoother
+ * side's one-sided slope takes over, so a sloped surface keeps its true normal right up to any
+ * edge; plain minmod (both sides comparably smooth: interiors, tent apexes, symmetric curvature)
+ * remains the base and keeps the classic behaviour — walls stay invisible because the surface
+ * side of a cliff is the smooth side and it is flat.
+ *
+ * The takeover is a CONTINUOUS blend on the smoothness dominance, never a hard select: the
+ * operator must be continuous in its inputs or f32 (GPU) vs f64 (CPU) dust flips a branch on
+ * near-tie stencils and the two pipelines derive visibly different normals (selftest parity).
+ *
+ * Without this, minmod mangled edge-adjacent texels: a step's one-sided diff either cancelled the
+ * true slope to flat (opposite sign — the 2px seam between intersecting plates, the dark fringe
+ * inside mask edges) or masqueraded as the surface slope (same sign, smaller).
  */
-function coverGrad(fwd: number, bwd: number, fwdCov: boolean, bwdCov: boolean): number {
-  if (fwdCov && bwdCov) return minmod(fwd, bwd);
-  if (fwdCov) return fwd;
-  if (bwdCov) return bwd;
-  return 0;
+function sideGrad(hm2: number, hm1: number, h0: number, hp1: number, hp2: number): number {
+  const fwd = hp1 - h0;
+  const bwd = h0 - hm1;
+  const sf = Math.max(Math.abs(hp2 - 2 * hp1 + h0), SMOOTH_EPS);
+  const sb = Math.max(Math.abs(h0 - 2 * hm1 + hm2), SMOOTH_EPS);
+  const d = (sb - sf) / (sb + sf); // >0: forward side smoother
+  const dom = Math.min(1, Math.max(0, (Math.abs(d) - DOM_LO) / (DOM_HI - DOM_LO)));
+  const gate = Math.min(1, Math.max(0, (Math.max(sf, sb) - STEP_LO) / (STEP_HI - STEP_LO)));
+  const t = dom * gate;
+  const side = d > 0 ? fwd : bwd;
+  const base = minmod(fwd, bwd);
+  return base + (side - base) * t;
 }
 
 /**
- * Edge-preserving normals from a height field (minmod of one-sided differences), edge-clamped.
- * Image space: x right, y down, z out — n = normalize(-dH/dx, -dH/dy, 1).
- * slopeScale multiplies the gradients (used by supersampled rendering, where the canvas is
- * scaled up but heights are not). Output is packed xyz triplets, row-major.
- *
- * `mask` (the footprint+trim coverage, same layout) makes the gradient coverage-aware: a masked-out
- * neighbour is excluded so a trimmed/silhouetted edge of a SLOPED surface keeps its true normal
- * instead of a flattened fringe (minmod otherwise cancels the real slope against the carve cliff).
- * Omitted = plain minmod (no coverage data). Walls stay flat either way — their covered side is flat.
+ * Edge-preserving normals from a height field (smoothness-guided one-sided differences — see
+ * {@link sideGrad}), edge-clamped. Image space: x right, y down, z out —
+ * n = normalize(-dH/dx, -dH/dy, 1). slopeScale multiplies the gradients (used by supersampled
+ * rendering, where the canvas is scaled up but heights are not). Packed xyz triplets, row-major.
  */
 export function deriveNormals(
   heightMap: Float32Array,
   width: number,
   height: number,
   slopeScale = 1,
-  mask?: Float32Array,
 ): Float32Array {
   const out = new Float32Array(width * height * 3);
   const at = (x: number, y: number): number =>
     heightMap[clamp(y, 0, height - 1) * width + clamp(x, 0, width - 1)]!;
-  const covered = (x: number, y: number): boolean =>
-    mask === undefined || mask[clamp(y, 0, height - 1) * width + clamp(x, 0, width - 1)]! > COVER_EPS;
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      const c = at(x, y);
-      const dx = coverGrad(at(x + 1, y) - c, c - at(x - 1, y), covered(x + 1, y), covered(x - 1, y)) * slopeScale;
-      const dy = coverGrad(at(x, y + 1) - c, c - at(x, y - 1), covered(x, y + 1), covered(x, y - 1)) * slopeScale;
+      const dx = sideGrad(at(x - 2, y), at(x - 1, y), at(x, y), at(x + 1, y), at(x + 2, y)) * slopeScale;
+      const dy = sideGrad(at(x, y - 2), at(x, y - 1), at(x, y), at(x, y + 1), at(x, y + 2)) * slopeScale;
       const inv = 1 / Math.hypot(dx, dy, 1);
       const i = (y * width + x) * 3;
       out[i] = -dx * inv;

@@ -1465,6 +1465,8 @@ export function App(): React.JSX.Element {
           notify(enterProject(await openProjectByPath(getHost(), openQ)));
           const img = params.get("openimage");
           if (img) setTimeout(() => openImageTab(joinPath(openQ, img)), 100);
+          const docRel = params.get("opendoc");
+          if (docRel) setTimeout(() => openDoc(joinPath(openQ, docRel)), 100);
         } catch (err) {
           notify(err instanceof Error ? err.message : String(err), "error");
         }

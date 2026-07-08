@@ -42,42 +42,53 @@ test("normals are unit length everywhere including clamped edges", () => {
   }
 });
 
-test("coverage-aware: a masked-out neighbour does not flatten a tilted surface at the edge", () => {
-  // A constant x-ramp (dH/dx = 1) covered on the left half (mask 1) and trimmed on the right
-  // (mask 0, height carved to 0). The last COVERED column's normal must still read the ramp's
-  // slope, not get cancelled by the cliff into the carved region.
+test("a trim/silhouette cliff does not flatten a tilted surface at its edge (mask fringe)", () => {
+  // A constant x-ramp (dH/dx = 1) carved to 0 from x=4 on (a mask trim / footprint edge). The last
+  // surface column (x=3) must still read the ramp's slope: the cliff side is maximally non-smooth,
+  // so the smoothness-guided gradient takes the surface side instead of minmod cancelling to flat.
   const w = 8, h = 3;
   const height = new Float32Array(w * h);
-  const mask = new Float32Array(w * h);
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const covered = x <= 3;
-      height[y * w + x] = covered ? x : 0; // ramp where covered, carved to 0 outside
-      mask[y * w + x] = covered ? 1 : 0;
-    }
-  }
-  // WITHOUT coverage awareness the edge column (x=3) minmods the ramp (+1) against the cliff
-  // (0-3=-3) -> 0 -> a flat (0,0,1) normal (the fringe). WITH it, x=3 uses its covered (left)
-  // neighbour only -> slope 1 -> the true tilted normal.
-  const n = deriveNormals(height, w, h, 1, mask);
-  const i = (1 * w + 3) * 3; // last covered column, middle row
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) height[y * w + x] = x <= 3 ? x : 0;
+  const n = deriveNormals(height, w, h);
+  const i = (1 * w + 3) * 3; // last surface column, middle row
   expect(n[i]).toBeCloseTo(-Math.SQRT1_2, 2); // -dx/|.| with dx=1
   expect(n[i + 2]).toBeCloseTo(Math.SQRT1_2, 2);
 });
 
-test("coverage-aware: a genuine flat-topped wall still reads flat at its edge", () => {
-  // flat plateau (height 5) covered on the left, carved to 0 on the right — the edge must stay
-  // flat (the interior side is flat), i.e. the fix must not turn walls into slopes.
+test("a genuine flat-topped wall still reads flat at its edge", () => {
+  // flat plateau (height 5) then a cliff to 0 — the edge must stay flat (the surface side is
+  // flat), i.e. discontinuity handling must not turn walls into slopes.
   const w = 8, h = 3;
   const height = new Float32Array(w * h);
-  const mask = new Float32Array(w * h);
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    const covered = x <= 3;
-    height[y * w + x] = covered ? 5 : 0;
-    mask[y * w + x] = covered ? 1 : 0;
-  }
-  const n = deriveNormals(height, w, h, 1, mask);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) height[y * w + x] = x <= 3 ? 5 : 0;
+  const n = deriveNormals(height, w, h);
   const i = (1 * w + 3) * 3;
+  expect(n[i]).toBeCloseTo(0, 5);
+  expect(n[i + 2]).toBeCloseTo(1, 5);
+});
+
+test("a small step in a continuous slope leaves NO flat seam (intersecting plates)", () => {
+  // ramp dH/dx = 0.5 with a 1.5px step DOWN at x=5: the step-crossing one-sided diff is
+  // opposite-signed, so plain minmod zeroed BOTH adjacent columns — the 2px purple seam between
+  // two intersecting plates. Both columns must keep the true ramp slope.
+  const w = 12, h = 3;
+  const s = 0.5, d = 1.5;
+  const height = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) height[y * w + x] = s * x - (x >= 5 ? d : 0);
+  const n = deriveNormals(height, w, h);
+  const expectNx = -s / Math.hypot(s, 1);
+  for (const x of [3, 4, 5, 6, 8]) {
+    const i = (1 * w + x) * 3;
+    expect(n[i]).toBeCloseTo(expectNx, 2); // no flat column on either side of the step
+  }
+});
+
+test("a tent apex still reads flat (both sides equally smooth -> minmod)", () => {
+  const w = 11, h = 3;
+  const height = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) height[y * w + x] = 5 - Math.abs(x - 5);
+  const n = deriveNormals(height, w, h);
+  const i = (1 * w + 5) * 3; // the apex
   expect(n[i]).toBeCloseTo(0, 5);
   expect(n[i + 2]).toBeCloseTo(1, 5);
 });

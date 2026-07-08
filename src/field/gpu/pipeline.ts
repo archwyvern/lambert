@@ -123,7 +123,7 @@ export interface GpuEvaluateOptions {
   defaults?: AdjustmentDefaults;
 }
 
-const APRON = 1; // normal pass needs 1px neighborhood; tiles overlap by this and drop it
+const APRON = 2; // the normal pass's side_grad stencil reads ±2px; tiles overlap by this and drop it
 
 export class GpuFieldRenderer {
   private constructor(
