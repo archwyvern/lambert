@@ -276,15 +276,21 @@ export function App(): React.JSX.Element {
     setRecents((rs) => pushRecent(rs, path, basename(path.replace(/\/+$/, "")) || path, Date.now()));
   const removeRecentProject = (path: string): void => setRecents((rs) => removeRecent(rs, path));
 
-  const enterProject = (opened: OpenedProject): string => {
-    setWorkspace(new Workspace(opened.projectPath, opened.config));
-    setViews({});
-    // remote projects: a project is remote iff its sidecar exists; corruption is soft (re-clone recovers)
+  // Remote projects: a project is remote iff its sidecar exists; corruption is soft (re-clone
+  // recovers). EVERY way into a project must call this — enterProject and the session restore —
+  // or the remote verbs grey out and the root row loses the server's name.
+  const refreshSidecar = (projectPath: string): void => {
     setSidecar(null);
-    void loadSidecar(sidecarIo(getHost()), opened.projectPath).then((s) => {
+    void loadSidecar(sidecarIo(getHost()), projectPath).then((s) => {
       if (s === "corrupt") notify("Remote sync state is corrupted — re-clone the project to restore syncing", "error");
       else if (s) setSidecar(s);
     });
+  };
+
+  const enterProject = (opened: OpenedProject): string => {
+    setWorkspace(new Workspace(opened.projectPath, opened.config));
+    setViews({});
+    refreshSidecar(opened.projectPath);
     recordRecent(opened.projectPath);
     setLastDir(dirname(opened.projectPath)); // reopen the dialog at the project's containing folder next time
     getHost().notifyProjectOpened(); // grow the welcome window to the remembered editor size
@@ -1443,6 +1449,7 @@ export function App(): React.JSX.Element {
         }
         if (ws.tabs.length > 0) ws.activeIndex = Math.min(Math.max(0, s.activeIndex), ws.tabs.length - 1);
         setWorkspace(ws);
+        refreshSidecar(s.projectPath); // restored projects keep their remote-ness (sync/export verbs, root name)
         setViews(restoredViews);
         setViewports(restoredViewports);
         setOrbits(restoredOrbits);
