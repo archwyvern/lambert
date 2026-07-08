@@ -1,6 +1,6 @@
 {
   "name": "lambert",
-  "version": "0.8.12",
+  "version": "0.8.13",
   "description": "Shape-based height field authoring for normal maps. 3D but not 3D, done the hard way.",
   "type": "module",
   "license": "MIT",
