@@ -49,7 +49,18 @@ async function main(): Promise<void> {
 
   const doc = parseDoc(readFileSync(docPath, "utf8"));
   const docDir = path.dirname(path.resolve(docPath));
-  const source = decode(await resolveDiffuse(cliHost, doc.source.uri));
+  // Project root for relative sources: nearest ancestor with project.lambert, else the doc's dir.
+  let projectRoot = docDir;
+  for (let dir = docDir; ; ) {
+    if (existsSync(path.join(dir, "project.lambert"))) {
+      projectRoot = dir;
+      break;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  const source = decode(await resolveDiffuse(cliHost, doc.source.uri, { baseDir: projectRoot }));
   if (source.width !== doc.source.width || source.height !== doc.source.height) {
     console.error(
       `source is ${source.width}x${source.height} but document expects ` +
