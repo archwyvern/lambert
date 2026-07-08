@@ -526,10 +526,10 @@ struct NormalUniforms {
 @group(0) @binding(1) var fieldTex: texture_2d<f32>;
 @group(0) @binding(2) var outNormal: texture_storage_2d<rgba32float, write>;
 
-fn height_at(x: i32, y: i32) -> f32 {
+fn field_at(x: i32, y: i32) -> vec2f {
   let cx = clamp(x, 0, i32(nu.width) - 1);
   let cy = clamp(y, 0, i32(nu.height) - 1);
-  return textureLoad(fieldTex, vec2i(cx, cy), 0).r;
+  return textureLoad(fieldTex, vec2i(cx, cy), 0).rg; // r=height, g=coverage
 }
 
 // minmod of the two one-sided slopes — keeps real slopes, drops cliffs to flat so a vertical wall
@@ -539,17 +539,29 @@ fn minmod(a: f32, b: f32) -> f32 {
   return select(b, a, abs(a) < abs(b));
 }
 
+// coverage-aware axis gradient — the WGSL twin of coverGrad() in normals.ts. A carved (masked-out /
+// off-footprint) neighbour is excluded so a sloped surface keeps its true normal up to a trim edge
+// instead of minmod cancelling it against the carve cliff (the fringe). Must match the CPU exactly.
+const COVER_EPS = 1e-3;
+fn cover_grad(fwd: f32, bwd: f32, fwdCov: bool, bwdCov: bool) -> f32 {
+  if (fwdCov && bwdCov) { return minmod(fwd, bwd); }
+  if (fwdCov) { return fwd; }
+  if (bwdCov) { return bwd; }
+  return 0.0;
+}
+
 @compute @workgroup_size(8, 8)
 fn normals(@builtin(global_invocation_id) gid: vec3u) {
   if (gid.x >= nu.width || gid.y >= nu.height) { return; }
   let x = i32(gid.x);
   let y = i32(gid.y);
-  let c = height_at(x, y);
-  let dx = minmod(height_at(x + 1, y) - c, c - height_at(x - 1, y)) * nu.slopeScale;
-  let dy = minmod(height_at(x, y + 1) - c, c - height_at(x, y - 1)) * nu.slopeScale;
+  let c = field_at(x, y);
+  let xp = field_at(x + 1, y); let xm = field_at(x - 1, y);
+  let yp = field_at(x, y + 1); let ym = field_at(x, y - 1);
+  let dx = cover_grad(xp.x - c.x, c.x - xm.x, xp.y > COVER_EPS, xm.y > COVER_EPS) * nu.slopeScale;
+  let dy = cover_grad(yp.x - c.x, c.x - ym.x, yp.y > COVER_EPS, ym.y > COVER_EPS) * nu.slopeScale;
   let inv = inverseSqrt(dx * dx + dy * dy + 1.0);
-  let m = textureLoad(fieldTex, vec2i(x, y), 0).g;
-  textureStore(outNormal, vec2u(gid.xy), vec4f(-dx * inv, -dy * inv, inv, m));
+  textureStore(outNormal, vec2u(gid.xy), vec4f(-dx * inv, -dy * inv, inv, c.y));
 }
 `;
 

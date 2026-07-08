@@ -112,9 +112,9 @@ export function renderField(
   };
   if (f === 1) {
     const field = evaluateField(resolved, width, height, ctx);
-    return { ...field, normals: deriveNormals(field.heightMap, width, height) };
+    return { ...field, normals: deriveNormals(field.heightMap, width, height, 1, field.mask) };
   }
   const hi = evaluateField(scaleResolvedForSupersample(resolved, f), width * f, height * f, ctx);
-  const hiNormals = deriveNormals(hi.heightMap, hi.width, hi.height, f);
+  const hiNormals = deriveNormals(hi.heightMap, hi.width, hi.height, f, hi.mask);
   return downsampleRender(hi, hiNormals, f);
 }

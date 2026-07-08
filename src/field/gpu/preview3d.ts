@@ -43,15 +43,25 @@ fn minmod(a: f32, b: f32) -> f32 {
   if (a * b <= 0.0) { return 0.0; }
   return select(b, a, abs(a) < abs(b));
 }
+
+// coverage-aware axis gradient (see normals.ts / composite): exclude carved neighbours so a sloped
+// surface keeps its true normal at a trim/silhouette edge instead of a flattened fringe.
+const COVER_EPS = 1e-3;
+fn cover_grad(fwd: f32, bwd: f32, fwdCov: bool, bwdCov: bool) -> f32 {
+  if (fwdCov && bwdCov) { return minmod(fwd, bwd); }
+  if (fwdCov) { return fwd; }
+  if (bwdCov) { return bwd; }
+  return 0.0;
+}
 `;
 
 const PREVIEW3D_BODY = /* wgsl */ `
 // Height at a doc pixel center, clamped to the canvas — the analytic equivalent of sampling the old
 // doc-res field texture at integer coords (the fold shader wrote fold_at((x+0.5, y+0.5)) at texel x,y).
-fn height_at_px(ix: i32, iy: i32) -> f32 {
+fn field_at_px(ix: i32, iy: i32) -> vec2f {
   let cx = clamp(ix, 0, i32(u.docW) - 1);
   let cy = clamp(iy, 0, i32(u.docH) - 1);
-  return fold_at(vec2f(f32(cx) + 0.5, f32(cy) + 0.5), u.shapeCount).x;
+  return fold_at(vec2f(f32(cx) + 0.5, f32(cy) + 0.5), u.shapeCount); // x=height, y=coverage
 }
 
 @vertex
@@ -98,9 +108,11 @@ fn fs(in: VOut) -> @location(0) vec4f {
   if (diffuse.a < 0.5) { discard; } // transparent diffuse -> see the floor grid through it
   // analytic image-space normal: minmod of one-sided slopes at this doc pixel — identical math to the
   // 2D lit composite / deriveNormals, so the two previews can never disagree.
-  let c = height_at_px(px.x, px.y);
-  let dx = minmod(height_at_px(px.x + 1, px.y) - c, c - height_at_px(px.x - 1, px.y)) * u.slopeScale;
-  let dy = minmod(height_at_px(px.x, px.y + 1) - c, c - height_at_px(px.x, px.y - 1)) * u.slopeScale;
+  let c = field_at_px(px.x, px.y);
+  let xp = field_at_px(px.x + 1, px.y); let xm = field_at_px(px.x - 1, px.y);
+  let yp = field_at_px(px.x, px.y + 1); let ym = field_at_px(px.x, px.y - 1);
+  let dx = cover_grad(xp.x - c.x, c.x - xm.x, xp.y > COVER_EPS, xm.y > COVER_EPS) * u.slopeScale;
+  let dy = cover_grad(yp.x - c.x, c.x - ym.x, yp.y > COVER_EPS, ym.y > COVER_EPS) * u.slopeScale;
   let inv = inverseSqrt(dx * dx + dy * dy + 1.0);
   let n2d = vec3f(-dx * inv, -dy * inv, inv);
   // a wall's minmod normal is flat (0), so light cliff faces by the geometric normal instead, remapped
