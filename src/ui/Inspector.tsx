@@ -307,8 +307,13 @@ export function Inspector(props: {
         group: "Parameters",
         value: [Number(object.params.tiltX ?? 0), Number(object.params.tiltY ?? 0)],
         size: 2,
+        // tilt is a slope (rise/run, = tanθ). The bar spans ±1 (±45°, the common range) for a
+        // usable scrubber, but it's SOFT — drag/type past it toward vertical when a steeper plate
+        // is wanted (the scrub step is range-independent, so precision isn't affected either way).
         min: -1,
         max: 1,
+        softMin: true,
+        softMax: true,
         onChange: (a) => live((s) => ({ ...s, params: { ...s.params, tiltX: a[0]!, tiltY: a[1]! } }), "tilt"),
         onCommit: commit,
       }),
