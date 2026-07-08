@@ -19,7 +19,8 @@ import { resolveDiffuse } from "../document/diffuseSource";
 import { basename, dirname, joinPath } from "../document/paths";
 import { pushRecent, removeRecent, type RecentProject } from "../document/recents";
 import { buildSessionJson, parseSessionJson } from "../document/session";
-import { PROJECT_FILE, Tab, Workspace } from "../document/workspace";
+import { PROJECT_FILE, Tab, tabPath, Workspace } from "../document/workspace";
+import type { DocTab } from "../document/workspace";
 import { alignNodes, distributeNodes, type AlignMode } from "./alignOps";
 import { buildMenuModel } from "./menuModel";
 import { BindingOverrides, COMMANDS, effectiveKeys, migrateLegacyOverrides } from "./commands";
@@ -39,7 +40,8 @@ import { Layers } from "./Layers";
 import { Library } from "./Library";
 import { Button, ICON, SectionLabel } from "./kit";
 import { UpdateNotice } from "./UpdateNotice";
-import { FileExplorer } from "@carapace/shell";
+import { FileExplorer, ImageView } from "@carapace/shell";
+import type { ImageViewInfo } from "@carapace/shell";
 import type { DirEntry, FileExplorerActions, FileExplorerProps, MenuModel } from "@carapace/shell";
 import { DocumentRegular, FolderRegular, ImageRegular } from "@fluentui/react-icons";
 import { usePersistentState } from "./persist";
@@ -68,6 +70,16 @@ const clampSection = (h: number): number => Math.min(1200, Math.max(96, h)); // 
 
 // dirs the explorer never descends into (matches drydock's tree pruning)
 const IGNORED_DIRS = new Set(["node_modules", ".git", "bin", "obj", ".godot"]);
+
+// image types the explorer lists and ImageView renders (whatever <img> decodes)
+const IMAGE_RE = /\.(png|jpe?g|webp|gif|bmp|svg)$/i;
+const IMAGE_MIMES: Record<string, string> = {
+  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp",
+  gif: "image/gif", bmp: "image/bmp", svg: "image/svg+xml",
+};
+function imageMime(path: string): string {
+  return IMAGE_MIMES[path.toLowerCase().split(".").pop() ?? ""] ?? "application/octet-stream";
+}
 
 /** Leading glyph for a file-tree entry: folder / image / generic file. */
 const fileIcon = (e: DirEntry): React.ReactNode => {
@@ -162,6 +174,7 @@ export function App(): React.JSX.Element {
   const [newDocPath, setNewDocPath] = useState<string | null>(null);
   const explorerActions = useRef<FileExplorerActions | null>(null);
   const [status, setStatus] = useState<{ text: string; tone: "info" | "error" } | null>(null);
+  const [imageInfo, setImageInfo] = useState<ImageViewInfo | null>(null); // active image tab's size/zoom (status bar)
   const selVertsRef = useRef(selVerts);
   selVertsRef.current = selVerts;
   const nudgeEndTimer = useRef<ReturnType<typeof setTimeout> | null>(null); // commits a nudge burst's undo group
@@ -200,7 +213,9 @@ export function App(): React.JSX.Element {
   const [, forceUpdate] = useReducer((x: number) => x + 1, 0);
 
   const active = workspace?.active ?? null;
-  const state = active?.store.state ?? null;
+  const activeDoc = active?.kind === "doc" ? active : null;
+  const activeImage = active?.kind === "image" ? active : null;
+  const state = activeDoc?.store.state ?? null;
 
   // All transient feedback lands in the status bar — no toasts. Info auto-clears, errors linger longer.
   const statusTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -218,15 +233,20 @@ export function App(): React.JSX.Element {
 
   // re-render whenever the workspace structure or the active document changes
   useEffect(() => (workspace ? workspace.subscribe(forceUpdate) : undefined), [workspace]);
-  useEffect(() => (active ? active.store.subscribe(forceUpdate) : undefined), [active]);
+  useEffect(() => (activeDoc ? activeDoc.store.subscribe(forceUpdate) : undefined), [activeDoc]);
   useEffect(() => setSelVerts([]), [state?.selectedId]);
   useEffect(() => setSelVerts([]), [active?.id]); // drop stale vertex indices when switching tabs
 
   // window title tracks the active document + dirty state (nothing set it before — it stayed "Lambert")
   useEffect(() => {
-    const name = active ? (active.docPath ? basename(active.docPath) : "Untitled") : null;
+    const p = active ? tabPath(active) : null;
+    const name = active ? (p ? basename(p) : "Untitled") : null;
     document.title = name ? `${state?.dirty ? "• " : ""}${name} — Lambert` : "Lambert";
-  }, [active, active?.docPath, state?.dirty]);
+  }, [active, state?.dirty]);
+
+  useEffect(() => {
+    if (!activeImage) setImageInfo(null);
+  }, [activeImage]);
 
   // 3D camera persistence: re-seed the orbit from the per-image saved camera when the active image
   // changes (default framing on first open), and report camera moves back so each image keeps its own
@@ -355,14 +375,14 @@ export function App(): React.JSX.Element {
       const migrated = migrateDocToDims(ask.doc, ask.width, ask.height, mode);
       const store = new DocumentStore(migrated, ask.docPath);
       store.reset(migrated, ask.docPath, { dirty: true });
-      const tab: Tab = { id: crypto.randomUUID(), docPath: ask.docPath, store, diffuse: { bytes: ask.bytes } };
+      const tab: Tab = { kind: "doc", id: crypto.randomUUID(), docPath: ask.docPath, store, diffuse: { bytes: ask.bytes } };
       const prevView = (ws.active && viewsRef.current[ws.active.id]) || DEFAULT_VIEW;
       setViews((vs) => ({ ...vs, [tab.id]: { ...prevView } }));
       ws.openTab(tab);
       notify(`Opened ${basename(ask.docPath)} at ${ask.width}×${ask.height} (${mode === "adopt" ? "positions kept" : "objects scaled"}) — save to keep`);
     } else {
       const t = ws.tabs[ws.indexById(ask.tabId)];
-      if (!t) return;
+      if (!t || t.kind !== "doc") return;
       t.store.update((d) => migrateDocToDims(d, ask.width, ask.height, mode));
       t.store.endGesture();
       t.diffuse.bytes = ask.bytes;
@@ -403,6 +423,23 @@ export function App(): React.JSX.Element {
         if (droppedUnknown > 0) {
           return `Opened ${basename(docPath)} — dropped ${droppedUnknown} unrecognized object${droppedUnknown === 1 ? "" : "s"} (legacy/removed type)`;
         }
+      })(),
+    );
+  };
+
+  // open a source image from the explorer as a read-only viewer tab; focus if already open
+  const openImageTab = (path: string): void => {
+    const ws = workspaceRef.current;
+    if (!ws) return;
+    const existing = ws.indexByDocPath(path);
+    if (existing >= 0) {
+      ws.focus(ws.tabs[existing]!.id);
+      return;
+    }
+    run(
+      (async () => {
+        const bytes = await getHost().readFile(path);
+        ws.openTab({ kind: "image", id: crypto.randomUUID(), path, bytes, mimeType: imageMime(path) });
       })(),
     );
   };
@@ -452,13 +489,17 @@ export function App(): React.JSX.Element {
     if (!ws) return;
     let changed = false;
     for (const t of ws.tabs) {
-      if (!t.docPath) continue;
-      const next = t.docPath === from ? to : t.docPath.startsWith(from + "/") ? to + t.docPath.slice(from.length) : null;
-      if (next) {
+      const p = tabPath(t);
+      if (!p) continue;
+      const next = p === from ? to : p.startsWith(from + "/") ? to + p.slice(from.length) : null;
+      if (!next) continue;
+      if (t.kind === "doc") {
         t.docPath = next;
         t.store.setDocPath(next);
-        changed = true;
+      } else {
+        t.path = next;
       }
+      changed = true;
     }
     if (changed) ws.notify();
   };
@@ -470,11 +511,12 @@ export function App(): React.JSX.Element {
     const gone = (p: string): boolean => paths.some((d) => p === d || p.startsWith(d + "/"));
     let keptDirty = 0;
     for (const t of [...ws.tabs]) {
-      if (!t.docPath || !gone(t.docPath)) continue;
+      const p = tabPath(t);
+      if (!p || !gone(p)) continue;
       // a clean tab can be closed silently; a DIRTY tab whose .lmb was deleted from the explorer keeps
       // its unsaved work — closing it here (as before) bypassed the dirty guard and lost it. Leave it
       // open so Save re-creates the file (or the close guard prompts); just flag it.
-      if (t.store.state.dirty) keptDirty += 1;
+      if (t.kind === "doc" && t.store.state.dirty) keptDirty += 1;
       else ws.closeTab(t.id);
     }
     if (keptDirty > 0) {
@@ -571,7 +613,7 @@ export function App(): React.JSX.Element {
   const reloadDiffuse = (): void => {
     const ws = workspaceRef.current;
     const t = ws?.active;
-    if (!ws || !t) return;
+    if (!ws || t?.kind !== "doc") return;
     run(
       (async () => {
         const doc = t.store.state.doc;
@@ -593,7 +635,7 @@ export function App(): React.JSX.Element {
     const ws = workspaceRef.current;
     if (!ws) return;
     const t = ws.tabs[ws.indexById(id)];
-    if (t?.store.state.dirty) {
+    if (t?.kind === "doc" && t.store.state.dirty) {
       const name = t.docPath ? basename(t.docPath) : "Untitled document";
       const r = await confirm({
         title: `${name} has unsaved changes`,
@@ -610,7 +652,7 @@ export function App(): React.JSX.Element {
   const saveActive = (): void => {
     const ws = workspaceRef.current;
     const t = ws?.active;
-    if (!ws || !t) return;
+    if (!ws || t?.kind !== "doc") return;
     saveTab(getHost(), t, ws.projectPath)
       .then((p) => {
         if (p) notify(`Saved ${basename(p)}`); // null = save-as dialog cancelled
@@ -623,7 +665,7 @@ export function App(): React.JSX.Element {
     const ws = workspaceRef.current;
     if (!ws) return;
     void (async () => {
-      const dirty = ws.tabs.filter((t) => t.store.state.dirty);
+      const dirty = ws.tabs.filter((t): t is DocTab => t.kind === "doc" && t.store.state.dirty);
       let saved = 0;
       let failed = 0;
       // per-tab try/catch: one failing save must not abort the rest (the old loop threw on the first
@@ -644,7 +686,7 @@ export function App(): React.JSX.Element {
   const exportActive = (): void => {
     const ws = workspaceRef.current;
     const t = ws?.active;
-    if (!ws || !t) return;
+    if (!ws || t?.kind !== "doc") return;
     // an unresolved-diffuse tab carries a blank placeholder, so its alpha (mask) gate would be wrong —
     // block export until the real diffuse is relinked
     if (t.diffuse.unresolved) {
@@ -674,7 +716,7 @@ export function App(): React.JSX.Element {
   const exportHeightmap = (): void => {
     const ws = workspaceRef.current;
     const t = ws?.active;
-    if (!ws || !t) return;
+    if (!ws || t?.kind !== "doc") return;
     if (!t.docPath) {
       notify("Save the document before exporting its height map", "error");
       return;
@@ -717,7 +759,7 @@ export function App(): React.JSX.Element {
       await getHost().mkdir(exportsDir).catch(() => {});
       const dir = await getHost().openFolderDialog({ title: "Export all NX to folder", defaultPath: exportsDir });
       if (!dir) return;
-      const liveDocs = new Map(ws.tabs.filter((t) => t.docPath).map((t) => [t.docPath!, t.store.state.doc]));
+      const liveDocs = new Map(ws.tabs.filter((t): t is DocTab => t.kind === "doc" && t.docPath !== null).map((t) => [t.docPath!, t.store.state.doc]));
       run(
         Promise.allSettled(
           lmbs.map(async (lmb) => {
@@ -830,6 +872,14 @@ export function App(): React.JSX.Element {
     );
   };
 
+  // Explorer root-row rename -> the project display name in project.lambert (empty = clear back
+  // to the directory default). Never available on remote clones (the server owns the name).
+  const renameProject = (name: string): void => {
+    const ws = workspaceRef.current;
+    if (!ws) return;
+    persistConfig({ ...ws.config, name: name.trim() || undefined });
+  };
+
   // open one of the settings dialogs, optionally at a screen (defaults to its last-viewed one)
   const openSettingsDialog = (dialog: SettingsDialogKind, screen?: string): void => {
     if (!workspaceRef.current) return;
@@ -857,7 +907,8 @@ export function App(): React.JSX.Element {
     // adjustment layers default to the FULL image bounds regardless of the drop point —
     // a filter region over everything below, not a placed shape
     if (o.typeId === ObjectTypeId.Adjust) {
-      const doc = workspaceRef.current?.active?.store.state.doc;
+      const a = workspaceRef.current?.active;
+      const doc = a?.kind === "doc" ? a.store.state.doc : undefined;
       if (doc) {
         const hw = doc.source.width / 2;
         const hh = doc.source.height / 2;
@@ -878,7 +929,7 @@ export function App(): React.JSX.Element {
   // add an object from the library popover (a palette preset), at the document origin
   const pickObject = (presetId: string): void => {
     const t = workspaceRef.current?.active;
-    if (!t) return;
+    if (t?.kind !== "doc") return;
     const o = t.store.state.doc.canvas.origin;
     t.store.update((d) => addInstance(d, resolvePaletteObject(presetId, v2(o.x, o.y))));
     const layers = t.store.state.doc.layers;
@@ -890,7 +941,7 @@ export function App(): React.JSX.Element {
   const savePresetFromSelection = (): void => {
     const ws = workspaceRef.current;
     const t = ws?.active;
-    if (!ws || !t) return;
+    if (!ws || t?.kind !== "doc") return;
     const node = t.store.state.selectedId ? findNode(t.store.state.doc.layers, t.store.state.selectedId) : null;
     if (!node || !isObject(node)) {
       notify("Select an object to save as a preset (groups aren't supported yet)", "error");
@@ -972,17 +1023,22 @@ export function App(): React.JSX.Element {
     return buildSessionJson({
       projectPath: ws.projectPath,
       activeIndex: ws.activeIndex,
-      tabs: ws.tabs.map((t) => ({
-        id: t.id,
-        docPath: t.docPath,
-        dirty: t.store.state.dirty,
-        doc: t.store.state.doc,
-        view: vs[t.id] ?? DEFAULT_VIEW,
-        selectedId: t.store.state.selectedId,
-        viewport: vpts[t.id],
-        orbit: obs[t.id],
-        pinned: t.pinned,
-      })),
+      tabs: ws.tabs.map((t) =>
+        t.kind === "image"
+          ? { kind: "image" as const, id: t.id, path: t.path, pinned: t.pinned }
+          : {
+              kind: "doc" as const,
+              id: t.id,
+              docPath: t.docPath,
+              dirty: t.store.state.dirty,
+              doc: t.store.state.doc,
+              view: vs[t.id] ?? DEFAULT_VIEW,
+              selectedId: t.store.state.selectedId,
+              viewport: vpts[t.id],
+              orbit: obs[t.id],
+              pinned: t.pinned,
+            },
+      ),
     });
   };
 
@@ -1006,7 +1062,8 @@ export function App(): React.JSX.Element {
   // in-window MenuBar (the menuModel built below). Defined in render so it sees fresh state; the
   // IPC listener calls the latest via a ref so it registers only once.
   const runMenuAction = (action: string): void => {
-    const t = workspaceRef.current?.active;
+    const anyTab = workspaceRef.current?.active;
+    const t = anyTab?.kind === "doc" ? anyTab : undefined; // doc-only actions guard on this
     const ids = t?.store.state.selectedIds ?? [];
     switch (action) {
       case "new-project":
@@ -1152,20 +1209,20 @@ export function App(): React.JSX.Element {
       case "close-saved":
       case "close-all": {
         const ws = workspaceRef.current;
-        if (!ws || !t) return;
+        if (!ws || !anyTab) return;
         const verb = (action === "close-tab" ? "close" : action) as Exclude<TabMenuVerb, "pin">;
-        const infos = ws.tabs.map((x) => ({ id: x.id, title: "", dirty: x.store.state.dirty, pinned: x.pinned }));
-        void closeMany(tabVerbIds(verb, infos, t.id));
+        const infos = ws.tabs.map((x) => ({ id: x.id, title: "", dirty: x.kind === "doc" && x.store.state.dirty, pinned: x.pinned }));
+        void closeMany(tabVerbIds(verb, infos, anyTab.id));
         return;
       }
       case "pin-tab":
-        if (t) setTabPinned(t.id, !t.pinned);
+        if (anyTab) setTabPinned(anyTab.id, !anyTab.pinned);
         return;
       case "tab-next":
       case "tab-prev": {
         const ws = workspaceRef.current;
-        if (!ws || !t || ws.tabs.length < 2) return;
-        const cur = ws.indexById(t.id);
+        if (!ws || !anyTab || ws.tabs.length < 2) return;
+        const cur = ws.indexById(anyTab.id);
         ws.focus(ws.tabs[(cur + (action === "tab-next" ? 1 : ws.tabs.length - 1)) % ws.tabs.length]!.id);
         return;
       }
@@ -1224,7 +1281,8 @@ export function App(): React.JSX.Element {
           keybinding: bindings.get(c.id) ?? undefined,
           isEnabled: () => {
             const ws = workspaceRef.current;
-            const t = ws?.active;
+            const anyTab = ws?.active;
+            const t = anyTab?.kind === "doc" ? anyTab : undefined;
             const n = t?.store.state.selectedIds.length ?? 0;
             switch (c.enable) {
               case "always":
@@ -1232,6 +1290,8 @@ export function App(): React.JSX.Element {
               case "workspace":
                 return !!ws;
               case "active":
+                return !!anyTab;
+              case "doc":
                 return !!t;
               case "sel":
                 return n > 0;
@@ -1264,7 +1324,7 @@ export function App(): React.JSX.Element {
     host.guardClose();
     host.onConfirmClose(async () => {
       const ws = workspaceRef.current;
-      const anyDirty = ws?.tabs.some((t) => t.store.state.dirty) ?? false;
+      const anyDirty = ws?.tabs.some((t) => t.kind === "doc" && t.store.state.dirty) ?? false;
       let ok = true;
       if (anyDirty) {
         const r = await confirm({
@@ -1287,7 +1347,24 @@ export function App(): React.JSX.Element {
   // project to open (double-clicked project.lambert), which wins. Also register the live "open with"
   // push so an already-running window opens a freshly double-clicked project.
   useEffect(() => {
-    if (new URLSearchParams(location.search).has("demo")) return;
+    const params = new URLSearchParams(location.search);
+    if (params.has("demo")) return;
+    // capture/e2e aid: `?open=<project dir>` opens a real on-disk project instead of restoring the
+    // session (automation profiles are fresh, so there is no session); `&openimage=<relpath>`
+    // then opens an image tab from it — used for --capture shots of the explorer/ImageView.
+    const openQ = params.get("open");
+    if (openQ) {
+      void (async () => {
+        try {
+          notify(enterProject(await openProjectByPath(getHost(), openQ)));
+          const img = params.get("openimage");
+          if (img) setTimeout(() => openImageTab(joinPath(openQ, img)), 100);
+        } catch (err) {
+          notify(err instanceof Error ? err.message : String(err), "error");
+        }
+      })();
+      return;
+    }
     getHost().onOpenProjectPath((dir) => openPathRef.current(dir));
     void (async () => {
       try {
@@ -1315,7 +1392,18 @@ export function App(): React.JSX.Element {
         const restoredViewports: Record<string, Viewport> = {};
         const restoredOrbits: Record<string, Orbit> = {};
         let unresolvedCount = 0;
+        let missingImages = 0;
         for (const ts of s.tabs) {
+          if (ts.kind === "image") {
+            // path-only persistence: re-read the file; a missing image just drops the tab
+            try {
+              const bytes = await host.readFile(ts.path);
+              ws.openTab({ kind: "image", id: ts.id, path: ts.path, bytes, mimeType: imageMime(ts.path), pinned: ts.pinned });
+            } catch {
+              missingImages += 1;
+            }
+            continue;
+          }
           // Resolve the diffuse, but a transient failure (remote host down, file:// on an unmounted
           // drive) must NOT drop the tab — that silently lost a dirty, never-saved doc's work forever
           // once the continuous stash overwrote the session with only survivors. Keep the tab with a
@@ -1353,7 +1441,7 @@ export function App(): React.JSX.Element {
           const store = new DocumentStore(doc, ts.docPath);
           if (ts.dirty) store.reset(doc, ts.docPath, { dirty: true });
           if (ts.selectedId && findNode(doc.layers, ts.selectedId)) store.select(ts.selectedId);
-          const tab: Tab = { id: ts.id, docPath: ts.docPath, store, diffuse: { bytes, unresolved }, pinned: ts.pinned };
+          const tab: Tab = { kind: "doc", id: ts.id, docPath: ts.docPath, store, diffuse: { bytes, unresolved }, pinned: ts.pinned };
           ws.openTab(tab);
           // backfill fields added since the session was saved; migrate the retired editor "lit" mode to normal
           restoredViews[ts.id] = { ...DEFAULT_VIEW, ...ts.view, mode: ts.view.mode === "lit" ? "normal" : ts.view.mode };
@@ -1374,6 +1462,9 @@ export function App(): React.JSX.Element {
           warnings.push(
             `${unresolvedCount} document${unresolvedCount === 1 ? "" : "s"} without ${unresolvedCount === 1 ? "its" : "their"} diffuse (use Reload Diffuse)`,
           );
+        }
+        if (missingImages > 0) {
+          warnings.push(`${missingImages} image tab${missingImages === 1 ? "" : "s"} skipped (file missing)`);
         }
         if (warnings.length > 0) notify(`Restored ${s.projectPath} — ${warnings.join("; ")}`, "error");
         else notify(`Restored ${s.projectPath}`);
@@ -1396,7 +1487,7 @@ export function App(): React.JSX.Element {
       }, 1000);
     };
     const unsubW = workspace.subscribe(schedule);
-    const unsubS = active?.store.subscribe(schedule);
+    const unsubS = activeDoc?.store.subscribe(schedule);
     schedule();
     return () => {
       unsubW();
@@ -1404,26 +1495,34 @@ export function App(): React.JSX.Element {
       if (stashTimer.current) clearTimeout(stashTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspace, active, views, viewports, orbits]);
+  }, [workspace, active, activeDoc, views, viewports, orbits]);
 
   // ?demo capture bootstrap (fixtures -> in-memory project + readiness flag) — QC-CARRY-2 extraction
   useDemoBootstrap({ setWorkspace, setViews, setSwapped, setNewDocPath, setSelVerts, setTool, setBoxMode, openSettings, runAction: (id) => runMenuActionRef.current(id), defaultView: DEFAULT_VIEW });
   // the window-level editor keymap (tools, Esc, Delete, nudges, copy/paste, X/V) — QC-CARRY-2 extraction
   useEditorKeymap({ workspaceRef, runMenuActionRef, bindingsRef: editorBindingsRef, selVertsRef, nudgeEndTimer, setSwapped, setSelVerts, setTool, setActiveView, onChordPending: setChordPending });
+  // Explorer root-row label: remote clones show the server's project name (rename disabled);
+  // local projects the configured name, else the directory basename.
+  const projectDisplayName = sidecar?.projectPath ?? workspace?.config.name ?? (workspace ? basename(workspace.projectPath) : "");
+
   const tabInfos = workspace
-    ? workspace.tabs.map((t) => ({
-        id: t.id,
-        name: t.docPath ? basename(t.docPath) : "untitled",
-        dirty: t.store.state.dirty,
-        pinned: t.pinned,
-        docPath: t.docPath,
-      }))
+    ? workspace.tabs.map((t) => {
+        const p = tabPath(t);
+        return {
+          id: t.id,
+          name: p ? basename(p) : "untitled",
+          dirty: t.kind === "doc" && t.store.state.dirty,
+          pinned: t.pinned,
+          docPath: p,
+        };
+      })
     : [];
 
   // tab context-menu extensions: path + reveal verbs (only for saved docs — untitled has no path)
   const tabExtraItems = (tab: { id: string }): MenuItem[] => {
     const ws = workspaceRef.current;
-    const docPath = ws?.tabs[ws.indexById(tab.id)]?.docPath;
+    const target = ws?.tabs[ws.indexById(tab.id)];
+    const docPath = target ? tabPath(target) : null;
     if (!ws || !docPath) return [];
     const relative = docPath.startsWith(ws.projectPath) ? docPath.slice(ws.projectPath.length).replace(/^\//, "") : docPath;
     return [
@@ -1443,12 +1542,13 @@ export function App(): React.JSX.Element {
     keys: (id) => bindings.get(id) ?? undefined,
     hasWorkspace: !!workspace,
     hasActive: !!active,
+    hasDoc: !!activeDoc,
     hasSel,
     hasRemote: sidecar !== null,
     canAlign,
     canDistribute,
-    canUndo: !!active?.store.canUndo,
-    canRedo: !!active?.store.canRedo,
+    canUndo: !!activeDoc?.store.canUndo,
+    canRedo: !!activeDoc?.store.canRedo,
     hasPresets: (workspace?.config.presets?.length ?? 0) > 0,
     rulers,
     pixelGrid,
@@ -1461,9 +1561,9 @@ export function App(): React.JSX.Element {
       <Toolbar
         menu={menuModel}
         controls={
-          active && state ? (
+          activeDoc && state ? (
             <ViewControls
-              store={active.store}
+              store={activeDoc.store}
               state={state}
               view={activeView}
               setView={setActiveView}
@@ -1528,10 +1628,10 @@ export function App(): React.JSX.Element {
           onClose={() => setSettingsOpen(null)}
         />
       ) : null}
-      {settingsOpen === "doc" && workspace && active && state ? (
+      {settingsOpen === "doc" && workspace && activeDoc && state ? (
         <DocumentSettingsDialog
           config={workspace.config}
-          store={active.store}
+          store={activeDoc.store}
           state={state}
           initialScreen={docScreen}
           onScreenChange={setDocScreen}
@@ -1552,7 +1652,7 @@ export function App(): React.JSX.Element {
         {workspace ? (
           <>
             <aside className="flex shrink-0 flex-col bg-bg" style={{ width: leftWidth }}>
-              {active ? (
+              {activeDoc ? (
                 <div className="p-3 pb-0">
                   <Library enabled onPick={pickObject} savedPresets={workspace?.config.presets ?? []} onDeletePreset={deletePreset} />
                 </div>
@@ -1562,7 +1662,7 @@ export function App(): React.JSX.Element {
               <div className="min-h-0 flex-1 pt-3">
                 <SplitView orientation="vertical" size={layersHeight} onResize={(h) => setLayersHeight(clampSection(h))} min={96}>
                   <div className="flex h-full min-h-0 flex-col px-3">
-                    {active && state ? <Layers store={active.store} state={state} /> : null}
+                    {activeDoc && state ? <Layers store={activeDoc.store} state={state} /> : null}
                   </div>
                   <div className="flex h-full min-h-0 flex-col px-3 pt-2 pb-3">
                     <SectionLabel>Explorer</SectionLabel>
@@ -1573,8 +1673,15 @@ export function App(): React.JSX.Element {
                           19.2); the ReactNode objects are identical, only nominally distinct */}
                       <FileExplorer
                         root={workspace.projectPath}
+                        rootNode={{
+                          label: projectDisplayName,
+                          // remote clones take the server's project name — renaming is skyrat's
+                          // business (project.lambert syncs, so a local rename would push to everyone)
+                          onRename: sidecar ? undefined : renameProject,
+                        }}
                         onOpen={(p) => {
                           if (/\.lmb$/i.test(p)) openDoc(p);
+                          else if (IMAGE_RE.test(p)) openImageTab(p);
                         }}
                         newFile={{ extension: ".lmb", label: "Document" }}
                         onNewFile={beginNewDoc}
@@ -1583,9 +1690,11 @@ export function App(): React.JSX.Element {
                         actionsRef={explorerActions}
                         getIcon={fileIcon as FileExplorerProps["getIcon"]}
                         getDecoration={(e) => gitDecorations.get(e.path)}
-                        // show only .lmb documents + folders. project.lambert is hidden (infra) so it can't be
-                        // renamed/deleted from the tree, which would break the project.
-                        exclude={(e) => (e.isDir ? IGNORED_DIRS.has(e.name) : !/\.lmb$/i.test(e.name))}
+                        // .lmb documents, viewable images, folders. project.lambert is hidden (infra) so it
+                        // can't be renamed/deleted from the tree, which would break the project.
+                        exclude={(e) =>
+                          e.isDir ? IGNORED_DIRS.has(e.name) : e.name === PROJECT_FILE || !(/\.lmb$/i.test(e.name) || IMAGE_RE.test(e.name))
+                        }
                         ariaLabel="Project files"
                         storageKey="lambert.explorer.expanded"
                       />
@@ -1594,7 +1703,7 @@ export function App(): React.JSX.Element {
                 </SplitView>
               </div>
             </aside>
-            {active ? <ToolPalette tool={tool} setTool={setTool} keyFor={(t) => bindings.get(`tool-${t}`)} /> : null}
+            {activeDoc ? <ToolPalette tool={tool} setTool={setTool} keyFor={(t) => bindings.get(`tool-${t}`)} /> : null}
             <Sash orientation="vertical" onDrag={(dx) => setLeftWidth((w) => clampPanel(w + dx))} />
           </>
         ) : null}
@@ -1612,7 +1721,7 @@ export function App(): React.JSX.Element {
               onReorder={(id, toIndex) => workspaceRef.current?.moveTab(id, toIndex)}
             />
           ) : null}
-          {active && state ? (
+          {activeDoc && state ? (
             <div
               className="grid min-h-0 flex-1"
               style={{
@@ -1623,11 +1732,11 @@ export function App(): React.JSX.Element {
             >
               <main className="relative min-w-0 overflow-hidden bg-[var(--color-viewport-bg)]" style={{ gridArea: "big" }}>
                 <CanvasView
-                  store={active.store}
+                  store={activeDoc.store}
                   state={state}
                   view={activeView}
                   tool={tool}
-                  diffuseBytes={active.diffuse.bytes}
+                  diffuseBytes={activeDoc.diffuse.bytes}
                   resolvePaletteObject={resolvePaletteObject}
                   selVerts={selVerts}
                   setSelVerts={setSelVerts}
@@ -1644,9 +1753,9 @@ export function App(): React.JSX.Element {
                   overridesNormalDirs={state.doc.normalDirs !== undefined}
                   openSettings={openSettings}
                   swapped={swapped}
-                  tabId={active.id}
-                  savedViewport={viewports[active.id]}
-                  onViewportChange={(vp) => setViewports((m) => ({ ...m, [active.id]: vp }))}
+                  tabId={activeDoc.id}
+                  savedViewport={viewports[activeDoc.id]}
+                  onViewportChange={(vp) => setViewports((m) => ({ ...m, [activeDoc.id]: vp }))}
                   setTool={setTool}
                   snap={snap}
                   rulers={rulers}
@@ -1659,7 +1768,7 @@ export function App(): React.JSX.Element {
               </div>
               <aside className="overflow-y-auto bg-bg p-3" style={{ gridArea: "inspector" }}>
                 <Inspector
-                  store={active.store}
+                  store={activeDoc.store}
                   state={state}
                   selVerts={selVerts}
                   openSettings={openSettings}
@@ -1667,7 +1776,7 @@ export function App(): React.JSX.Element {
                   snap={snap}
                   adjustmentDefaults={workspace!.config.adjustmentDefaults}
                   onSelectMask={(nodeId, maskId) => {
-                    active.store.select(nodeId);
+                    activeDoc.store.select(nodeId);
                     setMaskFocus((f) => ({ nodeId, maskId, seq: (f?.seq ?? 0) + 1 }));
                   }}
                 />
@@ -1700,6 +1809,16 @@ export function App(): React.JSX.Element {
                 />
               </div>
             </div>
+          ) : activeImage ? (
+            <main className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-[var(--color-viewport-bg)]">
+              <ImageView
+                key={activeImage.id}
+                bytes={activeImage.bytes}
+                mimeType={activeImage.mimeType}
+                alt={basename(activeImage.path)}
+                onInfo={setImageInfo}
+              />
+            </main>
           ) : workspace ? (
             <div className="flex min-h-0 flex-1 bg-[var(--color-viewport-bg)]">
               <EmptyState
@@ -1727,13 +1846,26 @@ export function App(): React.JSX.Element {
       </div>
       <StatusBar
         left={
-          chordPending ? (
-            <span className="text-fg-mid">({formatKeys(chordPending)}) waiting for the second key…</span>
-          ) : status ? (
-            <span className={status.tone === "error" ? "text-error" : "text-fg-mid"}>{status.text}</span>
-          ) : null
+          <span className="flex min-w-0 items-center gap-3">
+            {workspace ? (
+              <span className="max-w-[40vw] truncate text-fg-mid" title={workspace.projectPath}>
+                {workspace.projectPath}
+              </span>
+            ) : null}
+            {chordPending ? (
+              <span className="min-w-0 truncate text-fg-mid">({formatKeys(chordPending)}) waiting for the second key…</span>
+            ) : status ? (
+              <span className={`min-w-0 truncate ${status.tone === "error" ? "text-error" : "text-fg-mid"}`} title={status.text}>{status.text}</span>
+            ) : null}
+          </span>
         }
-        right={state ? `${state.doc.source.width}×${state.doc.source.height} · ${flattenLayers(state.doc.layers).length} objects` : null}
+        right={
+          state
+            ? `${state.doc.source.width}×${state.doc.source.height} · ${flattenLayers(state.doc.layers).length} objects`
+            : activeImage && imageInfo
+              ? <span className="whitespace-nowrap">{`${imageInfo.width}×${imageInfo.height} · ${Math.round(imageInfo.zoom * 100)}%`}</span>
+              : null
+        }
       />
       <UpdateNotice autoCheck={autoUpdateCheck} />
     </div>

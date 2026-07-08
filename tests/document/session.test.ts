@@ -3,7 +3,7 @@ import { ObjectTypeId } from "../../src/field/objectTypeIds";
 import "../../src/field/objects";
 import { addObject } from "../../src/document/docOps";
 import { emptyDoc } from "../../src/document/schema";
-import { buildSessionJson, parseSessionJson, TabSession } from "../../src/document/session";
+import { buildSessionJson, parseSessionJson, DocTabSession, TabSession } from "../../src/document/session";
 import type { ObjectInstance } from "../../src/field/types";
 import { Vector3 } from "@carapace/primitives";
 import { v2 } from "../../src/field/vec";
@@ -14,8 +14,15 @@ const view = {
   lightDir: [-0.5, -0.5, 0.7] as [number, number, number],
 };
 
-function tab(id: string, docPath: string | null, dirty: boolean, selectedId: string | null = null): TabSession {
+/** Narrow a parsed tab to the doc variant (throws on images — these tests build docs). */
+function asDoc(t: TabSession | undefined): DocTabSession {
+  if (!t || t.kind !== "doc") throw new Error("expected a doc tab");
+  return t;
+}
+
+function tab(id: string, docPath: string | null, dirty: boolean, selectedId: string | null = null): DocTabSession {
   return {
+    kind: "doc",
     id,
     docPath,
     dirty,
@@ -36,10 +43,10 @@ test("workspace session round-trips project, tabs, active index, and hydrates do
   expect(s.activeIndex).toBe(1);
   expect(s.tabs.length).toBe(2);
   expect(s.tabs[0]!.id).toBe("a");
-  expect(s.tabs[1]!.docPath).toBe(null);
-  expect(s.tabs[1]!.dirty).toBe(true);
+  expect(asDoc(s.tabs[1]).docPath).toBe(null);
+  expect(asDoc(s.tabs[1]).dirty).toBe(true);
   // objects hydrate back into Vector instances (have methods, not plain objects)
-  expect((s.tabs[0]!.doc.layers[0] as ObjectInstance).transform.pos).toBeInstanceOf(Vector3);
+  expect((asDoc(s.tabs[0]).doc.layers[0] as ObjectInstance).transform.pos).toBeInstanceOf(Vector3);
 });
 
 test("session with no open project round-trips (empty tabs, no active)", () => {
@@ -56,22 +63,22 @@ test("migrates a legacy per-tab view: an unknown mode -> normal, stray 'raster' 
   legacy.tabs[0].view.mode = "height"; // a mode that no longer exists
   legacy.tabs[0].view.raster = true; // saved before the vector/raster toggle was removed — must not break parse
   const s = parseSessionJson(JSON.stringify(legacy));
-  expect(s.tabs[0]!.view.mode).toBe("normal");
-  expect("raster" in s.tabs[0]!.view).toBe(false); // the removed field is stripped, not carried forward
+  expect(asDoc(s.tabs[0]).view.mode).toBe("normal");
+  expect("raster" in asDoc(s.tabs[0]).view).toBe(false); // the removed field is stripped, not carried forward
 });
 
 test("persists per-tab selection + viewport, and defaults them for legacy sessions", () => {
   const withVp = { ...tab("/p/a.png", null, false, "object-1"), viewport: { zoom: 2, panX: 10, panY: -5 } };
   const s = parseSessionJson(buildSessionJson({ projectPath: "/p", activeIndex: 0, tabs: [withVp] }));
-  expect(s.tabs[0]!.selectedId).toBe("object-1");
-  expect(s.tabs[0]!.viewport).toEqual({ zoom: 2, panX: 10, panY: -5 });
+  expect(asDoc(s.tabs[0]).selectedId).toBe("object-1");
+  expect(asDoc(s.tabs[0]).viewport).toEqual({ zoom: 2, panX: 10, panY: -5 });
 
   const legacy = JSON.parse(buildSessionJson({ projectPath: "/p", activeIndex: 0, tabs: [tab("/p/a.png", null, false)] }));
   delete legacy.tabs[0].selectedId; // saved before selection/viewport persistence existed
   delete legacy.tabs[0].viewport;
   const s2 = parseSessionJson(JSON.stringify(legacy));
-  expect(s2.tabs[0]!.selectedId).toBe(null);
-  expect(s2.tabs[0]!.viewport).toBeUndefined();
+  expect(asDoc(s2.tabs[0]).selectedId).toBe(null);
+  expect(asDoc(s2.tabs[0]).viewport).toBeUndefined();
 });
 
 test("one corrupt tab is dropped + counted, the rest of the session survives", () => {
@@ -90,4 +97,23 @@ test("rejects garbage and wrong versions", () => {
   const valid = JSON.parse(buildSessionJson({ projectPath: null, activeIndex: -1, tabs: [] }));
   valid.version = 2;
   expect(() => parseSessionJson(JSON.stringify(valid))).toThrow();
+});
+
+test("image tabs round-trip path-only; a pre-image session (no kind) parses as doc tabs", () => {
+  const s = parseSessionJson(
+    buildSessionJson({
+      projectPath: "/p",
+      activeIndex: 0,
+      tabs: [tab("a", "/p/a.lmb", false), { kind: "image", id: "i1", path: "/p/hull.df.png", pinned: true }],
+    }),
+  );
+  expect(s.tabs).toHaveLength(2);
+  expect(s.tabs[1]).toEqual({ kind: "image", id: "i1", path: "/p/hull.df.png", pinned: true });
+
+  // legacy: strip the kind field — must still parse as a doc tab
+  const legacy = JSON.parse(buildSessionJson({ projectPath: "/p", activeIndex: 0, tabs: [tab("a", "/p/a.lmb", false)] }));
+  delete legacy.tabs[0].kind;
+  const s2 = parseSessionJson(JSON.stringify(legacy));
+  expect(s2.droppedTabs).toBe(0);
+  expect(asDoc(s2.tabs[0]).docPath).toBe("/p/a.lmb");
 });

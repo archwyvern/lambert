@@ -44,8 +44,18 @@ const sessionEnvelopeSchema = z.object({
   tabs: z.array(z.unknown()),
 });
 
+// Image tabs persist path-only (bytes re-read on restore; a missing file drops the tab).
+const imageTabSchema = z.object({
+  kind: z.literal("image"),
+  id: z.string().min(1),
+  path: z.string().min(1),
+  pinned: z.boolean().optional(),
+});
+
 export type View = z.infer<typeof viewSchema>;
-export type TabSession = Omit<z.infer<typeof tabSchema>, "doc"> & { doc: LambertDoc };
+export type DocTabSession = Omit<z.infer<typeof tabSchema>, "doc"> & { kind: "doc"; doc: LambertDoc };
+export type ImageTabSession = z.infer<typeof imageTabSchema>;
+export type TabSession = DocTabSession | ImageTabSession;
 export interface SessionData {
   version: 1;
   projectPath: string | null;
@@ -66,12 +76,23 @@ export function parseSessionJson(json: string): ParsedSession {
   const tabs: TabSession[] = [];
   let droppedTabs = 0;
   for (const raw of env.tabs) {
+    // Discriminate by kind; pre-image sessions have no kind field and are doc tabs.
+    if ((raw as { kind?: string } | null)?.kind === "image") {
+      const parsed = imageTabSchema.safeParse(raw);
+      if (!parsed.success) {
+        droppedTabs += 1;
+        continue;
+      }
+      tabs.push(parsed.data);
+      continue;
+    }
     const parsed = tabSchema.safeParse(raw);
     if (!parsed.success) {
       droppedTabs += 1; // one bad tab must not sink the rest of a crash-recovery session
       continue;
     }
-    const t = parsed.data as unknown as TabSession;
+    const t = parsed.data as unknown as DocTabSession;
+    t.kind = "doc";
     t.doc = hydrateDoc(t.doc as unknown as Parameters<typeof hydrateDoc>[0]); // the shared .lmb hydration path
     tabs.push(t);
   }

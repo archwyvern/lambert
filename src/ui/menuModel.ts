@@ -16,6 +16,8 @@ export function buildMenuModel(opts: {
   hasWorkspace: boolean;
   /** A document tab is active. */
   hasActive: boolean;
+  /** The active tab is a DOCUMENT (image tabs disable doc-only items). */
+  hasDoc: boolean;
   hasSel: boolean;
   /** The open project is a remote (WebDAV) clone — enables Sync / Export to Remote. */
   hasRemote: boolean;
@@ -27,7 +29,7 @@ export function buildMenuModel(opts: {
   rulers: boolean;
   pixelGrid: boolean;
 }): MenuModel {
-  const { action, about, keys, hasWorkspace, hasActive, hasSel, hasRemote, canAlign, canDistribute, canUndo, canRedo, hasPresets, rulers, pixelGrid } = opts;
+  const { action, about, keys, hasWorkspace, hasActive, hasDoc, hasSel, hasRemote, canAlign, canDistribute, canUndo, canRedo, hasPresets, rulers, pixelGrid } = opts;
   return [
     {
       label: "&&File",
@@ -37,14 +39,14 @@ export function buildMenuModel(opts: {
         { label: "Clone Remote Project…", shortcut: keys("remote-clone"), run: () => action("remote-clone") },
         { separator: true },
         { label: "New Document…", shortcut: keys("new-document"), enabled: hasWorkspace, run: () => action("new-document") },
-        { label: "Reload Diffuse", enabled: hasActive, run: () => action("reload-diffuse") },
+        { label: "Reload Diffuse", enabled: hasDoc, run: () => action("reload-diffuse") },
         { separator: true },
-        { label: "Save", shortcut: keys("save"), enabled: hasActive, run: () => action("save") },
+        { label: "Save", shortcut: keys("save"), enabled: hasDoc, run: () => action("save") },
         { label: "Save All", shortcut: keys("save-all"), enabled: hasWorkspace, run: () => action("save-all") },
         { label: "Close Tab", shortcut: keys("close-tab"), enabled: hasActive, run: () => action("close-tab") },
         { separator: true },
-        { label: "Export NX", shortcut: keys("export-nx"), enabled: hasActive, run: () => action("export-nx") },
-        { label: "Export Height Map", shortcut: keys("export-height"), enabled: hasActive, run: () => action("export-height") },
+        { label: "Export NX", shortcut: keys("export-nx"), enabled: hasDoc, run: () => action("export-nx") },
+        { label: "Export Height Map", shortcut: keys("export-height"), enabled: hasDoc, run: () => action("export-height") },
         { label: "Export All NX", shortcut: keys("export-all"), enabled: hasWorkspace, run: () => action("export-all") },
         { separator: true },
         { label: "Sync from Remote", shortcut: keys("remote-sync"), enabled: hasRemote, run: () => action("remote-sync") },
@@ -55,7 +57,7 @@ export function buildMenuModel(opts: {
         { separator: true },
         { label: "Preferences…", shortcut: keys("preferences"), run: () => action("preferences") },
         { label: "Project Settings…", shortcut: keys("project-settings"), enabled: hasWorkspace, run: () => action("project-settings") },
-        { label: "Document Settings…", shortcut: keys("document-settings"), enabled: hasActive, run: () => action("document-settings") },
+        { label: "Document Settings…", shortcut: keys("document-settings"), enabled: hasDoc, run: () => action("document-settings") },
       ],
     },
     {
@@ -65,7 +67,7 @@ export function buildMenuModel(opts: {
         { label: "Redo", shortcut: keys("redo"), enabled: canRedo, run: () => action("redo") },
         { separator: true },
         { label: "Copy", shortcut: keys("copy"), enabled: hasSel, run: () => action("copy") },
-        { label: "Paste", shortcut: keys("paste"), enabled: hasActive, run: () => action("paste") },
+        { label: "Paste", shortcut: keys("paste"), enabled: hasDoc, run: () => action("paste") },
         { separator: true },
         { label: "Duplicate", shortcut: keys("duplicate"), enabled: hasSel, run: () => action("duplicate") },
         { label: "Save as Preset", enabled: hasSel, run: () => action("save-preset") },
@@ -103,11 +105,11 @@ export function buildMenuModel(opts: {
     {
       label: "&&View",
       items: [
-        { label: "Fit", shortcut: keys("zoom-fit"), enabled: hasActive, run: () => action("zoom-fit") },
+        { label: "Fit", shortcut: keys("zoom-fit"), enabled: hasDoc, run: () => action("zoom-fit") },
         { label: "Fit Selection", shortcut: keys("zoom-fit-selection"), enabled: hasSel, run: () => action("zoom-fit-selection") },
-        { label: "100%", shortcut: keys("zoom-100"), enabled: hasActive, run: () => action("zoom-100") },
-        { label: "Zoom In", shortcut: keys("zoom-in"), enabled: hasActive, run: () => action("zoom-in") },
-        { label: "Zoom Out", shortcut: keys("zoom-out"), enabled: hasActive, run: () => action("zoom-out") },
+        { label: "100%", shortcut: keys("zoom-100"), enabled: hasDoc, run: () => action("zoom-100") },
+        { label: "Zoom In", shortcut: keys("zoom-in"), enabled: hasDoc, run: () => action("zoom-in") },
+        { label: "Zoom Out", shortcut: keys("zoom-out"), enabled: hasDoc, run: () => action("zoom-out") },
         { separator: true },
         { label: "Next Tab", shortcut: keys("tab-next"), enabled: hasActive, run: () => action("tab-next") },
         { label: "Previous Tab", shortcut: keys("tab-prev"), enabled: hasActive, run: () => action("tab-prev") },

@@ -17,12 +17,13 @@ import {
   saveTab,
 } from "../../src/document/io";
 import { DocumentStore } from "../../src/document/store";
-import { PROJECT_FILE, type Tab } from "../../src/document/workspace";
+import { PROJECT_FILE, type DocTab } from "../../src/document/workspace";
 import type { Host } from "../../src/ui/host";
 import { v2 } from "../../src/field/vec";
 
 // An untitled tab (no docPath) built directly — exercises saveTab's save-as path.
-const untitledTab = (uri: string, w: number, h: number, bytes: Uint8Array): Tab => ({
+const untitledTab = (uri: string, w: number, h: number, bytes: Uint8Array): DocTab => ({
+  kind: "doc",
   id: "t1",
   docPath: null,
   store: new DocumentStore(emptyDoc(uri, w, h), null),
