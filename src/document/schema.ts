@@ -104,8 +104,10 @@ const groupLayerSchema: z.ZodType = z.lazy(() =>
 const layerNodeSchema: z.ZodType = z.lazy(() => z.union([groupLayerSchema, objectSchema]));
 
 /** Which way the encoded channels point. Default: red right, green up.
- *  `rotation` (degrees, default 0) additionally rotates the encoded XY frame counter-clockwise on
- *  screen — for consumers that rotate the artwork itself (e.g. skyrat sprites authored -90°). */
+ *  `rotation` (degrees, default 0) additionally rotates the encoded XY frame — for consumers that
+ *  rotate the artwork itself. The sign matches the label: entering -90 rotates the frame -90 (a
+ *  positive value spins the red-positive axis right -> down on screen), so the number you dial in
+ *  is the rotation you get. */
 export interface NormalDirs {
   red: "right" | "left";
   green: "up" | "down";
@@ -120,8 +122,8 @@ export function normalSigns(dirs: NormalDirs): { red: number; green: number } {
 }
 
 /** The full XY encode transform for image-space (y-down) normals: rotation then channel signs.
- *  encodedX = xx·nx + xy·ny, encodedY = yx·nx + yy·ny (both then mapped 0.5 + v/2). Positive
- *  rotation turns the encoded frame counter-clockwise on screen — verify on the reference ball. */
+ *  encodedX = xx·nx + xy·ny, encodedY = yx·nx + yy·ny (both then mapped 0.5 + v/2). The rotation
+ *  is applied with the sign the user dials in (see NormalDirs.rotation) — verify on the ref ball. */
 export interface NormalXform {
   xx: number;
   xy: number;
@@ -131,7 +133,9 @@ export interface NormalXform {
 
 export function normalXform(dirs: NormalDirs): NormalXform {
   const s = normalSigns(dirs);
-  const t = ((dirs.rotation ?? 0) * Math.PI) / 180;
+  // Negated so a positive `rotation` matches its label on the y-down screen (right -> down),
+  // rather than the raw math convention (which spun the opposite way to the number).
+  const t = (-(dirs.rotation ?? 0) * Math.PI) / 180;
   const c = Math.cos(t);
   const sn = Math.sin(t);
   return { xx: s.red * c, xy: -s.red * sn, yx: s.green * sn, yy: s.green * c };

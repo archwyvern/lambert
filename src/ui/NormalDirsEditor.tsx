@@ -165,7 +165,7 @@ export function NormalDirsEditor(props: {
         <span style={{ color: RED }}>Red</span> points {dirs.red}, <span style={{ color: GREEN }}>green</span> points{" "}
         {dirs.green}
         {rotation !== 0 ? `, frame rotated ${rotation}°` : ""} —{" "}
-        {rotation === 0 ? (dirs.green === "up" ? "the OpenGL convention" : "the DirectX convention") : "a rotated frame for consumers that rotate the artwork itself"}
+        {rotation === 0 ? (dirs.green === "up" ? "the OpenGL convention" : "the DirectX convention") : "a rotated frame for consumers that rotate the artwork itself by the same angle"}
         . The ball is a raised hemisphere encoded with this convention; match it against a known-good normal map from
         your engine.
       </p>
