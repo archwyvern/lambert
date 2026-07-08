@@ -6,9 +6,8 @@ import { registerFileIcons } from "@carapace/shell";
  * drydock: engine-own documents get the default page glyph in the brand violet.
  */
 registerFileIcons({
-  extensions: {
-    ".lmb": { seti: "_default", color: "#a074c4" }, // lambert height-field document
-  },
+  // .lmb is NOT registered here — the explorer renders the LambertMark itself for those rows
+  // (see the FileExplorer getIcon in App); Seti only backs everything else.
   fileNames: {
     // hidden from lambert's own explorer, but right wherever else it shows up
     "project.lambert": { seti: "_config" },

@@ -42,7 +42,7 @@ import { Layers } from "./Layers";
 import { Library } from "./Library";
 import { Button, ICON, SectionLabel } from "./kit";
 import { UpdateNotice } from "./UpdateNotice";
-import { FileExplorer, ImageView } from "@carapace/shell";
+import { FileExplorer, FileTypeIcon, ImageView } from "@carapace/shell";
 import type { ImageViewInfo } from "@carapace/shell";
 import type { DirEntry, FileExplorerActions, FileExplorerProps, MenuModel } from "@carapace/shell";
 import { usePersistentState } from "./persist";
@@ -1664,6 +1664,13 @@ export function App(): React.JSX.Element {
                     <div className="-mx-1 min-h-0 flex-1 overflow-y-auto" style={{ ["--text-sm" as string]: "0.8125rem" }}>
                       <FileExplorer
                         root={workspace.projectPath}
+                        // .lmb rows carry the Lambert mark itself; everything else (and folders)
+                        // resolves through the default Seti set
+                        getIcon={(e) =>
+                          !e.isDir && /\.lmb$/i.test(e.name)
+                            ? <LambertMark className="h-[1.05em] w-[1.05em] shrink-0" />
+                            : <FileTypeIcon name={e.name} isDir={e.isDir} />
+                        }
                         rootNode={{
                           label: projectDisplayName,
                           // remote clones take the server's project name — renaming is skyrat's
