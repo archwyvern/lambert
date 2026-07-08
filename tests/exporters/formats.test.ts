@@ -176,17 +176,17 @@ test("nx hdr: RGBE round-trips within mantissa precision; non-rgb layouts are re
   expect(() => encodeNx(normals, new Float32Array(w).fill(1), w, 1, DIRS, null, out({ format: "hdr", channels: "rgba" }))).toThrow(/RGB/);
 });
 
-test("normal rotation: ±90° swap the tilt between channels (encoded frame rotates on screen)", () => {
+test("normal rotation: the sign matches the label; ±90° are opposite spins, 180° flips red", () => {
   const right = new Float32Array([Math.SQRT1_2, 0, Math.SQRT1_2]); // right-tilted normal
-  // -90° (clockwise): the right-tilt reads as a downward-tilt — bright green under green-DOWN sense…
-  // with green-up it lands bright: g = 0.5 + nx/2
-  const cw = decode(encodeNx(right, new Float32Array([1]), 1, 1, { ...DIRS, rotation: -90 }, null, out({ depth: 8 })));
-  expect(cw.data[0]).toBe(128); // red neutral
-  expect(cw.data[1]! / 255).toBeCloseTo(0.5 + Math.SQRT1_2 / 2, 1);
-  // +90° (counter-clockwise): the same tilt lands dark green
-  const ccw = decode(encodeNx(right, new Float32Array([1]), 1, 1, { ...DIRS, rotation: 90 }, null, out({ depth: 8 })));
-  expect(ccw.data[0]).toBe(128);
-  expect(ccw.data[1]! / 255).toBeCloseTo(0.5 - Math.SQRT1_2 / 2, 1);
+  // Sign matches the label (positive spins red-positive right -> down): a right-tilt rotated +90°
+  // reads as a downward-tilt, landing bright green (g = 0.5 + nx/2).
+  const pos = decode(encodeNx(right, new Float32Array([1]), 1, 1, { ...DIRS, rotation: 90 }, null, out({ depth: 8 })));
+  expect(pos.data[0]).toBe(128); // red neutral
+  expect(pos.data[1]! / 255).toBeCloseTo(0.5 + Math.SQRT1_2 / 2, 1);
+  // -90° is the opposite spin — the same tilt lands dark green
+  const neg = decode(encodeNx(right, new Float32Array([1]), 1, 1, { ...DIRS, rotation: -90 }, null, out({ depth: 8 })));
+  expect(neg.data[0]).toBe(128);
+  expect(neg.data[1]! / 255).toBeCloseTo(0.5 - Math.SQRT1_2 / 2, 1);
   // 180° flips red
   const flip = decode(encodeNx(right, new Float32Array([1]), 1, 1, { ...DIRS, rotation: 180 }, null, out({ depth: 8 })));
   expect(flip.data[0]! / 255).toBeCloseTo(0.5 - Math.SQRT1_2 / 2, 1);

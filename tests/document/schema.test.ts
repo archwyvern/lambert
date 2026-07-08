@@ -7,6 +7,7 @@ import {
   emptyDoc,
   emptyProjectConfig,
   hydrateObjectRaw,
+  normalXform,
   parseDoc,
   parseProjectConfig,
   presetLibrarySchema,
@@ -125,4 +126,32 @@ test("preset library envelope validates and rejects junk", () => {
   expect(presetLibrarySchema.parse(JSON.parse(JSON.stringify(lib))).presets.length).toBe(1);
   expect(() => presetLibrarySchema.parse({ schemaVersion: 1, presets: [{ id: "x" }] })).toThrow();
   expect(() => presetLibrarySchema.parse({ presets: [] })).toThrow(); // missing version
+});
+
+// normalXform: the encoded-frame rotation. A POSITIVE `rotation` must rotate the frame in the
+// same direction as its label (entering -90 rotates -90, not +90) — this pins the sign so it
+// can't silently flip back. Direction is read off the red-positive axis (where encodedX is max).
+test("normalXform rotation sign: +90 vs -90 are opposite, red-max axis tracks the label", () => {
+  const at = (rotation: number) => normalXform({ red: "right", green: "up", rotation });
+
+  // rotation 0: red points +x (right), green points up (encodedY negative for +y-down)
+  const z = at(0);
+  expect(z.xx).toBeCloseTo(1);
+  expect(z.xy).toBeCloseTo(0);
+
+  // The red-positive image-space direction = the unit vector maximizing xx*dx + xy*dy = (xx, xy).
+  // +90 and -90 must send it to OPPOSITE places (not both to the same, and not swapped with the old
+  // convention). We pin +90 -> red points DOWN (+y), -90 -> red points UP (-y).
+  const p90 = at(90);
+  expect(p90.xx).toBeCloseTo(0);
+  expect(p90.xy).toBeCloseTo(1); // red-max at (0, +1) = down
+
+  const n90 = at(-90);
+  expect(n90.xx).toBeCloseTo(0);
+  expect(n90.xy).toBeCloseTo(-1); // red-max at (0, -1) = up
+
+  // symmetry: negating the angle transposes the rotation (opposite spin)
+  const a = at(37), b = at(-37);
+  expect(a.xy).toBeCloseTo(-b.xy);
+  expect(a.yx).toBeCloseTo(-b.yx);
 });
