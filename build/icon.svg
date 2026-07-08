@@ -11,7 +11,7 @@
       <feDropShadow dx="1.5" dy="5" stdDeviation="3" flood-color="#000000" flood-opacity="0.5"/>
     </filter>
   </defs>
-  <polygon points="126 36 6 24 64 122.5 126 36" fill="#0d162f"/>
-  <polygon points="124 26 4 14 62 112.5 124 26" fill="url(#normalMid)"/>
-  <polygon points="122 16 2 4 60 102.5 122 16" fill="url(#normalTop)" filter="url(#topcast)"/>
+  <polygon points="2 24 122 24 62 122.5 2 24" fill="#0d162f"/>
+  <polygon points="2 14 122 14 62 112.5 2 14" fill="url(#normalMid)"/>
+  <polygon points="2 4 122 4 62 102.5 2 4" fill="url(#normalTop)" filter="url(#topcast)"/>
 </svg>

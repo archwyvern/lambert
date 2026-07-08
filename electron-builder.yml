@@ -60,3 +60,9 @@ nsis:
   # hyphens (Lambert-Setup-x.exe) — the names never match, so every Windows auto-update download 404s.
   # A hyphenated, space-free name is byte-identical on disk, on the GitHub asset, and in latest.yml.
   artifactName: ${productName}-Setup-${version}.${ext}
+
+# The bundled icon, readable at runtime (process.resourcesPath/icon.png) — desktopIcon.ts
+# refreshes the Linux desktop integration's hicolor copies from it after auto-updates.
+extraResources:
+  - from: build/icon.png
+    to: icon.png
