@@ -41,6 +41,8 @@ const localToCanvas = (s: ObjectInstance, cp: Vector2): Vector2 => fromLocal(s.t
 /** The object transform-handle drag snapshot (corner/edge scale + rotate baseline). */
 interface DragSnap {
   start: Vector2;
+  /** Pointer position at the PRESS — the baseline a mid-drag modifier toggle rewinds to. */
+  start0: Vector2;
   rotation: number;
   scale: Vector3;
   /** The object's scale BEFORE the drag started — never re-baselined. Uniform (Shift) scaling snaps to
@@ -48,10 +50,16 @@ interface DragSnap {
    *  not the mid-drag distorted one. */
   scale0: Vector3;
   pos: Vector3;
+  /** The object's position BEFORE the drag started (pairs with scale0 for the rewind). */
+  pos0: Vector3;
   /** Fixed point the scale pivots about (the opposite corner/edge, or centre with Ctrl), local + canvas. */
   anchorLocal: Vector2;
   anchorCanvas: Vector2;
-  /** Modifier state at the last (re)baseline — a toggle mid-drag re-baselines so it takes effect live. */
+  /** Both candidate anchors projected through the PRE-DRAG transform, so a mid-drag Ctrl toggle
+   *  can reinterpret the whole drag from the press (retroactive), not just from the toggle. */
+  anchorCanvasNormal0: Vector2;
+  anchorCanvasCenter0: Vector2;
+  /** Modifier state at the last reinterpretation. */
   shift: boolean;
   ctrl: boolean;
 }
@@ -145,35 +153,43 @@ function GizmosInner(props: {
   // math runs in parent-local coords. (identity parent => same as the world event point.)
   const eventParent = (e: React.MouseEvent): Vector2 => affineApply(invParent, eventCanvasPoint(e));
 
-  // anchorFor picks the pinned point: normally the opposite corner/edge, but the centre when Ctrl
-  // is held (scale-from-centre). Re-evaluated when a modifier toggles mid-drag (see onPointerMove).
-  const handleProps = (anchorFor: (e: React.PointerEvent) => Vector2, apply: (p: Vector2, e: React.PointerEvent, ds: DragSnap) => void) =>
+  // The pinned point is normally the opposite corner/edge (`normalAnchor`), or the centre with Ctrl
+  // (scale-from-centre). A modifier toggle mid-drag reinterprets the WHOLE drag under the new mode —
+  // as if it had been held from the press — matching Shift's original-aspect (scale0) behaviour
+  // instead of Ctrl only applying from the toggle onward.
+  const handleProps = (normalAnchor: Vector2, apply: (p: Vector2, e: React.PointerEvent, ds: DragSnap) => void) =>
     dragState({
       onStart: (e) => {
-        const anchorLocal = anchorFor(e);
+        if (e.button !== 0) return null; // left only: middle = pan, right = context menu
+        const anchorLocal = e.ctrlKey ? boundsCenter : normalAnchor;
+        const start = eventParent(e);
         return {
-          start: eventParent(e),
+          start,
+          start0: start,
           rotation: object.transform.rotation,
           scale: object.transform.scale,
           scale0: object.transform.scale, // immutable pre-drag aspect (never re-baselined)
           pos: object.transform.pos,
+          pos0: object.transform.pos,
           anchorLocal,
           anchorCanvas: localToCanvas(object, anchorLocal),
+          anchorCanvasNormal0: localToCanvas(object, normalAnchor),
+          anchorCanvasCenter0: localToCanvas(object, boundsCenter),
           shift: e.shiftKey,
           ctrl: e.ctrlKey,
         };
       },
       onMove: (e, ds) => {
-        // Shift (uniform) / Ctrl (from-centre) toggled mid-drag: re-baseline from the CURRENT state so
-        // the new mode takes effect immediately and seamlessly (no jump), not just from the next drag.
         if (e.shiftKey !== ds.shift || e.ctrlKey !== ds.ctrl) {
+          // Rewind to the pre-drag baseline and let apply() recompute the whole drag under the
+          // new modifiers (retroactive; the visible jump IS the reinterpretation).
           ds.shift = e.shiftKey;
           ds.ctrl = e.ctrlKey;
-          ds.start = eventParent(e);
-          ds.scale = object.transform.scale;
-          ds.pos = object.transform.pos;
-          ds.anchorLocal = anchorFor(e);
-          ds.anchorCanvas = localToCanvas(object, ds.anchorLocal);
+          ds.start = ds.start0;
+          ds.scale = ds.scale0;
+          ds.pos = ds.pos0;
+          ds.anchorLocal = e.ctrlKey ? boundsCenter : normalAnchor;
+          ds.anchorCanvas = e.ctrlKey ? ds.anchorCanvasCenter0 : ds.anchorCanvasNormal0;
         }
         apply(eventParent(e), e, ds);
       },
@@ -197,9 +213,8 @@ function GizmosInner(props: {
   /** Corner drag: scales both footprint axes from the opposite corner (Shift = uniform, Ctrl = from centre). */
   const cornerScale = (i: number) =>
     handleProps(
-      (e) => (e.ctrlKey ? boundsCenter : boundsCorners[(i + 2) % 4]!),
-      // uniform (Shift) references the immutable pre-drag scale0 so it snaps to the ORIGINAL aspect;
-      // per-axis (no Shift) uses the live-rebaselined scale
+      boundsCorners[(i + 2) % 4]!,
+      // uniform (Shift) references the immutable pre-drag scale0 so it snaps to the ORIGINAL aspect
       (p, e, ds) => scaleAround(axisScaleFromDrag(ds.anchorCanvas, ds.rotation, ds.start, p, e.shiftKey ? ds.scale0 : ds.scale, e.shiftKey), ds),
     );
 
@@ -209,7 +224,7 @@ function GizmosInner(props: {
     const b = boundsCorners[(i + 3) % 4]!;
     const oppositeMid = v2((a.x + b.x) / 2, (a.y + b.y) / 2);
     return handleProps(
-      (e) => (e.ctrlKey ? boundsCenter : oppositeMid),
+      oppositeMid,
       (p, e, ds) => {
         const sc = axisScaleFromDrag(ds.anchorCanvas, ds.rotation, ds.start, p, e.shiftKey ? ds.scale0 : ds.scale, e.shiftKey);
         scaleAround(e.shiftKey ? sc : axis === "x" ? ds.scale.withX(sc.x) : ds.scale.withY(sc.y), ds);
@@ -220,11 +235,14 @@ function GizmosInner(props: {
   /** Rotate handle: drag an arm extending from an edge to spin the object about its pivot (Shift = 15°). */
   const rotateHandle = () =>
     rotDrag({
-      onStart: (e) => ({
-        start: eventParent(e),
-        startRotation: object.transform.rotation,
-        pivot: v2(object.transform.pos.x, object.transform.pos.y),
-      }),
+      onStart: (e) => {
+        if (e.button !== 0) return null; // left only: middle = pan, right = context menu
+        return {
+          start: eventParent(e),
+          startRotation: object.transform.rotation,
+          pivot: v2(object.transform.pos.x, object.transform.pos.y),
+        };
+      },
       onMove: (e, rd) => {
         let rot = rotationFromDrag(rd.pivot, rd.start, eventParent(e), rd.startRotation);
         if (e.shiftKey) rot = snapAngle(rot, ROTATE_SNAP);

@@ -4,7 +4,7 @@ import "./fileIcons";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { decode, encode } from "fast-png";
 import { DocumentStore } from "../document/store";
-import { addInstance, duplicateObject, moveObjectTo, removeObject, reorderObject, updateObject } from "../document/docOps";
+import { addInstanceNear, duplicateObject, moveObjectTo, removeObject, reorderObject, updateObject } from "../document/docOps";
 import { createFromPreset } from "../field/presets";
 import { bakeRings, bezierAnchor } from "../field/bezier";
 import { addNode, cloneNode, findNode, siblingsOf, ungroup, updateNode, wrapInGroup } from "../document/layerOps";
@@ -112,7 +112,6 @@ const DEFAULT_VIEW: ViewState = {
  *  tuned object from one .lmb tab and paste it into another. Snapshots node refs (the store's immutable
  *  updates never mutate them); Paste deep-clones with fresh ids. */
 let objectClipboard: LayerNode[] = [];
-const PASTE_OFFSET = 16; // px nudge so a pasted copy isn't perfectly stacked on the source
 
 export function App(): React.JSX.Element {
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
@@ -1031,9 +1030,10 @@ export function App(): React.JSX.Element {
     const t = workspaceRef.current?.active;
     if (t?.kind !== "doc") return;
     const o = t.store.state.doc.canvas.origin;
-    t.store.update((d) => addInstance(d, resolvePaletteObject(presetId, v2(o.x, o.y))));
-    const layers = t.store.state.doc.layers;
-    t.store.select(layers[layers.length - 1]?.id ?? null);
+    const instance = resolvePaletteObject(presetId, v2(o.x, o.y));
+    // group-aware: a selected group (or an object inside one) receives the new object
+    t.store.update((d) => addInstanceNear(d, instance, t.store.state.selectedId));
+    t.store.select(instance.id);
     t.store.endGesture();
   };
 
@@ -1219,8 +1219,9 @@ export function App(): React.JSX.Element {
         return;
       case "paste":
         if (t && objectClipboard.length) {
-          // deep-clone each with fresh ids + a small offset, add at top level, and select the new copies
-          const clones = objectClipboard.map((n) => cloneNode(n, PASTE_OFFSET, PASTE_OFFSET));
+          // deep-clone each with fresh ids AT THE SAME POSITION (paste-in-place; the layer panel +
+          // selection highlight disambiguate the copy), add at top level, and select the new copies
+          const clones = objectClipboard.map((n) => cloneNode(n, 0, 0));
           t.store.commit((d) => clones.reduce((acc, c) => ({ ...acc, layers: addNode(acc.layers, c, null) }), d));
           t.store.setSelection(clones.map((c) => c.id));
         }
