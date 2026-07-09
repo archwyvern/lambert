@@ -17,6 +17,8 @@ if (params.has("selftest")) {
     .catch((err: unknown) => {
       status.textContent = `harness FAILED: ${err instanceof Error ? `${err.message}\n${err.stack ?? ""}` : String(err)}`;
     });
+} else if (params.has("embed")) {
+  void import("./embedHarness").then((m) => m.runEmbedHarness());
 } else {
   void import("../ui/App").then(({ App }) => {
     createRoot(document.getElementById("root")!).render(

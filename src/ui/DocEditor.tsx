@@ -5,7 +5,7 @@ import { Inspector } from "./Inspector";
 import { Preview3D } from "./Preview3D";
 import { ViewControls } from "./ViewControls";
 import type { Viewport } from "./viewport";
-import type { ViewState } from "./App";
+import type { ViewState } from "./viewState";
 import type { EditorState } from "../document/store";
 import type { DocTab } from "../document/workspace";
 import type { ToolMode } from "./tools";

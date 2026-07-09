@@ -36,7 +36,7 @@ import { PEN_CLOSE_PX, usePenDraft } from "./usePenDraft";
 import { localBounds } from "../field/objectBounds";
 import { CANCEL_DRAG_EVENT } from "./usePointerDrag";
 import type { Placing, ToolMode } from "./tools";
-import type { ViewState } from "./App";
+import type { ViewState } from "./viewState";
 
 type Drag =
   | { kind: "pan"; lastX: number; lastY: number }
