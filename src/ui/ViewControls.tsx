@@ -1,7 +1,7 @@
 import { CircleHalfFillRegular, ColorFillRegular, GridRegular, ImageRegular, LightbulbRegular, LockClosedRegular, LockOpenRegular, RulerRegular, TransparencySquareRegular } from "@fluentui/react-icons";
 import { IconButton, SpinSlider } from "@carapace/shell";
 import type { DocumentStore, EditorState } from "../document/store";
-import type { ViewState } from "./App";
+import type { ViewState } from "./viewState";
 import { VIEW_MODES, type ViewMode } from "./preview";
 
 const MODE_META: Record<ViewMode, { icon: React.JSX.Element; label: string }> = {
