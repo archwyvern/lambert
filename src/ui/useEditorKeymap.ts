@@ -7,7 +7,7 @@ import { applyBezierEdit } from "../field/bezierEdit";
 import { isObject } from "../field/types";
 import { v2 } from "../field/vec";
 import type { Workspace } from "../document/workspace";
-import type { ViewState } from "./viewState";
+import type { ViewState } from "./App";
 import { CANCEL_DRAG_EVENT } from "./usePointerDrag";
 import { VIEW_MODES } from "./preview";
 import type { ToolMode } from "./tools";

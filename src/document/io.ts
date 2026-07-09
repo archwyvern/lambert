@@ -143,19 +143,15 @@ export async function saveTab(host: Host, tab: DocTab, projectPath: string): Pro
  */
 /** Render a doc's NX to bytes + final path WITHOUT writing — the remote exporter uploads the
  *  result instead. exportDocNx is the write-to-disk wrapper. */
-/**
- * Render a document's NX from IN-MEMORY diffuse bytes (no filesystem). The core shared by the
- * desktop's file export ({@link renderDocNx}, which resolves the diffuse first) and the embedded
- * editor (which already holds the diffuse). `label` names the doc in the dims-mismatch error.
- */
-export async function renderNxBytes(doc: LambertDoc, diffuseBytes: Uint8Array, config: ProjectConfig, outPath: string, label = outPath): Promise<ExportFile> {
+export async function renderDocNx(host: Host, doc: LambertDoc, label: string, config: ProjectConfig, outPath: string, projectPath: string): Promise<ExportFile> {
   const { gpuExportRender } = await import("../ui/exportRender");
+  const bytes = await resolveDiffuse(host, doc.source.uri, { baseDir: projectPath });
   const { detailChainParams } = await import("../field/adjustments");
   const { detailFieldForDiffuse } = await import("../field/detail");
   const chain = detailChainParams(doc.layers, config.adjustmentDefaults);
-  const detail = chain ? detailFieldForDiffuse(diffuseBytes, chain) : null;
+  const detail = chain ? detailFieldForDiffuse(bytes, chain) : null;
   const render = await gpuExportRender(doc, detail, config.adjustmentDefaults);
-  const diffuse = decode(diffuseBytes);
+  const diffuse = decode(bytes);
   // Re-validate dims before the alpha gate: if the diffuse changed size since the doc was opened, its
   // opacity[] would be the wrong length and encodeNxPng would index out of range → corrupt NX alpha.
   // openDocTab checks on open, but the file can change underneath us before an export.
@@ -166,11 +162,6 @@ export async function renderNxBytes(doc: LambertDoc, diffuseBytes: Uint8Array, c
     );
   }
   return buildNxExport(doc, render, outPath, effectiveNormalDirs(doc, config), effectiveOutput(doc, config), diffuseOpacity(diffuse));
-}
-
-export async function renderDocNx(host: Host, doc: LambertDoc, label: string, config: ProjectConfig, outPath: string, projectPath: string): Promise<ExportFile> {
-  const bytes = await resolveDiffuse(host, doc.source.uri, { baseDir: projectPath });
-  return renderNxBytes(doc, bytes, config, outPath, label);
 }
 
 export async function exportDocNx(host: Host, doc: LambertDoc, label: string, config: ProjectConfig, outPath: string, projectPath: string): Promise<string> {
