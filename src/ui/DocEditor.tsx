@@ -3,6 +3,7 @@ import { Vector2 } from "@carapace/primitives";
 import { CanvasView } from "./CanvasView";
 import { Inspector } from "./Inspector";
 import { Preview3D } from "./Preview3D";
+import { ViewControls } from "./ViewControls";
 import type { Viewport } from "./viewport";
 import type { ViewState } from "./App";
 import type { EditorState } from "../document/store";
@@ -52,9 +53,11 @@ export interface DocEditorProps {
   /** Project config — supplies the effective normal-direction encode + adjustment defaults. */
   config: ProjectConfig;
   snap: boolean;
+  onSnap: (fn: (s: boolean) => boolean) => void;
   rulers: boolean;
   pixelGrid: boolean;
   normalAlphaGate: boolean;
+  onNormalAlphaGate: (fn: (g: boolean) => boolean) => void;
   deleteKeys: string | null;
   openSettings: (screen: string) => void;
   /** Right (inspector) column width + a drag delta handler (App clamps). */
@@ -71,14 +74,28 @@ export function DocEditor(props: DocEditorProps): React.JSX.Element {
   const { tab, state, view, onView, config } = props;
   const store = tab.store;
   return (
-    <div
-      className="grid min-h-0 flex-1"
-      style={{
-        gridTemplateColumns: `minmax(0, 1fr) auto ${props.rightWidth}px`,
-        gridTemplateRows: `minmax(0, 1fr) auto ${props.cornerHeight}px`,
-        gridTemplateAreas: '"big sash inspector" "big sash rsash" "big sash corner"',
-      }}
-    >
+    <div className="flex min-h-0 flex-1 flex-col">
+      {/* view/snap/mode controls — a strip above the canvas (embed + desktop share it here) */}
+      <div className="flex shrink-0 items-center justify-end border-b border-border bg-bg px-2 py-1">
+        <ViewControls
+          store={store}
+          state={state}
+          view={view}
+          setView={onView}
+          snap={props.snap}
+          setSnap={props.onSnap}
+          normalAlphaGate={props.normalAlphaGate}
+          setNormalAlphaGate={props.onNormalAlphaGate}
+        />
+      </div>
+      <div
+        className="grid min-h-0 flex-1"
+        style={{
+          gridTemplateColumns: `minmax(0, 1fr) auto ${props.rightWidth}px`,
+          gridTemplateRows: `minmax(0, 1fr) auto ${props.cornerHeight}px`,
+          gridTemplateAreas: '"big sash inspector" "big sash rsash" "big sash corner"',
+        }}
+      >
       <main className="relative min-w-0 overflow-hidden bg-[var(--color-viewport-bg)]" style={{ gridArea: "big" }}>
         <CanvasView
           store={store}
@@ -156,6 +173,7 @@ export function DocEditor(props: DocEditorProps): React.JSX.Element {
           pointLights={view.pointLights}
           onPointLightsChange={(pls) => onView((v) => ({ ...v, pointLights: pls }))}
         />
+      </div>
       </div>
     </div>
   );

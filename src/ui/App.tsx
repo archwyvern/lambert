@@ -46,7 +46,6 @@ import type { DirEntry, FileExplorerActions, FileExplorerProps, MenuModel } from
 import { usePersistentState } from "./persist";
 import { Sash, SplitView, EditorTabs, tabVerbIds, StatusBar, formatKeys, KeybindingProvider, useConfirm, EmptyState, parseGitPorcelainZ, scmDecoration, type ScmDecoration, type MenuItem, type TabMenuVerb } from "@carapace/shell";
 import { Toolbar } from "./Toolbar";
-import { ViewControls } from "./ViewControls";
 import { LambertMark } from "./LambertMark";
 import { LaunchScreen } from "./LaunchScreen";
 import { NewDocumentDialog } from "./NewDocumentDialog";
@@ -1455,23 +1454,7 @@ export function App(): React.JSX.Element {
     <KeybindingProvider config={keybindingsConfig}>
     <div className="flex h-screen flex-col bg-bg text-base text-fg">
       {/* always rendered: with a frameless window this bar IS the titlebar (drag + window controls) */}
-      <Toolbar
-        menu={menuModel}
-        controls={
-          activeDoc && state ? (
-            <ViewControls
-              store={activeDoc.store}
-              state={state}
-              view={activeView}
-              setView={setActiveView}
-              snap={snap}
-              setSnap={setSnap}
-              normalAlphaGate={normalAlphaGate}
-              setNormalAlphaGate={setNormalAlphaGate}
-            />
-          ) : undefined
-        }
-      />
+      <Toolbar menu={menuModel} />
       {showAbout ? <AboutDialog onClose={() => setShowAbout(false)} /> : null}
       {resizeAsk ? (
         <ResizeMigrationDialog
@@ -1630,9 +1613,11 @@ export function App(): React.JSX.Element {
               onSwapToggle={() => setSwapped((s) => !s)}
               config={workspace!.config}
               snap={snap}
+              onSnap={setSnap}
               rulers={rulers}
               pixelGrid={pixelGrid}
               normalAlphaGate={normalAlphaGate}
+              onNormalAlphaGate={setNormalAlphaGate}
               deleteKeys={bindings.get("delete") ?? null}
               openSettings={openSettings}
               rightWidth={rightWidth}
