@@ -3,7 +3,7 @@ import { DocumentStore } from "../document/store";
 import { emptyDoc, emptyProjectConfig } from "../document/schema";
 import { findNode } from "../document/layerOps";
 import { DocTab, Tab, Workspace } from "../document/workspace";
-import type { ViewState } from "./viewState";
+import type { ViewState } from "./App";
 import { VIEW_MODES, type ViewMode } from "./preview";
 import { TOOL_KEYS, type ToolMode } from "./tools";
 

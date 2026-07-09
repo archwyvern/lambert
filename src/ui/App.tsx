@@ -11,7 +11,7 @@ import { addNode, cloneNode, findNode, siblingsOf, ungroup, updateNode, wrapInGr
 import { flattenLayers } from "../field/flatten";
 import { isGroup, isObject, type LayerNode, type ObjectInstance } from "../field/types";
 import { Vector2, Vector3 } from "@carapace/primitives";
-import { effectiveOutput, emptyDoc, hydrateObjectRaw, parseDoc, parseProjectConfig, presetLibrarySchema, ProjectConfig, serializeDoc, serializeProjectConfig, type LambertDoc, type SavedPreset } from "../document/schema";
+import { effectiveNormalDirs, effectiveOutput, emptyDoc, hydrateObjectRaw, parseDoc, parseProjectConfig, presetLibrarySchema, ProjectConfig, serializeDoc, serializeProjectConfig, type LambertDoc, type SavedPreset } from "../document/schema";
 import { getObjectType, ObjectTypeId } from "../field/registry";
 import { DimsMismatchError, exportDocNx, exportTabHeightmap, exportTabNx, newProjectFlow, openDocTab, openProjectByPath, openProjectFlow, renderDocNx, saveTab, type OpenedProject } from "../document/io";
 import { nxExtension } from "../document/exports";
@@ -30,12 +30,14 @@ import { SETTINGS_DEFAULT_SCREEN, settingsDialogFor, type SettingsDialogKind } f
 import { useDemoBootstrap } from "./useDemoBootstrap";
 import { parseEditorBindings, useEditorKeymap, type EditorBinding } from "./useEditorKeymap";
 import { CommandPalette, CommandProvider, createCommandRegistry } from "@carapace/shell";
+import { CanvasView } from "./CanvasView";
 import type { Viewport } from "./viewport";
 import { DEFAULT_ORBIT, type Orbit } from "../field/gpu/preview3d";
+import { Preview3D } from "./Preview3D";
 import { use3DCamera } from "./use3DCamera";
 import { ToolPalette } from "./ToolPalette";
 import { carapaceHost, getHost } from "./host";
-import { DocEditor } from "./DocEditor";
+import { Inspector } from "./Inspector";
 import { Layers } from "./Layers";
 import { Library } from "./Library";
 import { Button, ICON, SectionLabel } from "./kit";
@@ -46,13 +48,14 @@ import type { DirEntry, FileExplorerActions, FileExplorerProps, MenuModel } from
 import { usePersistentState } from "./persist";
 import { Sash, SplitView, EditorTabs, tabVerbIds, StatusBar, formatKeys, KeybindingProvider, useConfirm, EmptyState, parseGitPorcelainZ, scmDecoration, type ScmDecoration, type MenuItem, type TabMenuVerb } from "@carapace/shell";
 import { Toolbar } from "./Toolbar";
+import { ViewControls } from "./ViewControls";
 import { LambertMark } from "./LambertMark";
 import { LaunchScreen } from "./LaunchScreen";
 import { NewDocumentDialog } from "./NewDocumentDialog";
 import { AboutDialog } from "./AboutDialog";
 import { DocumentSettingsDialog, PreferencesDialog, ProjectSettingsDialog } from "./SettingsDialog";
+import type { ViewMode, PointLight } from "./preview";
 import { VIEW_MODES } from "./preview";
-import { DEFAULT_VIEW, type ViewState } from "./viewState";
 import { ToolMode } from "./tools";
 import { v2 } from "../field/vec";
 
@@ -72,6 +75,32 @@ const IMAGE_MIMES: Record<string, string> = {
 function imageMime(path: string): string {
   return IMAGE_MIMES[path.toLowerCase().split(".").pop() ?? ""] ?? "application/octet-stream";
 }
+
+export interface ViewState {
+  mode: ViewMode;
+  /** Overlay opacity for the normal view (1 = 100%). */
+  opacity: number;
+  lightDir: [number, number, number];
+  /** Lit view: light intensity multiplier (1 = default). */
+  lightEnergy: number;
+  /** Lit-preview point lights (2). Preview-only (never exported); transient like lightEnergy. */
+  pointLights: PointLight[];
+  /** The mode active before the current one — target of the "toggle last view" command (Shift+V).
+   *  Transient, like lightEnergy: not in the session schema, backfilled from DEFAULT_VIEW per session. */
+  prevMode?: ViewMode;
+}
+
+const DEFAULT_VIEW: ViewState = {
+  mode: "normal",
+  opacity: 1,
+  lightDir: [-0.5, -0.5, 0.7],
+  lightEnergy: 1,
+  prevMode: "diffuse",
+  pointLights: [
+    { on: false, x: 0.35, y: 0.4, height: 0.5, intensity: 0.8, color: [1.0, 0.85, 0.65] }, // warm key
+    { on: false, x: 0.65, y: 0.6, height: 0.5, intensity: 0.8, color: [0.6, 0.78, 1.0] }, // cool fill
+  ],
+};
 
 /** In-app object clipboard (Copy/Paste), module-level so it survives across tabs — an artist can copy a
  *  tuned object from one .lmb tab and paste it into another. Snapshots node refs (the store's immutable
@@ -1428,7 +1457,23 @@ export function App(): React.JSX.Element {
     <KeybindingProvider config={keybindingsConfig}>
     <div className="flex h-screen flex-col bg-bg text-base text-fg">
       {/* always rendered: with a frameless window this bar IS the titlebar (drag + window controls) */}
-      <Toolbar menu={menuModel} />
+      <Toolbar
+        menu={menuModel}
+        controls={
+          activeDoc && state ? (
+            <ViewControls
+              store={activeDoc.store}
+              state={state}
+              view={activeView}
+              setView={setActiveView}
+              snap={snap}
+              setSnap={setSnap}
+              normalAlphaGate={normalAlphaGate}
+              setNormalAlphaGate={setNormalAlphaGate}
+            />
+          ) : undefined
+        }
+      />
       {showAbout ? <AboutDialog onClose={() => setShowAbout(false)} /> : null}
       {resizeAsk ? (
         <ResizeMigrationDialog
@@ -1561,45 +1606,93 @@ export function App(): React.JSX.Element {
             />
           ) : null}
           {activeDoc && state ? (
-            <DocEditor
-              tab={activeDoc}
-              state={state}
-              view={activeView}
-              onView={setActiveView}
-              tool={tool}
-              onTool={setTool}
-              selVerts={selVerts}
-              onSelVerts={setSelVerts}
-              viewport={viewports[activeDoc.id]}
-              onViewport={(vp) => setViewports((m) => ({ ...m, [activeDoc.id]: vp }))}
-              onSelectMask={(nodeId, maskId) => setMaskFocus((f) => ({ nodeId, maskId, seq: (f?.seq ?? 0) + 1 }))}
-              maskFocus={maskFocus}
-              resolvePaletteObject={resolvePaletteObject}
-              cam3d={cam3d}
-              canvas3dRef={canvas3dRef}
-              preview3dOn={preview3dOn}
-              onPreview3dToggle={() => setPreview3dOn((v) => !v)}
-              boxMode={boxMode}
-              onBoxMode={setBoxMode}
-              boxLitViewport={boxLitViewport}
-              onBoxLitViewport={setBoxLitViewport}
-              swapped={swapped}
-              onSwapToggle={() => setSwapped((s) => !s)}
-              config={workspace!.config}
-              snap={snap}
-              onSnap={setSnap}
-              rulers={rulers}
-              pixelGrid={pixelGrid}
-              normalAlphaGate={normalAlphaGate}
-              onNormalAlphaGate={setNormalAlphaGate}
-              deleteKeys={bindings.get("delete") ?? null}
-              openSettings={openSettings}
-              rightWidth={rightWidth}
-              onRightResize={(dx) => setRightWidth((w) => clampPanel(w - dx))}
-              cornerHeight={cornerHeight}
-              onCornerResize={(dy) => setCornerHeight((h) => clampCorner(h - dy))}
-              onRender={bumpRender}
-            />
+            <div
+              className="grid min-h-0 flex-1"
+              style={{
+                gridTemplateColumns: `minmax(0, 1fr) auto ${rightWidth}px`,
+                gridTemplateRows: `minmax(0, 1fr) auto ${cornerHeight}px`,
+                gridTemplateAreas: '"big sash inspector" "big sash rsash" "big sash corner"',
+              }}
+            >
+              <main className="relative min-w-0 overflow-hidden bg-[var(--color-viewport-bg)]" style={{ gridArea: "big" }}>
+                <CanvasView
+                  store={activeDoc.store}
+                  state={state}
+                  view={activeView}
+                  tool={tool}
+                  diffuseBytes={activeDoc.diffuse.bytes}
+                  resolvePaletteObject={resolvePaletteObject}
+                  selVerts={selVerts}
+                  setSelVerts={setSelVerts}
+                  maskFocus={maskFocus}
+                  onLightChange={(d) => setActiveView((v) => ({ ...v, lightDir: d }))}
+                  onEnergyChange={(en) => setActiveView((v) => ({ ...v, lightEnergy: en }))}
+                  canvas3dRef={canvas3dRef}
+                  orbit3d={preview3dOn ? cam3d.orbit : null}
+                  boxMode={boxMode}
+                  boxLitViewport={boxLitViewport}
+                  normalDirs={effectiveNormalDirs(state.doc, workspace!.config)}
+                  adjustmentDefaults={workspace!.config.adjustmentDefaults}
+                  deleteKeys={bindings.get("delete") ?? null}
+                  overridesNormalDirs={state.doc.normalDirs !== undefined}
+                  openSettings={openSettings}
+                  swapped={swapped}
+                  tabId={activeDoc.id}
+                  savedViewport={viewports[activeDoc.id]}
+                  onViewportChange={(vp) => setViewports((m) => ({ ...m, [activeDoc.id]: vp }))}
+                  setTool={setTool}
+                  snap={snap}
+                  rulers={rulers}
+                  pixelGrid={pixelGrid}
+                  normalAlphaGate={normalAlphaGate}
+                />
+              </main>
+              <div className="flex" style={{ gridArea: "sash" }}>
+                <Sash orientation="vertical" onDrag={(dx) => setRightWidth((w) => clampPanel(w - dx))} />
+              </div>
+              <aside className="overflow-y-auto bg-bg p-3" style={{ gridArea: "inspector" }}>
+                <Inspector
+                  store={activeDoc.store}
+                  state={state}
+                  selVerts={selVerts}
+                  openSettings={openSettings}
+                  setTool={setTool}
+                  snap={snap}
+                  adjustmentDefaults={workspace!.config.adjustmentDefaults}
+                  onSelectMask={(nodeId, maskId) => {
+                    activeDoc.store.select(nodeId);
+                    setMaskFocus((f) => ({ nodeId, maskId, seq: (f?.seq ?? 0) + 1 }));
+                  }}
+                />
+              </aside>
+              <div style={{ gridArea: "rsash" }}>
+                <Sash orientation="horizontal" onDrag={(dy) => setCornerHeight((h) => clampCorner(h - dy))} />
+              </div>
+              <div className="border-t border-border bg-[var(--color-viewport-bg)]" style={{ gridArea: "corner" }} />
+              <div
+                className="relative overflow-hidden border-t border-border bg-[var(--color-viewport-bg)]"
+                style={{ gridArea: swapped ? "big" : "corner" }}
+              >
+                <Preview3D
+                  cam={cam3d}
+                  canvasRef={canvas3dRef}
+                  docW={state.doc.source.width}
+                  docH={state.doc.source.height}
+                  enabled={preview3dOn}
+                  onToggle={() => setPreview3dOn((v) => !v)}
+                  onResize={bumpRender}
+                  big={swapped}
+                  onSwap={() => setSwapped((s) => !s)}
+                  mode={boxMode}
+                  onModeChange={setBoxMode}
+                  onLitViewport={setBoxLitViewport}
+                  lightDir={activeView.lightDir}
+                  onLightChange={(d) => setActiveView((v) => ({ ...v, lightDir: d }))}
+                  pointLights={activeView.pointLights}
+                  onPointLightsChange={(pls) => setActiveView((v) => ({ ...v, pointLights: pls }))}
+                />
+              </div>
+            </div>
           ) : activeImage ? (
             <main className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-[var(--color-viewport-bg)]">
               <ImageView
