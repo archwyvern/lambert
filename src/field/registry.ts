@@ -1,5 +1,5 @@
 import { isGroup, type LayerNode, type ObjectInstance, type ObjectType } from "./types";
-import { Vector2, Vector3 } from "@carapace/primitives";
+import { Vector2, Vector3 } from "@aphralatrax/primitives";
 import { v2 } from "./vec";
 
 export { ObjectTypeId } from "./objectTypeIds";

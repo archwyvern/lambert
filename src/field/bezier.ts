@@ -1,4 +1,4 @@
-import { Vector2 } from "@carapace/primitives";
+import { Vector2 } from "@aphralatrax/primitives";
 import { v2 } from "./vec";
 
 /** A cubic-Bézier path anchor: a point plus two tangent handles, stored as offsets from the

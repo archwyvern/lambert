@@ -10,7 +10,7 @@ import { bakeRings, bezierAnchor } from "../field/bezier";
 import { addNode, cloneNode, findNode, siblingsOf, ungroup, updateNode, wrapInGroup } from "../document/layerOps";
 import { flattenLayers } from "../field/flatten";
 import { isGroup, isObject, type LayerNode, type ObjectInstance } from "../field/types";
-import { Vector2, Vector3 } from "@carapace/primitives";
+import { Vector2, Vector3 } from "@aphralatrax/primitives";
 import { effectiveNormalDirs, effectiveOutput, emptyDoc, hydrateObjectRaw, parseDoc, parseProjectConfig, presetLibrarySchema, ProjectConfig, serializeDoc, serializeProjectConfig, type LambertDoc, type SavedPreset } from "../document/schema";
 import { getObjectType, ObjectTypeId } from "../field/registry";
 import { DimsMismatchError, exportDocNx, exportTabHeightmap, exportTabNx, newProjectFlow, openDocTab, openProjectByPath, openProjectFlow, renderDocNx, saveTab, type OpenedProject } from "../document/io";
@@ -1556,9 +1556,11 @@ export function App(): React.JSX.Element {
                         // .lmb rows carry the Lambert mark itself; everything else (and folders)
                         // resolves through the default Seti set
                         getIcon={(e) =>
-                          !e.isDir && /\.lmb$/i.test(e.name)
-                            ? <LambertMark className="h-[1.05em] w-[1.05em] shrink-0" />
-                            : <FileTypeIcon name={e.name} isDir={e.isDir} />
+                          e.isDir
+                            ? null // no icon slot for folders — bare twistie (matches the shell default)
+                            : /\.lmb$/i.test(e.name)
+                              ? <LambertMark className="h-[1.05em] w-[1.05em] shrink-0" />
+                              : <FileTypeIcon name={e.name} />
                         }
                         rootNode={{
                           label: projectDisplayName,

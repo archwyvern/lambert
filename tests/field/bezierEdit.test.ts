@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Vector2 } from "@carapace/primitives";
+import { Vector2 } from "@aphralatrax/primitives";
 import "../../src/field/objects";
 import { bezierAnchor } from "../../src/field/bezier";
 import { applyBezierEdit, insertOnClosed, movePoint, toggleMode } from "../../src/field/bezierEdit";

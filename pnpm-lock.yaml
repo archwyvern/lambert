@@ -5,16 +5,16 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
+  '@aphralatrax/primitives': link:../aphralatrax/packages/primitives
   '@carapace/shell': link:../carapace/packages/shell
-  '@carapace/primitives': link:../carapace/packages/primitives
 
 importers:
 
   .:
     dependencies:
-      '@carapace/primitives':
-        specifier: link:../carapace/packages/primitives
-        version: link:../carapace/packages/primitives
+      '@aphralatrax/primitives':
+        specifier: link:../aphralatrax/packages/primitives
+        version: link:../aphralatrax/packages/primitives
       '@carapace/shell':
         specifier: link:../carapace/packages/shell
         version: link:../carapace/packages/shell

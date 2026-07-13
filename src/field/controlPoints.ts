@@ -1,4 +1,4 @@
-import { Vector2 } from "@carapace/primitives";
+import { Vector2 } from "@aphralatrax/primitives";
 import { v2 } from "./vec";
 
 /** Regular n-gon around a centroid, flat-top oriented (n=4 gives an axis-aligned square). */

@@ -1,4 +1,4 @@
-import { Vector2 } from "@carapace/primitives";
+import { Vector2 } from "@aphralatrax/primitives";
 import { affineApply, affineInvert } from "../field/affine";
 import { flattenLayers } from "../field/flatten";
 import { isGroup, isObject, type LayerNode, type ObjectInstance } from "../field/types";
