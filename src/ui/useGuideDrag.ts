@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Vector2 } from "@carapace/primitives";
+import type { Vector2 } from "@aphralatrax/primitives";
 import { addGuide, moveGuide, removeGuide } from "../document/canvasOps";
 import type { DocumentStore } from "../document/store";
 import { snapHalf } from "../field/snap";

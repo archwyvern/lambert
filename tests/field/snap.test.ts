@@ -4,7 +4,7 @@ import { createObjectInstance, ObjectTypeId } from "../../src/field/registry";
 import { alignedToAxis, snapHalf, snapObjectToGrid, snapToGuides } from "../../src/field/snap";
 import { fromLocal } from "../../src/field/transform";
 import { v2 } from "../../src/field/vec";
-import { Vector3 } from "@carapace/primitives";
+import { Vector3 } from "@aphralatrax/primitives";
 
 test("snapHalf snaps to the nearest whole or half", () => {
   expect(snapHalf(0.24)).toBe(0);

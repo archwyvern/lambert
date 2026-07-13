@@ -1,4 +1,4 @@
-import { Vector2 } from "@carapace/primitives";
+import { Vector2 } from "@aphralatrax/primitives";
 import { clamp } from "./vec";
 
 /** Unsigned distance from p to segment ab. */

@@ -1,4 +1,4 @@
-import { Vector2 } from "@carapace/primitives";
+import { Vector2 } from "@aphralatrax/primitives";
 import { v2 } from "../field/vec";
 import type { PointerDragHandlers } from "./usePointerDrag";
 
