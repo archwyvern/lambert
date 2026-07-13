@@ -1,4 +1,4 @@
-import type { Vector2 } from "../../math";
+import type { Vector2 } from "@aphralatrax/primitives";
 import { bakeRings, bezierAnchor } from "../bezier";
 import { defineObjectType, ObjectTypeId } from "../registry";
 import { sdPolygon } from "../sdf";

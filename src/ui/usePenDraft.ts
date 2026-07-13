@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Vector2 } from "../math";
+import type { Vector2 } from "@aphralatrax/primitives";
 import type { Placing, ToolMode } from "./tools";
 
 /** Screen px: clicking within this of the first pen point closes the loop. */

@@ -1,4 +1,4 @@
-import { Vector2, Vector3 } from "../math";
+import { Vector2, Vector3 } from "@aphralatrax/primitives";
 import { v2 } from "./vec";
 
 export interface Transform2D {

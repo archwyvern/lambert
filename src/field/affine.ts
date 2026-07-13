@@ -1,4 +1,4 @@
-import { Vector2 } from "../math";
+import { Vector2 } from "@aphralatrax/primitives";
 import type { Transform2D } from "./transform";
 import { v2 } from "./vec";
 

@@ -1,4 +1,4 @@
-import { Vector3 } from "../math";
+import { Vector3 } from "@aphralatrax/primitives";
 import "./objects";
 import { bakeRings, bezierAnchor } from "./bezier";
 import { meshEdges } from "./meshOps";

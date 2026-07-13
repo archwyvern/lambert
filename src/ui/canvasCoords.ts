@@ -1,4 +1,4 @@
-import { Vector2 } from "../math";
+import { Vector2 } from "@aphralatrax/primitives";
 import { v2 } from "../field/vec";
 import { screenToCanvas, Viewport } from "./viewport";
 

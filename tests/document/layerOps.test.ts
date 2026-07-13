@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Vector2, Vector3 } from "../../src/math";
+import { Vector2, Vector3 } from "@aphralatrax/primitives";
 import "../../src/field/objects";
 import { addNode, duplicateNode, emptyGroup, findNode, findParentId, moveNode, nodeWorldComposite, ungroup, wrapInGroup } from "../../src/document/layerOps";
 import { affineApply } from "../../src/field/affine";
