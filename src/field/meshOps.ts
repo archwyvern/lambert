@@ -1,5 +1,5 @@
 import type { MeshData } from "./types";
-import { Vector2 } from "@aphralatrax/primitives";
+import { Vector2 } from "../math";
 import { v2 } from "./vec";
 
 const sameEdge = (p: number, q: number, x: number, y: number): boolean =>

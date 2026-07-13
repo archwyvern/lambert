@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import "../../src/field/objects";
-import { Vector3 } from "@aphralatrax/primitives";
+import { Vector3 } from "../../src/math";
 import { addObject } from "../../src/document/docOps";
 import { migrateDocToDims } from "../../src/document/migrate";
 import { emptyDoc } from "../../src/document/schema";

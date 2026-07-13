@@ -1,4 +1,4 @@
-import { Vector2 } from "@aphralatrax/primitives";
+import { Vector2 } from "../math";
 import { Affine, affineApply } from "./affine";
 import { bakeMaskLoop, bezierAnchor } from "./bezier";
 import { influence } from "./combine";

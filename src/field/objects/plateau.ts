@@ -1,4 +1,4 @@
-import { Vector2 } from "@aphralatrax/primitives";
+import { Vector2 } from "../../math";
 import { frustumStrip } from "../controlPoints";
 import { applyProfile, PROFILE_KINDS, ProfileKind } from "../profiles";
 import { defineObjectType, enumParam, ObjectTypeId } from "../registry";

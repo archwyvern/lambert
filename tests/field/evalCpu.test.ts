@@ -4,7 +4,7 @@ import { createObjectInstance, ObjectTypeId } from "../../src/field/registry";
 import { evaluateField } from "../../src/field/evalCpu";
 import { resolveObjects } from "../../src/field/flatten";
 import { v2 } from "../../src/field/vec";
-import { Vector3 } from "@aphralatrax/primitives";
+import { Vector3 } from "../../src/math";
 
 const px = (r: { width: number }, x: number, y: number) => y * r.width + x;
 

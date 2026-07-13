@@ -6,7 +6,7 @@ import { createMask } from "../../src/field/maskOps";
 import { axisScaleFromDrag, constrainAxis, grabGroup, pointsInBox, pickObject, rotationFromDrag, snapAngle, toggleIndex } from "../../src/ui/picking";
 import { toLocal } from "../../src/field/transform";
 import { v2 } from "../../src/field/vec";
-import { Vector3 } from "@aphralatrax/primitives";
+import { Vector3 } from "../../src/math";
 
 test("toggleIndex: adds when absent, removes when present", () => {
   expect(toggleIndex([1, 2], 3)).toEqual([1, 2, 3]);

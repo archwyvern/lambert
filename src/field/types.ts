@@ -1,4 +1,4 @@
-import { Vector2 } from "@aphralatrax/primitives";
+import { Vector2 } from "../math";
 import type { BezierAnchor } from "./bezier";
 import type { Transform2D } from "./transform";
 import type { CombineOp } from "./combine";

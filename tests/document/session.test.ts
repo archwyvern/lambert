@@ -5,7 +5,7 @@ import { addObject } from "../../src/document/docOps";
 import { emptyDoc } from "../../src/document/schema";
 import { buildSessionJson, parseSessionJson, DocTabSession, TabSession } from "../../src/document/session";
 import type { ObjectInstance } from "../../src/field/types";
-import { Vector3 } from "@aphralatrax/primitives";
+import { Vector3 } from "../../src/math";
 import { v2 } from "../../src/field/vec";
 
 const view = {

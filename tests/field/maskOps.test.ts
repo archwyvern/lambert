@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ObjectTypeId } from "../../src/field/objectTypeIds";
-import { Vector2, Vector3 } from "@aphralatrax/primitives";
+import { Vector2, Vector3 } from "../../src/math";
 import { affineApply, affineFromTRS, affineIdentity, affineInvert } from "../../src/field/affine";
 import { flattenLayers, type ResolvedMask } from "../../src/field/flatten";
 import { bakeMasks, createMask, maskCoverage, setMaskFollow, setMaskSpace } from "../../src/field/maskOps";

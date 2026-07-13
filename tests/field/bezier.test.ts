@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Vector2 } from "@aphralatrax/primitives";
+import { Vector2 } from "../../src/math";
 import { bezierAnchor, bakeMaskLoop, insertOnPath, nearestOnPath, resolveHandlesClosed } from "../../src/field/bezier";
 
 const v = (x: number, y: number): Vector2 => new Vector2(x, y);
