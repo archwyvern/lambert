@@ -1,4 +1,4 @@
-import type { Vector2 } from "@aphralatrax/primitives";
+import type { Vector2 } from "@carapace/primitives";
 import { bakeRings, bezierAnchor } from "../bezier";
 import { applyProfile, PROFILE_KINDS, ProfileKind } from "../profiles";
 import { defineObjectType, enumParam, ObjectTypeId } from "../registry";

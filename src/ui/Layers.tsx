@@ -9,7 +9,7 @@ import {
   LockOpenRegular,
 } from "@fluentui/react-icons";
 import { useEffect, useState } from "react";
-import { Vector3 } from "@aphralatrax/primitives";
+import { Vector3 } from "@carapace/primitives";
 import type { DocumentStore, EditorState } from "../document/store";
 import { duplicateObject, moveObjectTo, removeObject, updateObject } from "../document/docOps";
 import { addGroup, emptyGroup, findNode, findParentId, moveNode, siblingsOf, ungroup, updateNode, wrapInGroup } from "../document/layerOps";

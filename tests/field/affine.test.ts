@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Vector2, Vector3 } from "@aphralatrax/primitives";
+import { Vector2, Vector3 } from "@carapace/primitives";
 import { affineApply, affineCompose, affineFromTRS, affineInvert, affineScaleHint } from "../../src/field/affine";
 import { distanceScale, fromLocal, toLocal } from "../../src/field/transform";
 import type { Transform2D } from "../../src/field/transform";

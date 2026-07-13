@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { v2 } from "../../src/field/vec";
-import { Vector3 } from "@aphralatrax/primitives";
+import { Vector3 } from "@carapace/primitives";
 import { distanceScale, toLocal } from "../../src/field/transform";
 
 test("toLocal: translation and scale", () => {

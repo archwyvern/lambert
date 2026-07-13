@@ -1,4 +1,4 @@
-import { Vector2 } from "@aphralatrax/primitives";
+import { Vector2 } from "@carapace/primitives";
 
 /** Terse constructor for a carapace {@link Vector2} (the 2D vector type used throughout). */
 export const v2 = (x: number, y: number): Vector2 => new Vector2(x, y);

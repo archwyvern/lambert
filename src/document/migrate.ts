@@ -1,4 +1,4 @@
-import { Vector3 } from "@aphralatrax/primitives";
+import { Vector3 } from "@carapace/primitives";
 import type { BezierAnchor } from "../field/bezier";
 import type { LayerNode, Mask } from "../field/types";
 import { v2 } from "../field/vec";
