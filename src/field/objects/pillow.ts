@@ -1,4 +1,4 @@
-import { Vector2 } from "@aphralatrax/primitives";
+import { Vector2 } from "../../math";
 import { bakeRings, bezierAnchor } from "../bezier";
 import { PARAMS_OFFSET, RECORD_SLOT } from "../gpu/wgsl";
 import { ringInv4 } from "../softDist";

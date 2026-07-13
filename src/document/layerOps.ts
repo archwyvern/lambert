@@ -1,4 +1,4 @@
-import { Vector3 } from "@aphralatrax/primitives";
+import { Vector3 } from "../math";
 import { affineCompose, affineFromTRS, affineIdentity, affineInvert, type Affine } from "../field/affine";
 import { isGroup, type GroupLayer, type LayerNode } from "../field/types";
 import { identityTransform } from "../field/transform";

@@ -1,4 +1,4 @@
-import { Vector2 } from "@aphralatrax/primitives";
+import { Vector2 } from "../../math";
 import { sdSegment } from "../sdf";
 import { triBary } from "../tri";
 import type { FieldSample, ObjectInstance } from "../types";

@@ -1,4 +1,4 @@
-import { Vector2 } from "@aphralatrax/primitives";
+import { Vector2 } from "../../math";
 import { defineObjectType, numParam, ObjectTypeId } from "../registry";
 import { sdPolygon } from "../sdf";
 import type { FieldSample, ObjectInstance } from "../types";

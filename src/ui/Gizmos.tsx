@@ -25,7 +25,7 @@ import { isGroup, isObject, type ObjectInstance } from "../field/types";
 import { GroupGizmo } from "./GroupGizmo";
 import { MaskGizmo } from "./MaskGizmo";
 import { localBounds, paddedCorners } from "../field/objectBounds";
-import { Vector2, Vector3 } from "@aphralatrax/primitives";
+import { Vector2, Vector3 } from "../math";
 import { v2 } from "../field/vec";
 import { ContextMenu, MenuEntry } from "./kit";
 import { axisScaleFromDrag, constrainAxis, grabGroup, rotationFromDrag, ROTATE_SNAP, snapAngle, toggleIndex } from "./picking";

@@ -1,4 +1,4 @@
-import { Vector2 } from "@aphralatrax/primitives";
+import { Vector2 } from "../math";
 
 /** Barycentric coords (u,v) of p in triangle abc, or null if outside (tolerant on shared edges). */
 export function triBary(p: Vector2, a: Vector2, b: Vector2, c: Vector2): { u: number; v: number } | null {
