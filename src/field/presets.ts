@@ -1,4 +1,4 @@
-import { Vector2 } from "@aphralatrax/primitives";
+import { Vector2 } from "@carapace/primitives";
 import { allObjectTypes, createObjectInstance } from "./registry";
 import type { ObjectInstance } from "./types";
 

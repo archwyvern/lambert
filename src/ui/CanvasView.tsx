@@ -18,7 +18,7 @@ import { detailParamsKey, type DetailField } from "../field/detail";
 import { requestDetail } from "./detailManager";
 import { normalXform, type NormalDirs } from "../document/schema";
 import { NormalSphere } from "./NormalDirsEditor";
-import { Vector2, Vector3 } from "@aphralatrax/primitives";
+import { Vector2, Vector3 } from "@carapace/primitives";
 import { EmptyState, ShortcutGuide, SpinSlider } from "@carapace/shell";
 import { v2 } from "../field/vec";
 import { ContextMenu, type MenuEntry } from "./kit";

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { matchEvent, parseChord } from "@carapace/shell";
-import { Vector2 } from "@aphralatrax/primitives";
+import { Vector2 } from "@carapace/primitives";
 import type { DocumentStore } from "../document/store";
 import type { LambertDoc } from "../document/schema";
 import { nodeFrames, updateNode } from "../document/layerOps";

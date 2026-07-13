@@ -10,7 +10,7 @@ import type { GroupLayer, ObjectInstance } from "../field/types";
 import { v2 } from "../field/vec";
 import { Inspector as PropertyInspector } from "@carapace/shell";
 import type { InspectorField, InspectorSectionInfo } from "@carapace/shell";
-import { Vector3 } from "@aphralatrax/primitives";
+import { Vector3 } from "@carapace/primitives";
 import { humanizeLabel } from "@carapace/shell";
 import { AdjustmentList } from "./AdjustmentList";
 import { NodeMaskList, transformFields } from "./inspectorParts";

@@ -1,4 +1,4 @@
-import { Vector2, Vector3 } from "@aphralatrax/primitives";
+import { Vector2, Vector3 } from "@carapace/primitives";
 import { z } from "zod";
 import type { CanvasState, LayerNode, ObjectInstance } from "../field/types";
 import { dropUnknownLayers } from "../field/registry";

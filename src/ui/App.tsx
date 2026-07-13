@@ -10,7 +10,7 @@ import { bakeRings, bezierAnchor } from "../field/bezier";
 import { addNode, cloneNode, findNode, siblingsOf, ungroup, updateNode, wrapInGroup } from "../document/layerOps";
 import { flattenLayers } from "../field/flatten";
 import { isGroup, isObject, type LayerNode, type ObjectInstance } from "../field/types";
-import { Vector2, Vector3 } from "@aphralatrax/primitives";
+import { Vector2, Vector3 } from "@carapace/primitives";
 import { effectiveNormalDirs, effectiveOutput, emptyDoc, hydrateObjectRaw, parseDoc, parseProjectConfig, presetLibrarySchema, ProjectConfig, serializeDoc, serializeProjectConfig, type LambertDoc, type SavedPreset } from "../document/schema";
 import { getObjectType, ObjectTypeId } from "../field/registry";
 import { DimsMismatchError, exportDocNx, exportTabHeightmap, exportTabNx, newProjectFlow, openDocTab, openProjectByPath, openProjectFlow, renderDocNx, saveTab, type OpenedProject } from "../document/io";

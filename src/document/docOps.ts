@@ -1,4 +1,4 @@
-import { Vector2, Vector3 } from "@aphralatrax/primitives";
+import { Vector2, Vector3 } from "@carapace/primitives";
 import type { LambertDoc } from "./schema";
 import { duplicateNode, findNode, findParentId, moveNode, removeNode, siblingsOf, updateNode } from "./layerOps";
 import { deleteVertices } from "../field/controlPoints";

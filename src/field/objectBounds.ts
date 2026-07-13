@@ -1,4 +1,4 @@
-import { Vector2 } from "@aphralatrax/primitives";
+import { Vector2 } from "@carapace/primitives";
 import { bezierSpine } from "./bezier";
 import { ObjectTypeId } from "./objectTypeIds";
 import type { ObjectInstance } from "./types";

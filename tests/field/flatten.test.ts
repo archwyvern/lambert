@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Vector2, Vector3 } from "@aphralatrax/primitives";
+import { Vector2, Vector3 } from "@carapace/primitives";
 import "../../src/field/objects";
 import { flattenLayers, resolveObjects } from "../../src/field/flatten";
 import { affineApply, affineFromTRS } from "../../src/field/affine";

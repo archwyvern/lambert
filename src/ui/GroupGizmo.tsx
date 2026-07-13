@@ -1,4 +1,4 @@
-import { Vector2, Vector3 } from "@aphralatrax/primitives";
+import { Vector2, Vector3 } from "@carapace/primitives";
 import { usePointerDrag } from "./usePointerDrag";
 import { CornerHandles, GizmoHalo, RotateKnobs } from "./gizmoChrome";
 import type { DocumentStore } from "../document/store";
