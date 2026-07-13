@@ -32,6 +32,7 @@
       "esbuild"
     ],
     "overrides": {
+      "@aphralatrax/primitives": "link:../aphralatrax/packages/primitives",
       "@carapace/shell": "link:../carapace/packages/shell"
     }
   },
@@ -52,6 +53,7 @@
     "vitest": "^4.1.8"
   },
   "dependencies": {
+    "@aphralatrax/primitives": "github:archwyvern/aphralatrax#master",
     "@carapace/shell": "github:archwyvern/carapace#master",
     "@fontsource-variable/inter": "^5.2.8",
     "@fontsource-variable/jetbrains-mono": "^5.2.8",

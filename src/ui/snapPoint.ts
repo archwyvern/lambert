@@ -1,4 +1,4 @@
-import { Vector2 } from "../math";
+import { Vector2 } from "@aphralatrax/primitives";
 import { snapHalf, snapToGuides } from "../field/snap";
 import { v2 } from "../field/vec";
 

@@ -1,4 +1,4 @@
-import type { Vector2 } from "../math";
+import type { Vector2 } from "@aphralatrax/primitives";
 
 /** Quarter-px² epsilon keeping the boundary integral finite ON a sample point (h -> 0 there anyway). */
 export const SOFT_EPS2 = 0.25;

@@ -1,4 +1,4 @@
-import { Vector3 } from "../math";
+import { Vector3 } from "@aphralatrax/primitives";
 import type { InspectorField } from "@carapace/shell";
 import type { LambertDoc } from "../document/schema";
 import type { DocumentStore } from "../document/store";

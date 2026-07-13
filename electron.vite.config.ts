@@ -48,6 +48,7 @@ export default defineConfig({
         "@carapace/shell/ipc": resolve(import.meta.dirname, "../carapace/packages/shell/src/fs/client.ts"),
         "@carapace/shell/seti.css": resolve(import.meta.dirname, "../carapace/packages/shell/src/tree/fileIcons/seti.css"),
         "@carapace/shell": resolve(import.meta.dirname, "../carapace/packages/shell/src/index.ts"),
+        "@aphralatrax/primitives": resolve(import.meta.dirname, "../carapace/packages/primitives/src/index.ts"),
       },
     },
   },

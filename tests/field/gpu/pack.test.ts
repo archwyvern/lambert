@@ -7,7 +7,7 @@ import { packObjects } from "../../../src/field/gpu/pack";
 import { RECORD_F32 } from "../../../src/field/gpu/wgsl";
 import { toLocal } from "../../../src/field/transform";
 import { v2 } from "../../../src/field/vec";
-import { Vector3 } from "../../../src/math";
+import { Vector3 } from "@aphralatrax/primitives";
 
 test("dome record: layout offsets", () => {
   const dome = createObjectInstance(ObjectTypeId.Sphere, v2(10, 20));

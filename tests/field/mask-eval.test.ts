@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Vector2, Vector3 } from "../../src/math";
+import { Vector2, Vector3 } from "@aphralatrax/primitives";
 import "../../src/field/objects";
 import { evaluateField } from "../../src/field/evalCpu";
 import { renderField } from "../../src/field/render";

@@ -1,4 +1,4 @@
-import type { Vector2 } from "../math";
+import type { Vector2 } from "@aphralatrax/primitives";
 import type { Adjustment, ObjectInstance } from "./types";
 import { clamp } from "./vec";
 

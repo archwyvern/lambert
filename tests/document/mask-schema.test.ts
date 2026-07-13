@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import "../../src/field/objects"; // register object types (parseDoc drops unknown typeIds)
 import { ObjectTypeId } from "../../src/field/objectTypeIds";
-import { Vector2, Vector3 } from "../../src/math";
+import { Vector2, Vector3 } from "@aphralatrax/primitives";
 import { parseDoc, serializeDoc } from "../../src/document/schema";
 import type { LambertDoc } from "../../src/document/schema";
 import type { ObjectInstance } from "../../src/field/types";

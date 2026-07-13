@@ -1,4 +1,4 @@
-import { Vector2 } from "../math";
+import { Vector2 } from "@aphralatrax/primitives";
 import { bakeMaskLoop, bakeRings, BezierAnchor, bezierAnchor } from "./bezier";
 import { getObjectType } from "./registry";
 import type { ObjectInstance } from "./types";

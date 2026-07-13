@@ -1,6 +1,6 @@
 import { fromLocal, toLocal } from "./transform";
 import type { ObjectInstance } from "./types";
-import { Vector2, Vector3 } from "../math";
+import { Vector2, Vector3 } from "@aphralatrax/primitives";
 import { v2 } from "./vec";
 
 /** Snap a value to the ½-pixel grid (nearest whole or half). */

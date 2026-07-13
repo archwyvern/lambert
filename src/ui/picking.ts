@@ -3,7 +3,7 @@ import type { ResolvedObject } from "../field/flatten";
 import { getObjectType } from "../field/registry";
 import type { ObjectInstance } from "../field/types";
 import { bakeMasks, maskCoverage } from "../field/maskOps";
-import { Vector2, Vector3 } from "../math";
+import { Vector2, Vector3 } from "@aphralatrax/primitives";
 import { v2 } from "../field/vec";
 
 const PICK_SLOP_PX = 1;
