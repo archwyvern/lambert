@@ -539,7 +539,13 @@ function GizmosInner(props: {
   // drag handlers for a vertex point / its in / out tangent handle (mirror on plain drag, Alt breaks)
   const bezierHandleProps = (kind: "point" | "in" | "out", i: number) =>
     bezierDrag({
-      onStart: (e) => (e.button !== 0 ? null : { kind, i }),
+      onStart: (e) => {
+        if (e.button !== 0) return null;
+        // anchor (not tangent) drags arm the octant alignment guide on the path segments,
+        // matching the control-point vertex drag
+        if (kind === "point") setDraggingVert(true);
+        return { kind, i };
+      },
       onMove: (e, drag) => {
         if (!object.bezier) return;
         const canvasPt = eventCanvasPoint(e);
@@ -572,7 +578,10 @@ function GizmosInner(props: {
         const next = dragHandle(based, drag.i, drag.kind, local, sym !== e.altKey, e.shiftKey ? ROTATE_SNAP : undefined);
         commitBezier(next, `bez:${object.id}`);
       },
-      onEnd: () => store.endGesture(),
+      onEnd: () => {
+        setDraggingVert(false);
+        store.endGesture();
+      },
       threshold: HANDLE_DRAG_PX,
     });
   // Press on the curve inserts an anchor WITHOUT changing it (de Casteljau split on the resolved path;
@@ -588,6 +597,7 @@ function GizmosInner(props: {
       const ins = insertOnPath(object.bezier, object.subpathStarts, !!object.closed, near);
       setSelVerts([ins.index]);
       commitBezier(ins.anchors, `insdrag:${object.id}`, { subpathStarts: ins.subpathStarts });
+      setDraggingVert(true); // the insert flows into an anchor drag — arm the alignment guide
       return { kind: "point", i: ins.index };
     },
     onMove: (e, drag) => {
@@ -595,7 +605,10 @@ function GizmosInner(props: {
       const local = w2l(snapPt(eventCanvasPoint(e))); // snap the new anchor's canvas position (grid + guides)
       commitBezier(movePoint(object.bezier, drag.i, local, e.altKey), `insdrag:${object.id}`);
     },
-    onEnd: () => store.endGesture(),
+    onEnd: () => {
+      setDraggingVert(false);
+      store.endGesture();
+    },
     threshold: HANDLE_DRAG_PX,
   });
   const bezScreen = (local: Vector2): Vector2 => toScreen(local);
@@ -614,11 +627,39 @@ function GizmosInner(props: {
         <>
           {/* one centreline per subpath loop (Mesa has base + top rings) */}
           {splitSubpaths(object.bezier!, object.subpathStarts).map((loop, li) => {
-            const pts = bezierSpine(loop, 24, object.closed).map((cp) => { const s = bezScreen(cp); return `${s.x},${s.y}`; }).join(" ");
+            const PER_SEG = 24;
+            const spine = bezierSpine(loop, PER_SEG, object.closed);
+            const pts = spine.map((cp) => { const s = bezScreen(cp); return `${s.x},${s.y}`; }).join(" ");
+            // Visible centreline, split PER SEGMENT so the octant alignment guide can light one
+            // stretch: while an anchor drags, a segment whose anchor-to-anchor CHORD sits on a
+            // 0/45/90 axis (within ¼ canvas px) goes bright white + thick — the same cue the
+            // control-point shapes' seg() edges give.
+            const alignTol = 0.25 * viewport.zoom;
+            const segs = object.closed && loop.length >= 3 ? loop.length : loop.length - 1;
+            const segLines: React.JSX.Element[] = [];
+            for (let i = 0; i < segs; i++) {
+              const a = bezScreen(loop[i]!.p);
+              const b = bezScreen(loop[(i + 1) % loop.length]!.p);
+              const on = draggingVert && alignedToAxis(a, b, alignTol);
+              const segPts = spine
+                .slice(i * PER_SEG, i * PER_SEG + PER_SEG + 1)
+                .map((cp) => { const s = bezScreen(cp); return `${s.x},${s.y}`; })
+                .join(" ");
+              segLines.push(
+                <polyline
+                  key={i}
+                  points={segPts}
+                  fill="none"
+                  stroke={on ? "#ffffff" : "var(--color-accent)"}
+                  strokeWidth={on ? 3 : 1.5}
+                  strokeOpacity={on ? 1 : 0.85}
+                  style={{ pointerEvents: "none" }}
+                />,
+              );
+            }
             return (
               <g key={li}>
-                {/* visible centreline (not interactive) so the whole path reads at a glance */}
-                <polyline points={pts} fill="none" stroke="var(--color-accent)" strokeWidth={1.5} strokeOpacity={0.85} style={{ pointerEvents: "none" }} />
+                {segLines}
                 {/* invisible hit strip: click anywhere along the path to insert an anchor (and keep
                     dragging it). SLIM in the select tool so a body-drag of a thin Cable/Ridge still has
                     grabbable body either side of the centreline; the vertex tool gets the fat strip. */}
