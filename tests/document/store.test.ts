@@ -94,9 +94,14 @@ test("store: selection, dirty, markSaved, subscribe", () => {
   const id = store.state.doc.layers[0]!.id;
   store.select(id);
   expect(store.state.selectedId).toBe(id);
-  store.markSaved("/tmp/x.lambert");
+  store.markSaved(store.state.doc, "/tmp/x.lambert");
   expect(store.state.dirty).toBe(false);
   expect(store.state.docPath).toBe("/tmp/x.lambert");
+  // an edit that lands during an async save keeps dirty true: the saved baseline is the snapshot
+  const snapshot = store.state.doc;
+  store.update((d) => addObject(d, ObjectTypeId.Sphere, v2(4, 4)));
+  store.markSaved(snapshot, "/tmp/x.lambert");
+  expect(store.state.dirty).toBe(true);
   expect(notified).toBeGreaterThanOrEqual(3);
   unsub();
 });
