@@ -222,17 +222,23 @@ export function useEditorKeymap(opts: {
             { coalesce: `vnudge:${id}` },
           );
         } else {
-          // updateNode, not updateObject: the selected node may be a GROUP (updateObject only
-          // patches objects, so a group nudge silently no-oped)
+          // updateNode, not updateObject: a selected node may be a GROUP (updateObject only
+          // patches objects, so a group nudge silently no-oped). Nudge the WHOLE multi-selection
+          // in unison — canvas drag moves every member, arrows match.
+          const ids = store.state.selectedIds;
           store.update(
             (d) => ({
               ...d,
-              layers: updateNode(d.layers, id, (n) => ({
-                ...n,
-                transform: { ...n.transform, pos: n.transform.pos.withX(n.transform.pos.x + dx).withY(n.transform.pos.y + dy) },
-              })),
+              layers: ids.reduce(
+                (ls, oid) =>
+                  updateNode(ls, oid, (n) => ({
+                    ...n,
+                    transform: { ...n.transform, pos: n.transform.pos.withX(n.transform.pos.x + dx).withY(n.transform.pos.y + dy) },
+                  })),
+                d.layers,
+              ),
             }),
-            { coalesce: `nudge:${id}` },
+            { coalesce: `nudge:${ids.join("+")}` },
           );
         }
         // a burst of nudges collapses to one undo entry; commit it after a short pause so the next
