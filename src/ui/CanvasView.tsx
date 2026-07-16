@@ -249,13 +249,29 @@ export function CanvasView(props: {
     resize();
     const ro = new ResizeObserver(resize);
     ro.observe(host);
+    // The create() promise can resolve after unmount (StrictMode's dev double-mount makes this the
+    // NORM: two creates race on one canvas). The loser is disposed and never touches the canvas;
+    // only the surviving owner attaches (configures the canvas context with its device).
+    let cancelled = false;
     void PreviewRenderer.create(canvas)
       .then((r) => {
+        if (cancelled) {
+          r.dispose();
+          return;
+        }
+        r.attach();
         rendererRef.current = r;
         setReady(true);
       })
-      .catch((err: unknown) => setGpuError(err instanceof Error ? err.message : String(err)));
-    return () => ro.disconnect();
+      .catch((err: unknown) => {
+        if (!cancelled) setGpuError(err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      cancelled = true;
+      ro.disconnect();
+      rendererRef.current?.dispose();
+      rendererRef.current = null;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -119,9 +119,7 @@ export class PreviewRenderer {
     });
     const p = new PreviewRenderer(device, canvas);
     p.gpu = await GpuFieldRenderer.create(device);
-    p.ctx = canvas.getContext("webgpu")!;
     const format = navigator.gpu.getPreferredCanvasFormat();
-    p.ctx.configure({ device, format });
     const module = device.createShaderModule({ code: buildCompositeWgsl() });
     p.compositePipeline = await device.createRenderPipelineAsync({
       layout: "auto",
@@ -169,6 +167,24 @@ export class PreviewRenderer {
     });
     p.uniformsGrid = device.createBuffer({ size: 96, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     return p;
+  }
+
+  /** Claim the 2D canvas: configure its WebGPU context with THIS renderer's device. Must be called
+   *  once by the winning owner AFTER create() resolves — never inside create(), where two racing
+   *  creates (React StrictMode's dev double-mount) would leave the canvas configured with one
+   *  device while the surviving renderer submits from the other (every frame then fails validation
+   *  and the canvas stays black). */
+  attach(): void {
+    this.ctx = this.canvas.getContext("webgpu")!;
+    this.ctx.configure({ device: this.device, format: navigator.gpu.getPreferredCanvasFormat() });
+  }
+
+  /** Tear down: cancel the pending frame and destroy the device (and with it every GPU resource).
+   *  For the unmount/loser path of the create() race — the instance is unusable afterwards. */
+  dispose(): void {
+    if (this.frame !== null) cancelAnimationFrame(this.frame);
+    this.frame = null;
+    this.device.destroy();
   }
 
   /** Attach/detach the 3D inspection canvas (the orbit pass renders only while attached). */
