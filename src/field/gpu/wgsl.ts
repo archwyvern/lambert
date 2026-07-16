@@ -361,7 +361,11 @@ fn cubic_dist(p: vec2f, p0: vec2f, c0: vec2f, c1: vec2f, p1: vec2f, cutStart: bo
 }
 
 // Triangulated height-field eval for Mesh: barycentric height in the
-// triangle under p (blended toward Phong by smoothness, the mesh's first param), else sd to nearest edge.
+// triangle under p (blended toward Phong by smoothness, the mesh's first param). Outside every
+// triangle but within the hard-cover margin of the nearest edge (MESH_HARD_COVER_PX doc px —
+// sprite boundary pixels raster up to ~0.71px outside the traced line, see meshField.ts), the
+// pixel is still covered with the CLAMPED edge point's height; beyond that, sd to nearest edge.
+const MESH_HARD_COVER_PX: f32 = 0.75;
 fn shape_meshfield(p: vec2f, base: u32) -> vec2f {
   let sm = rec(base, SLOT_PARAM0);
   let triStart = u32(rec(base, SLOT_TRI_START));
@@ -386,14 +390,41 @@ fn shape_meshfield(p: vec2f, base: u32) -> vec2f {
       return vec2f(hL + sm * (hP - hL), -1.0);
     }
   }
-  var d = 1e9;
+  // Nearest point on any edge (distance + edge param + endpoint offsets) — meshFieldEval twin.
+  var bestD = 1e9;
+  var bestT = 0.0;
+  var bestO0 = triStart;
+  var bestO1 = triStart;
   for (var t = 0u; t < triCount; t = t + 1u) {
     let o = triStart + t * 6u;
-    d = min(d, sd_segment(p, meshTris[o].xy, meshTris[o + 2u].xy));
-    d = min(d, sd_segment(p, meshTris[o + 2u].xy, meshTris[o + 4u].xy));
-    d = min(d, sd_segment(p, meshTris[o + 4u].xy, meshTris[o].xy));
+    for (var e = 0u; e < 3u; e = e + 1u) {
+      let o0 = o + e * 2u;
+      let o1 = o + ((e + 1u) % 3u) * 2u;
+      let ea = meshTris[o0].xy;
+      let eb = meshTris[o1].xy;
+      let pa = p - ea;
+      let ba = eb - ea;
+      let et = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-12), 0.0, 1.0);
+      let ed = length(pa - ba * et);
+      if (ed < bestD) {
+        bestD = ed;
+        bestT = et;
+        bestO0 = o0;
+        bestO1 = o1;
+      }
+    }
   }
-  return vec2f(0.0, d);
+  if (bestD * rec(base, SLOT_SCALE) <= MESH_HARD_COVER_PX) {
+    let a = meshTris[bestO0];
+    let b = meshTris[bestO1];
+    let hL = mix(a.z, b.z, bestT);
+    if (sm <= 0.0) { return vec2f(hL, -1.0); }
+    let q = mix(a.xy, b.xy, bestT);
+    let pa = a.z + a.w * (q.x - a.x) + meshTris[bestO0 + 1u].x * (q.y - a.y);
+    let pb = b.z + b.w * (q.x - b.x) + meshTris[bestO1 + 1u].x * (q.y - b.y);
+    return vec2f(hL + sm * (mix(pa, pb, bestT) - hL), -1.0);
+  }
+  return vec2f(0.0, bestD);
 }
 `;
 
