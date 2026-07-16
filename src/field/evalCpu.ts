@@ -71,7 +71,7 @@ export function evaluateField(resolved: ResolvedObject[], width: number, height:
       for (const { rs, type, op, s, baked, alpha, aabb } of items) {
         if (p.x < aabb.minX || p.x > aabb.maxX || p.y < aabb.minY || p.y > aabb.maxY) continue;
         const local = affineApply(rs.invAffine, p);
-        const sample = type.eval(local, s);
+        const sample = type.eval(local, s, rs.scaleHint);
         const sd = sample.sd * rs.scaleHint;
         // per-object opacity scales the whole contribution: the mask influence AND the height step
         // below. Edge coverage: AA objects get the box-filter ramp; the default is a HARD step at

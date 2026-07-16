@@ -188,5 +188,7 @@ export interface ObjectType {
   /** Optional record-packing hook, run AFTER the generic slots are written — for type-specific
    *  encodings (unpacked params, derived per-shape scalars in type-unused slots). */
   pack?(records: Float32Array, base: number, object: ObjectInstance): void;
-  eval(pLocal: Vector2, object: ObjectInstance): FieldSample;
+  /** `scaleHint` = the composed local->world scale (see ResolvedObject.scaleHint) for evals whose
+   *  thresholds are in DOC pixels (the mesh hard-cover margin); most types ignore it. */
+  eval(pLocal: Vector2, object: ObjectInstance, scaleHint?: number): FieldSample;
 }
