@@ -130,9 +130,12 @@ export async function saveTab(host: Host, tab: DocTab, projectPath: string): Pro
     });
     if (!path) return null; // cancelled
   }
-  await host.writeFile(path, new TextEncoder().encode(serializeDoc(tab.store.state.doc)));
+  // Snapshot before the async write: an edit landing mid-write must keep the tab dirty (the newer
+  // doc wasn't persisted), so the saved baseline is THIS snapshot, not whatever is current after.
+  const snapshot = tab.store.state.doc;
+  await host.writeFile(path, new TextEncoder().encode(serializeDoc(snapshot)));
   tab.docPath = path;
-  tab.store.markSaved(path);
+  tab.store.markSaved(snapshot, path);
   return path;
 }
 

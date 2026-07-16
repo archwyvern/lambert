@@ -150,9 +150,12 @@ export class DocumentStore {
     this.emit({ doc, docPath, dirty: opts.dirty ?? false, ...sel([]) });
   }
 
-  markSaved(path: string): void {
-    this.savedDoc = this.current.doc;
-    this.emit({ dirty: false, docPath: path });
+  /** Mark a SPECIFIC doc snapshot as the saved baseline — not necessarily `current`, because an edit
+   *  may have landed during the async file write. dirty is recomputed against the live doc, so if
+   *  the user edited mid-save the flag correctly stays true (the newer doc wasn't persisted). */
+  markSaved(doc: LambertDoc, path: string): void {
+    this.savedDoc = doc;
+    this.emit({ dirty: this.current.doc !== doc, docPath: path });
   }
 
   /** Update the on-disk path without touching dirty/undo — the file was renamed/moved underneath us. */
