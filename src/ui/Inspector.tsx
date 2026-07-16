@@ -114,17 +114,43 @@ export function Inspector(props: {
     );
   }
 
-  // no selection: the inspector is for the SELECTION — document-level configuration (origin, normal
-  // directions, output format) lives in Settings > Document, not here.
+  // no selection: the inspector shows the document — source dims, the canvas origin (the rulers'
+  // 0,0, editable in place), and a link to the full Settings for the rest (normal dirs, output).
   if (!object) {
     const doc = state.doc;
+    const o = doc.canvas.origin;
+    const setOrigin = (x: number, y: number, key: string): void =>
+      store.update((d) => ({ ...d, canvas: { ...d.canvas, origin: { x, y } } }), { coalesce: key });
+    const originFields: InspectorField[] = [
+      vec({
+        key: "origin",
+        label: "origin",
+        group: "Canvas",
+        value: [o.x, o.y],
+        size: 2,
+        onChange: (v) => setOrigin(v[0]!, v[1]!, "origin"),
+        onCommit: () => store.endGesture(),
+      }),
+    ];
     return (
       <div>
         <div className="mb-2 border-b border-border pb-1.5 text-md font-semibold text-fg">Document</div>
         <p className="mb-2 px-2 text-sm text-fg-mid">
           {doc.source.uri.split("/").pop()} · {doc.source.width}×{doc.source.height}
         </p>
-        <p className="mb-3 px-2 text-base leading-snug text-fg-mid">
+        <PropertyInspector fields={originFields} sections={[{ name: "Canvas" }]} />
+        <div className="mt-2 px-2">
+          <Button
+            className="w-full"
+            onClick={() => {
+              setOrigin(doc.source.width / 2, doc.source.height / 2, "origin-centre");
+              store.endGesture();
+            }}
+          >
+            Centre Origin
+          </Button>
+        </div>
+        <p className="my-3 px-2 text-base leading-snug text-fg-mid">
           Select an object to edit its parameters.
         </p>
         <div className="px-2">
@@ -298,26 +324,26 @@ export function Inspector(props: {
     }
   }
 
-  // tilt: a single Vector2 field (the slope direction+steepness), driving the tiltX/tiltY params
+  // tilt: an XY pad + numeric pair (the slope direction+steepness), driving the tiltX/tiltY
+  // params. The pad (drag a dot inside ±1) makes the slope DIRECTION controllable in one
+  // gesture — two independent scrubbers made that needlessly fiddly.
   if (hasTilt) {
-    fields.push(
-      vec({
-        key: "tilt",
-        label: "tilt",
-        group: "Parameters",
-        value: [Number(object.params.tiltX ?? 0), Number(object.params.tiltY ?? 0)],
-        size: 2,
-        // tilt is a slope (rise/run, = tanθ). The bar spans ±1 (±45°, the common range) for a
-        // usable scrubber, but it's SOFT — drag/type past it toward vertical when a steeper plate
-        // is wanted (the scrub step is range-independent, so precision isn't affected either way).
-        min: -1,
-        max: 1,
-        softMin: true,
-        softMax: true,
-        onChange: (a) => live((s) => ({ ...s, params: { ...s.params, tiltX: a[0]!, tiltY: a[1]! } }), "tilt"),
-        onCommit: commit,
-      }),
-    );
+    fields.push({
+      kind: "pad",
+      key: "tilt",
+      label: "tilt",
+      group: "Parameters",
+      value: [Number(object.params.tiltX ?? 0), Number(object.params.tiltY ?? 0)],
+      // tilt is a slope (rise/run, = tanθ). The pad + bar span ±1 (±45°, the common range), but
+      // the numeric bounds are SOFT — type past them toward vertical when a steeper plate is
+      // wanted (the pad handle then clamps to the rim).
+      min: -1,
+      max: 1,
+      softMin: true,
+      softMax: true,
+      onChange: (a) => live((s) => ({ ...s, params: { ...s.params, tiltX: a[0]!, tiltY: a[1]! } }), "tilt"),
+      onCommit: commit,
+    });
   }
 
   // the object's own transform — ALWAYS shown (selected vertices get their own section below, they
