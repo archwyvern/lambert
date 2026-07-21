@@ -3,6 +3,7 @@ import type { AdjustmentDefaults } from "../field/adjustments";
 import { flattenLayers, type ResolvedObject } from "../field/flatten";
 import type { DetailField } from "../field/detail";
 import { buildCompositeWgsl } from "../field/gpu/composite";
+import { buildFoldWgsl } from "../field/gpu/wgsl";
 import { detailBuffer } from "../field/gpu/pipeline";
 import { packObjects } from "../field/gpu/pack";
 import { GpuFieldRenderer } from "../field/gpu/pipeline";
@@ -67,12 +68,32 @@ export interface PerfProbe {
   frames: { packMs: number; cpuMs: number; gpuMs: number }[];
 }
 
+// Escape hatch for A/B comparison + emergencies: `?nofoldcache` forces every frame down the direct
+// per-fragment fold path (the pre-cache behavior).
+const FOLD_CACHE_DISABLED = typeof location !== "undefined" && new URLSearchParams(location.search).has("nofoldcache");
+
+// Doc-px padding around the visible doc window in the fold cache texture: pans/zoom-ins inside the
+// apron are pure texture reads (no fold at all); escaping it re-folds the (small) window once.
+const FOLD_APRON = 192;
+
+// Docs at or under this texel count (2048², ~34MB rg32float) fold whole-doc instead of windowed —
+// then NO pan can ever invalidate the cache, only content/detail edits.
+const FOLD_FULL_DOC_TEXELS = 4_194_304;
+
 export class PreviewRenderer {
   private gpu!: GpuFieldRenderer;
   private ctx!: GPUCanvasContext;
   private compositePipeline!: GPURenderPipeline;
+  private compositeCachedPipeline!: GPURenderPipeline;
+  private foldPipeline!: GPUComputePipeline;
   private uniforms!: GPUBuffer;
   private boxUniforms!: GPUBuffer; // separate uniform buffer for the lit-in-box composite pass
+  private foldUniforms!: GPUBuffer; // fold compute pass uniforms (window origin + size)
+  private foldWinBuf!: GPUBuffer; // cached-composite uniform: the fold window origin
+  private foldTex: GPUTexture | null = null;
+  // fold-cache validity: the packed-content generation + detail + doc dims it was folded for, and
+  // the doc-space window it covers (a hit needs the visible window CONTAINED in it)
+  private foldCache: { packSeq: number; detail: DetailField | null; docW: number; docH: number; x: number; y: number; w: number; h: number } | null = null;
   private diffuseTex: GPUTexture | null = null;
   // Decoded diffuse cache keyed on the source byte buffer (stable per open tab). Switching tabs just
   // rebinds the cached texture instead of re-decoding a multi-MP PNG + re-uploading. Bounded by open
@@ -121,13 +142,25 @@ export class PreviewRenderer {
     p.gpu = await GpuFieldRenderer.create(device);
     const format = navigator.gpu.getPreferredCanvasFormat();
     const module = device.createShaderModule({ code: buildCompositeWgsl() });
-    p.compositePipeline = await device.createRenderPipelineAsync({
-      layout: "auto",
-      vertex: { module, entryPoint: "vs" },
-      fragment: { module, entryPoint: "fs", targets: [{ format }] },
-    });
+    const cachedModule = device.createShaderModule({ code: buildCompositeWgsl(true) });
+    const foldModule = device.createShaderModule({ code: buildFoldWgsl() });
+    [p.compositePipeline, p.compositeCachedPipeline, p.foldPipeline] = await Promise.all([
+      device.createRenderPipelineAsync({
+        layout: "auto",
+        vertex: { module, entryPoint: "vs" },
+        fragment: { module, entryPoint: "fs", targets: [{ format }] },
+      }),
+      device.createRenderPipelineAsync({
+        layout: "auto",
+        vertex: { module: cachedModule, entryPoint: "vs" },
+        fragment: { module: cachedModule, entryPoint: "fs", targets: [{ format }] },
+      }),
+      device.createComputePipelineAsync({ layout: "auto", compute: { module: foldModule, entryPoint: "fold" } }),
+    ]);
     p.uniforms = device.createBuffer({ size: 128, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     p.boxUniforms = device.createBuffer({ size: 128, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    p.foldUniforms = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    p.foldWinBuf = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     const module3d = device.createShaderModule({ code: buildPreview3dWgsl() });
     p.pipeline3d = await device.createRenderPipelineAsync({
       layout: "auto",
@@ -538,19 +571,108 @@ export class PreviewRenderer {
       this.detailBuf = detailBuffer(this.device, p.detail ?? null, 1); // composite p is doc-space
       this.lastDetail = p.detail ?? null;
     }
-    const bind = this.device.createBindGroup({
-      layout: this.compositePipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: this.uniforms } },
-        { binding: 1, resource: { buffer: this.recordsBuf! } },
-        { binding: 2, resource: { buffer: this.pointsBuf! } },
-        { binding: 4, resource: { buffer: this.meshBuf! } },
-        { binding: 5, resource: this.diffuseTex.createView() },
-        { binding: 6, resource: { buffer: this.maskLoopsBuf! } },
-        { binding: 7, resource: { buffer: this.maskVertsBuf! } },
-        { binding: 8, resource: { buffer: this.detailBuf! } },
-      ],
-    });
+
+    // Fold cache: the composite snaps every fold sample to a doc-pixel centre, so a frame reads at
+    // most (visible doc px + stencil) DISTINCT fold values — zoomed in, orders of magnitude fewer
+    // than fragments. Fold those once into a doc-aligned window texture and let the cached
+    // composite variant read it: pans, zoom-ins, and light/opacity/mode tweaks inside the apron
+    // then cost zero fold work. Small docs fold WHOLE (valid at any zoom — samples are doc-px
+    // centres regardless — and pan can never invalidate); big docs fold the visible window and
+    // engage only at zoom >= 1, where the window is smaller than the screen. Diffuse mode never
+    // folds, and big-doc zoom-outs keep the direct analytic path.
+    const zoomDev = p.viewport.zoom * dpr;
+    const fullDoc = (docW + 8) * (docH + 8) <= FOLD_FULL_DOC_TEXELS;
+    let foldReady = false;
+    if (!FOLD_CACHE_DISABLED && p.mode !== "diffuse" && (fullDoc || zoomDev >= 1)) {
+      const vx0 = Math.max(Math.floor(-f[1] / zoomDev) - 4, -4);
+      const vy0 = Math.max(Math.floor(-f[2] / zoomDev) - 4, -4);
+      const vx1 = Math.min(Math.ceil((this.canvas.width - f[1]) / zoomDev) + 4, docW + 4);
+      const vy1 = Math.min(Math.ceil((this.canvas.height - f[2]) / zoomDev) + 4, docH + 4);
+      if (vx1 > vx0 && vy1 > vy0) {
+        const c = this.foldCache;
+        const hit =
+          c !== null &&
+          c.packSeq === this.packSeq &&
+          c.detail === this.lastDetail &&
+          c.docW === docW &&
+          c.docH === docH &&
+          vx0 >= c.x &&
+          vy0 >= c.y &&
+          vx1 <= c.x + c.w &&
+          vy1 <= c.y + c.h;
+        if (!hit) {
+          const wx0 = fullDoc ? -4 : Math.max(vx0 - FOLD_APRON, -4);
+          const wy0 = fullDoc ? -4 : Math.max(vy0 - FOLD_APRON, -4);
+          const fw = (fullDoc ? docW + 4 : Math.min(vx1 + FOLD_APRON, docW + 4)) - wx0;
+          const fh = (fullDoc ? docH + 4 : Math.min(vy1 + FOLD_APRON, docH + 4)) - wy0;
+          if (!this.foldTex || this.foldTex.width !== fw || this.foldTex.height !== fh) {
+            this.foldTex?.destroy();
+            this.foldTex = this.device.createTexture({
+              size: [fw, fh],
+              format: "rg32float",
+              usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING,
+            });
+          }
+          const fub = new ArrayBuffer(32);
+          const fu32 = new Uint32Array(fub);
+          const ff32 = new Float32Array(fub);
+          fu32[0] = fw;
+          fu32[1] = fh;
+          fu32[2] = this.shapeCount;
+          ff32[3] = wx0;
+          ff32[4] = wy0;
+          ff32[5] = 1; // step: 1 doc px per texel
+          this.device.queue.writeBuffer(this.foldUniforms, 0, fub);
+          this.device.queue.writeBuffer(this.foldWinBuf, 0, new Float32Array([wx0, wy0, 0, 0]));
+          const foldBind = this.device.createBindGroup({
+            layout: this.foldPipeline.getBindGroupLayout(0),
+            entries: [
+              { binding: 0, resource: { buffer: this.foldUniforms } },
+              { binding: 1, resource: { buffer: this.recordsBuf! } },
+              { binding: 2, resource: { buffer: this.pointsBuf! } },
+              { binding: 3, resource: this.foldTex.createView() },
+              { binding: 4, resource: { buffer: this.meshBuf! } },
+              { binding: 6, resource: { buffer: this.maskLoopsBuf! } },
+              { binding: 7, resource: { buffer: this.maskVertsBuf! } },
+              { binding: 8, resource: { buffer: this.detailBuf! } },
+            ],
+          });
+          const fenc = this.device.createCommandEncoder();
+          const fpass = fenc.beginComputePass();
+          fpass.setPipeline(this.foldPipeline);
+          fpass.setBindGroup(0, foldBind);
+          fpass.dispatchWorkgroups(Math.ceil(fw / 8), Math.ceil(fh / 8));
+          fpass.end();
+          this.device.queue.submit([fenc.finish()]);
+          this.foldCache = { packSeq: this.packSeq, detail: this.lastDetail, docW, docH, x: wx0, y: wy0, w: fw, h: fh };
+        }
+        foldReady = true;
+      }
+    }
+
+    const bind = foldReady
+      ? this.device.createBindGroup({
+          layout: this.compositeCachedPipeline.getBindGroupLayout(0),
+          entries: [
+            { binding: 0, resource: { buffer: this.uniforms } },
+            { binding: 5, resource: this.diffuseTex.createView() },
+            { binding: 9, resource: this.foldTex!.createView() },
+            { binding: 10, resource: { buffer: this.foldWinBuf } },
+          ],
+        })
+      : this.device.createBindGroup({
+          layout: this.compositePipeline.getBindGroupLayout(0),
+          entries: [
+            { binding: 0, resource: { buffer: this.uniforms } },
+            { binding: 1, resource: { buffer: this.recordsBuf! } },
+            { binding: 2, resource: { buffer: this.pointsBuf! } },
+            { binding: 4, resource: { buffer: this.meshBuf! } },
+            { binding: 5, resource: this.diffuseTex.createView() },
+            { binding: 6, resource: { buffer: this.maskLoopsBuf! } },
+            { binding: 7, resource: { buffer: this.maskVertsBuf! } },
+            { binding: 8, resource: { buffer: this.detailBuf! } },
+          ],
+        });
     const enc = this.device.createCommandEncoder();
     const pass = enc.beginRenderPass({
       colorAttachments: [
@@ -562,7 +684,7 @@ export class PreviewRenderer {
         },
       ],
     });
-    pass.setPipeline(this.compositePipeline);
+    pass.setPipeline(foldReady ? this.compositeCachedPipeline : this.compositePipeline);
     pass.setBindGroup(0, bind);
     pass.draw(3);
     pass.end();

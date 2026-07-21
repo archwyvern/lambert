@@ -52,6 +52,26 @@ struct CompositeUniforms {
 @group(0) @binding(5) var diffuseTex: texture_2d<f32>;
 `;
 
+// Direct variant: every fold sample is a full analytic fold_at (the field library is in the module).
+const SAMPLE_DIRECT = /* wgsl */ `
+fn sample_fold(pe: vec2f) -> vec2f { return fold_at(pe, cu.shapeCount); }
+`;
+
+// Cached variant: fold samples read the doc-res fold window texture the preview renders once per
+// content change (see PreviewRenderer). pe is always a doc-pixel centre (floor(p) + 0.5) and texel
+// (i, j) holds fold_at(origin + i + 0.5, origin + j + 0.5), so this is a BIT-EXACT replay of the
+// direct variant — the clamp only guards rounding at the window rim, which the ±2px stencil margin
+// keeps out of reach. No field library in this module: the whole fold cost lives in the fold pass.
+const SAMPLE_CACHED = /* wgsl */ `
+@group(0) @binding(9) var foldTex: texture_2d<f32>;
+@group(0) @binding(10) var<uniform> foldWin: vec4f; // xy = doc coord of texel (0,0)'s pixel index
+
+fn sample_fold(pe: vec2f) -> vec2f {
+  let t = vec2i(floor(pe) - foldWin.xy);
+  return textureLoad(foldTex, clamp(t, vec2i(0), vec2i(textureDimensions(foldTex)) - 1), 0).rg;
+}
+`;
+
 const COMPOSITE_MAIN = /* wgsl */ `
 // minmod of the two one-sided slopes (see normals.ts) — a vertical wall reads as flat instead of a
 // 1px ramp, so the preview matches the exported bake. Real slopes pass through unchanged.
@@ -102,16 +122,16 @@ fn fs(@builtin(position) fragPos: vec4f) -> @location(0) vec4f {
   // preview matches the pixelated NX bake exactly — there is no crisp "vector" mode that could mislead.
   let pe = floor(p) + vec2f(0.5, 0.5);
   let e = 1.0;
-  let center = fold_at(pe, cu.shapeCount);
+  let center = sample_fold(pe);
   let mask = center.y;
   let hc = center.x;
   // smoothness-guided gradient (matches the fold normal pass + CPU deriveNormals): a stencil side
   // that crosses a discontinuity (silhouette, mask carve, plate seam) is dropped, so sloped
   // surfaces keep their true normal right up to any edge — no fringe, no seam.
-  let hxp = fold_at(pe + vec2f(e, 0.0), cu.shapeCount).x;  let hxp2 = fold_at(pe + vec2f(2.0 * e, 0.0), cu.shapeCount).x;
-  let hxm = fold_at(pe - vec2f(e, 0.0), cu.shapeCount).x;  let hxm2 = fold_at(pe - vec2f(2.0 * e, 0.0), cu.shapeCount).x;
-  let hyp = fold_at(pe + vec2f(0.0, e), cu.shapeCount).x;  let hyp2 = fold_at(pe + vec2f(0.0, 2.0 * e), cu.shapeCount).x;
-  let hym = fold_at(pe - vec2f(0.0, e), cu.shapeCount).x;  let hym2 = fold_at(pe - vec2f(0.0, 2.0 * e), cu.shapeCount).x;
+  let hxp = sample_fold(pe + vec2f(e, 0.0)).x;  let hxp2 = sample_fold(pe + vec2f(2.0 * e, 0.0)).x;
+  let hxm = sample_fold(pe - vec2f(e, 0.0)).x;  let hxm2 = sample_fold(pe - vec2f(2.0 * e, 0.0)).x;
+  let hyp = sample_fold(pe + vec2f(0.0, e)).x;  let hyp2 = sample_fold(pe + vec2f(0.0, 2.0 * e)).x;
+  let hym = sample_fold(pe - vec2f(0.0, e)).x;  let hym2 = sample_fold(pe - vec2f(0.0, 2.0 * e)).x;
   let dHdx = side_grad(hxm2, hxm, hc, hxp, hxp2) / e;
   let dHdy = side_grad(hym2, hym, hc, hyp, hyp2) / e;
   let inv = inverseSqrt(dHdx * dHdx + dHdy * dHdy + 1.0);
@@ -155,7 +175,11 @@ fn fs(@builtin(position) fragPos: vec4f) -> @location(0) vec4f {
 }
 `;
 
-/** Assemble the 2D composite module: composite IO + the shared field library + the fragment. */
-export function buildCompositeWgsl(): string {
-  return COMPOSITE_IO + buildFieldLibWgsl() + COMPOSITE_MAIN;
+/** Assemble the 2D composite module. Direct: composite IO + the shared field library + the
+ *  analytic sample_fold + the fragment. Cached: no field library at all — fold samples read the
+ *  doc-res fold window texture (bindings 9/10) the preview keeps warm across pans/zooms. */
+export function buildCompositeWgsl(cached = false): string {
+  return cached
+    ? COMPOSITE_IO + SAMPLE_CACHED + COMPOSITE_MAIN
+    : COMPOSITE_IO + buildFieldLibWgsl() + SAMPLE_DIRECT + COMPOSITE_MAIN;
 }

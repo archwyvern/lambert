@@ -45,6 +45,24 @@ describe("meshFieldEval hard-cover margin", () => {
     expect(s.height).toBe(0);
   });
 
+  test("overlapping (folded-over) triangles: the highest surface wins, independent of order", () => {
+    // two triangles over the same footprint at different heights — the fold-over shape
+    const overlap = (tris: [number, number, number][]): ObjectInstance =>
+      ({
+        controlPoints: [v2(0, 0), v2(40, 0), v2(0, 40), v2(40, 40)],
+        mesh: { z: [2, 2, 2, 20], tris, edges: [] },
+        params: { smoothness: 0 },
+      }) as unknown as ObjectInstance;
+    // tris (0,1,2) and (0,1,3) overlap in the wedge y < x, x + y < 40. At p=(15,5):
+    // (0,1,2) is flat 2; (0,1,3) interpolates toward z3=20 -> 2(w+u) + 20v = 4.25. Max wins
+    // regardless of array order (first-hit used to make this order-dependent).
+    const a = meshFieldEval(v2(15, 5), overlap([[0, 1, 2], [0, 1, 3]]));
+    const b = meshFieldEval(v2(15, 5), overlap([[0, 1, 3], [0, 1, 2]]));
+    expect(a.height).toBeCloseTo(4.25, 9);
+    expect(b.height).toBeCloseTo(4.25, 9);
+    expect(a.sd).toBeLessThan(0);
+  });
+
   test("margin is in DOC pixels: object scale shrinks the local margin", () => {
     // At scaleHint 4 the 0.707-local-px staircase point is ~2.8 DOC px out — uncovered.
     const s = meshFieldEval(v2(16.5, 16.5), diamond(), 4);

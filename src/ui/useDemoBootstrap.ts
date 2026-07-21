@@ -97,16 +97,26 @@ export function useDemoBootstrap(opts: {
         };
         if (q.has("perf")) {
           // perf harness: drive N frames in `perfmode` (render = uniform-only invalidation, no repack;
-          // edit = per-frame doc mutation incl. pack) and write the PerfProbe stats as JSON to
-          // `perfout` (URL-encoded path). markReady is DEFERRED until the file is written so the
-          // --capture runner keeps the app alive for the whole run.
+          // edit = per-frame doc mutation incl. pack; pan = wheel-zoom to `zoom=` then a middle-drag
+          // pan with one real pointermove per frame — the full React + viewport + composite path) and
+          // write the PerfProbe stats as JSON to `perfout` (URL-encoded path). markReady is DEFERRED
+          // until the file is written so the --capture runner keeps the app alive for the whole run.
           const frames = Number(q.get("perf")) || 120;
           const perfmode = q.get("perfmode") ?? "render";
           const outPath = decodeURIComponent(q.get("perfout") ?? "/tmp/lambert-perf.json");
           const probe: { frames: { packMs: number; cpuMs: number; gpuMs: number }[] } = { frames: [] };
           (globalThis as unknown as { __lambertPerf?: typeof probe }).__lambertPerf = probe;
           let i = 0;
+          const evMs: number[] = []; // synchronous dispatch cost per tick (event handlers + React flush)
+          const frameMs: number[] = []; // rAF-to-rAF delta (whole frame incl. layout/paint/present)
+          let lastTick = 0;
+          const pan = { el: null as Element | null, cx: 0, cy: 0 };
+          const pev = (type: string, x: number, y: number, down: boolean): PointerEvent =>
+            new PointerEvent(type, { bubbles: true, cancelable: true, button: down ? 1 : -1, buttons: 4, pointerId: 7, isPrimary: true, clientX: x, clientY: y });
           const tick = (): void => {
+            const now = performance.now();
+            if (lastTick > 0) frameMs.push(now - lastTick);
+            lastTick = now;
             i += 1;
             if (perfmode === "edit") {
               // move the first object a hair: the full edit path (flatten + pack + React render)
@@ -116,6 +126,13 @@ export function useDemoBootstrap(opts: {
                 const t2 = { ...first.transform, rotation: first.transform.rotation + 0.002 };
                 return { ...d, layers: [{ ...first, transform: t2 }, ...d.layers.slice(1)] };
               });
+            } else if (perfmode === "pan") {
+              // circular pan wander (~17px/frame velocity) about the canvas centre
+              const x = pan.cx + 80 * Math.sin(i * 0.22);
+              const y = pan.cy + 80 * Math.cos(i * 0.22);
+              const t0 = performance.now();
+              pan.el!.dispatchEvent(pev("pointermove", x, y, false));
+              evMs.push(performance.now() - t0);
             } else {
               // uniform-only invalidation: light direction wiggles, layers ref stays -> no repack
               const a = 0.5 + 0.001 * i;
@@ -124,6 +141,7 @@ export function useDemoBootstrap(opts: {
             if (i < frames) requestAnimationFrame(tick);
             else {
               if (perfmode === "edit") tab.store.endGesture();
+              if (perfmode === "pan") pan.el!.dispatchEvent(pev("pointerup", pan.cx, pan.cy, true));
               setTimeout(() => {
                 const done = probe.frames.filter((f) => f.gpuMs >= 0).slice(5); // drop warmup
                 const pick = (k: "packMs" | "cpuMs" | "gpuMs"): number[] => done.map((f) => f[k]).sort((x, y) => x - y);
@@ -132,14 +150,18 @@ export function useDemoBootstrap(opts: {
                   p50: a[Math.floor(a.length / 2)] ?? 0,
                   p95: a[Math.floor(a.length * 0.95)] ?? 0,
                 });
+                const sorted = (a: number[]): number[] => a.slice(5).sort((x, y) => x - y);
                 const report = {
                   mode: perfmode,
                   size: w,
+                  zoom: Number(q.get("zoom")) || 1,
                   objects: doc.layers.length,
                   frames: done.length,
                   pack: stat(pick("packMs")),
                   cpu: stat(pick("cpuMs")),
                   gpu: stat(pick("gpuMs")),
+                  ...(evMs.length > 0 ? { ev: stat(sorted(evMs)) } : {}),
+                  ...(frameMs.length > 0 ? { frame: stat(sorted(frameMs)) } : {}),
                 };
                 void import("./host").then(({ getHost }) =>
                   getHost()
@@ -149,7 +171,30 @@ export function useDemoBootstrap(opts: {
               }, 800);
             }
           };
-          setTimeout(() => requestAnimationFrame(tick), 600); // let the first real frame settle
+          const start = (): void => {
+            if (perfmode === "pan") {
+              // zoom about the canvas centre via real wheel events (zoomAt steps 1.2x per notch),
+              // then arm the middle-button pan drag the ticks feed
+              const cv = document.querySelector("canvas");
+              if (!cv) {
+                console.error("perf pan: no canvas");
+                return;
+              }
+              const r = cv.getBoundingClientRect();
+              pan.el = cv;
+              pan.cx = r.left + r.width / 2;
+              pan.cy = r.top + r.height / 2;
+              const notches = Math.max(0, Math.round(Math.log(Number(q.get("zoom")) || 1) / Math.log(1.2)));
+              for (let n = 0; n < notches; n++) {
+                cv.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, clientX: pan.cx, clientY: pan.cy, deltaY: -100 }));
+              }
+              cv.dispatchEvent(pev("pointerdown", pan.cx, pan.cy, true));
+              setTimeout(() => requestAnimationFrame(tick), 300); // settle the zoomed first frame
+            } else {
+              requestAnimationFrame(tick);
+            }
+          };
+          setTimeout(start, 600); // let the first real frame settle
         } else if (q.has("drag")) {
           // capture aid: synthesize a left-button pointer drag `drag=x0,y0,x1,y1` (window px) on the
           // element under the start point — drives marquee/move flows for automated visual checks

@@ -1,11 +1,14 @@
 import { Vector2 } from "@carapace/primitives";
 import { clamp } from "./vec";
 
-/** Unsigned distance from p to segment ab. */
+/** Unsigned distance from p to segment ab (a == b degenerates to the point distance, not NaN —
+ *  the plateau face walk hits this on a pyramid's repeated-apex triangle). */
 export function sdSegment(p: Vector2, a: Vector2, b: Vector2): number {
   const pa = p.sub(a);
   const ba = b.sub(a);
-  const h = clamp(pa.dot(ba) / ba.lengthSquared(), 0, 1);
+  const l2 = ba.lengthSquared();
+  if (l2 < 1e-12) return pa.length();
+  const h = clamp(pa.dot(ba) / l2, 0, 1);
   return pa.sub(ba.scale(h)).length();
 }
 

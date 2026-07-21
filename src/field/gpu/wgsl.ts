@@ -159,6 +159,65 @@ fn soft_ring_dist(p: vec2f, start: u32, count: u32) -> f32 {
   return pow(soft_ring_inv(p, start, count), -0.33333333);
 }
 
+// The SHARP soft distance kernel: ∫ ds/d⁸ per segment (mirrors segmentInv8 in field/softDist.ts
+// — see the derivation + the far-span cancellation story there). Localized hard around the
+// nearest boundary run, so a ratio of two rings' distances stays linear across a band; Mesa's
+// slope uses it.
+fn soft_seg_inv8(p: vec2f, a: vec2f, b: vec2f) -> f32 {
+  let e = b - a;
+  let len = length(e);
+  if (len < 1e-6) { return 0.0; }
+  let w = p - a;
+  let proj = dot(w, e) / len;
+  let h2 = max(dot(w, w) - proj * proj, 0.0) + 0.25;
+  let h = sqrt(h2);
+  let u0 = -proj;
+  let u1 = len - proj;
+  if (u0 * u1 > 0.0 && min(abs(u0), abs(u1)) >= 3.0 * h) {
+    // far span one side: termwise series (the F-difference below cancels catastrophically here)
+    let aa = min(abs(u0), abs(u1));
+    let bb = max(abs(u0), abs(u1));
+    let ia = 1.0 / aa;
+    let ib = 1.0 / bb;
+    let ia2 = ia * ia;
+    let ib2 = ib * ib;
+    var pa = ia2 * ia2 * ia2 * ia;
+    var pb = ib2 * ib2 * ib2 * ib;
+    var hk = 1.0;
+    var sum = 0.0;
+    let coef = array<f32, 7>(1.0, -4.0, 10.0, -20.0, 35.0, -56.0, 84.0);
+    for (var k = 0u; k < 7u; k = k + 1u) {
+      sum = sum + (coef[k] * hk * (pa - pb)) / (7.0 + 2.0 * f32(k));
+      pa = pa * ia2;
+      pb = pb * ib2;
+      hk = hk * h2;
+    }
+    return sum;
+  }
+  var f = vec2f(0.0);
+  let us = vec2f(u1, u0);
+  for (var i = 0u; i < 2u; i = i + 1u) {
+    let u = us[i];
+    let s1 = u * u + h2;
+    let j1 = atan(u / h) / h;
+    let j2 = u / (2.0 * h2 * s1) + j1 / (2.0 * h2);
+    let j3 = u / (4.0 * h2 * s1 * s1) + (3.0 * j2) / (4.0 * h2);
+    f[i] = u / (6.0 * h2 * s1 * s1 * s1) + (5.0 * j3) / (6.0 * h2);
+  }
+  return f.x - f.y;
+}
+
+// The sharp C-inf soft distance to one ring: (∮ ds/d⁸)^(-1/7).
+fn soft_ring_dist8(p: vec2f, start: u32, count: u32) -> f32 {
+  var inv = 0.0;
+  for (var j = 0u; j < count; j = j + 1u) {
+    let a = points[start + j];
+    let b = points[start + select(j + 1u, 0u, j + 1u >= count)];
+    inv = inv + soft_seg_inv8(p, a, b);
+  }
+  return pow(inv, -0.14285714);
+}
+
 // Bilinear detail-band sample at a world point (mirrors sampleDetail in field/detail.ts).
 fn detail_sample(pw: vec2f) -> vec3f {
   let hdr = detail[0];
@@ -216,7 +275,9 @@ fn adjust_apply(kind: u32, H: f32, a: vec2f, b: vec2f, pl: vec2f, pw: vec2f, bas
 fn sd_segment(p: vec2f, a: vec2f, b: vec2f) -> f32 {
   let pa = p - a;
   let ba = b - a;
-  let h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+  let l2 = dot(ba, ba);
+  if (l2 < 1e-12) { return length(pa); } // a == b: point distance, not NaN (pyramid apex tri)
+  let h = clamp(dot(pa, ba) / l2, 0.0, 1.0);
   return length(pa - ba * h);
 }
 
@@ -370,6 +431,9 @@ fn shape_meshfield(p: vec2f, base: u32) -> vec2f {
   let sm = rec(base, SLOT_PARAM0);
   let triStart = u32(rec(base, SLOT_TRI_START));
   let triCount = u32(rec(base, SLOT_TRI_COUNT));
+  // triangles may overlap (folded-over sheet): the highest containing surface wins — meshFieldEval twin
+  var best = -1e30;
+  var anyHit = false;
   for (var t = 0u; t < triCount; t = t + 1u) {
     let o = triStart + t * 6u;
     let a = meshTris[o];
@@ -382,14 +446,18 @@ fn shape_meshfield(p: vec2f, base: u32) -> vec2f {
     if (uu >= -1e-4 && vv >= -1e-4 && uu + vv <= 1.0001) {
       let ww = 1.0 - uu - vv;
       let hL = ww * a.z + uu * b.z + vv * c.z;
-      if (sm <= 0.0) { return vec2f(hL, -1.0); }
-      let pa = a.z + a.w * (p.x - a.x) + meshTris[o + 1u].x * (p.y - a.y);
-      let pb = b.z + b.w * (p.x - b.x) + meshTris[o + 3u].x * (p.y - b.y);
-      let pc = c.z + c.w * (p.x - c.x) + meshTris[o + 5u].x * (p.y - c.y);
-      let hP = ww * pa + uu * pb + vv * pc;
-      return vec2f(hL + sm * (hP - hL), -1.0);
+      var h = hL;
+      if (sm > 0.0) {
+        let pa = a.z + a.w * (p.x - a.x) + meshTris[o + 1u].x * (p.y - a.y);
+        let pb = b.z + b.w * (p.x - b.x) + meshTris[o + 3u].x * (p.y - b.y);
+        let pc = c.z + c.w * (p.x - c.x) + meshTris[o + 5u].x * (p.y - c.y);
+        h = hL + sm * (ww * pa + uu * pb + vv * pc - hL);
+      }
+      best = max(best, h);
+      anyHit = true;
     }
   }
+  if (anyHit) { return vec2f(best, -1.0); }
   // Nearest point on any edge (distance + edge param + endpoint offsets) — meshFieldEval twin.
   var bestD = 1e9;
   var bestT = 0.0;
