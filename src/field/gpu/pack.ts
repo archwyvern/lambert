@@ -2,7 +2,8 @@ import { bakeMaskLoop, resolveHandles, resolveHandlesClosed } from "../bezier";
 import { COMBINE_OP_INDEX, objectCombineOp } from "../combine";
 import type { ResolvedObject } from "../flatten";
 import { meshGradients } from "../meshOps";
-import { getObjectType } from "../registry";
+import { getObjectType, ObjectTypeId } from "../registry";
+import { mesaRingsCross, mesaSeamRuns } from "../objects/plateauVector";
 import { affineApply, affineInvert } from "../affine";
 import { v2 } from "../vec";
 import { localBounds } from "../objectBounds";
@@ -42,8 +43,11 @@ export function packObjects(resolved: ResolvedObject[], defaults?: AdjustmentDef
   // adjustment — (kind, strength) + (p0, p1) + (p2, p3)
   const packableAdjustments = (s: { adjustments?: Adjustment[] }): Adjustment[] =>
     (s.adjustments ?? []).filter((a) => a.visible !== false && adjustmentKindIndex(a.kind) >= 0);
+  // Mesa seam runs append K extra (baseStart, topStart) index pairs to the points buffer.
+  const seamCount = (s: ResolvedObject["object"]): number =>
+    s.typeId === ObjectTypeId.PlateauVector ? (mesaSeamRuns(s)?.baseStarts.length ?? 0) : 0;
   const totalPoints = visible.reduce(
-    (n, { object: s }) => n + (analytic(s) ? s.bezier!.length * 4 : s.controlPoints.length) + packableAdjustments(s).length * 3,
+    (n, { object: s }) => n + (analytic(s) ? s.bezier!.length * 4 : s.controlPoints.length) + packableAdjustments(s).length * 3 + seamCount(s),
     0,
   );
   const totalTris = visible.reduce((n, { object: s }) => n + (s.mesh?.tris.length ?? 0), 0);
@@ -139,6 +143,12 @@ export function packObjects(resolved: ResolvedObject[], defaults?: AdjustmentDef
         records[base + holeBase + h - 1] = s.contourCounts[h]!;
       }
     }
+    // Mesa: the crossed-rims flag (skirt gate) in the record's LAST param slot — PARAM1+ carry the
+    // generic contour counts written above. Same computation as the CPU eval's memoized check.
+    if (s.typeId === ObjectTypeId.PlateauVector) {
+      const nB = s.ringSplit ?? (s.controlPoints.length >> 1);
+      records[base + PARAMS_OFFSET + 7] = mesaRingsCross(s.controlPoints, nB) ? 1 : 0;
+    }
     if (analytic(s)) {
       // 4 vec2 per anchor: point, in-handle (offset), out-handle (offset), (scale, pad) — the WGSL
       // reads them as p/hIn/hOut + the per-anchor cross-section multiplier. Resolve smooth (Catmull-Rom)
@@ -159,6 +169,20 @@ export function packObjects(resolved: ResolvedObject[], defaults?: AdjustmentDef
         points[cpStart * 2] = cp.x;
         points[cpStart * 2 + 1] = cp.y;
         cpStart++;
+      }
+    }
+    // Mesa corner-to-corner seam runs: K (baseStart, topStart) baked-index pairs appended after
+    // the rings; PARAM2 = K, PARAM3 = their absolute points-buffer offset (shape_mesa reads both).
+    if (s.typeId === ObjectTypeId.PlateauVector) {
+      const seams = mesaSeamRuns(s);
+      if (seams) {
+        records[base + PARAMS_OFFSET + 2] = seams.baseStarts.length;
+        records[base + PARAMS_OFFSET + 3] = cpStart;
+        for (let k = 0; k < seams.baseStarts.length; k++) {
+          points[cpStart * 2] = seams.baseStarts[k]!;
+          points[cpStart * 2 + 1] = seams.topStarts[k]!;
+          cpStart++;
+        }
       }
     }
     if (s.mesh) {

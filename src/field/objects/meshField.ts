@@ -16,10 +16,13 @@ export const HARD_COVER_PX = 0.75;
 /**
  * Shared eval for every triangulated height-field object (Mesh). Height
  * at p is the barycentric interpolation across the triangle under it, blended toward Phong
- * tessellation by the `smoothness` param (0..1); outside every triangle but within
- * HARD_COVER_PX (doc px — `scaleHint` converts) of the nearest edge, the pixel is still
- * covered with that edge point's height; beyond that, sd = distance to the nearest mesh
- * edge (the outline). Identical math on CPU and in `shape_meshfield` (gpu/wgsl.ts).
+ * tessellation by the `smoothness` param (0..1). Triangles may OVERLAP (a vertex dragged across
+ * an opposite edge folds the sheet over — the angled-view reading, like Plateau's crossed rims):
+ * the HIGHEST containing triangle's surface wins, so the fold tucks under the top face instead
+ * of z-fighting on array order. Outside every triangle but within HARD_COVER_PX (doc px —
+ * `scaleHint` converts) of the nearest edge, the pixel is still covered with that edge point's
+ * height; beyond that, sd = distance to the nearest mesh edge (the outline). Identical math on
+ * CPU and in `shape_meshfield` (gpu/wgsl.ts).
  */
 export function meshFieldEval(p: Vector2, object: ObjectInstance, scaleHint = 1): FieldSample {
   const m = object.mesh;
@@ -30,16 +33,17 @@ export function meshFieldEval(p: Vector2, object: ObjectInstance, scaleHint = 1)
     const g = m.grad![i]!;
     return m.z[i]! + g[0] * (q.x - cps[i]!.x) + g[1] * (q.y - cps[i]!.y);
   };
+  let best = -Infinity;
   for (const [a, b, c] of m.tris) {
     const bary = triBary(p, cps[a]!, cps[b]!, cps[c]!);
     if (bary === null) continue;
     const { u, v } = bary;
     const w = 1 - u - v;
     const hL = w * m.z[a]! + u * m.z[b]! + v * m.z[c]!;
-    if (sm <= 0 || !m.grad) return { height: hL, sd: -1 };
-    const hP = w * plane(a, p) + u * plane(b, p) + v * plane(c, p);
-    return { height: hL + sm * (hP - hL), sd: -1 };
+    const h = sm <= 0 || !m.grad ? hL : hL + sm * (w * plane(a, p) + u * plane(b, p) + v * plane(c, p) - hL);
+    best = Math.max(best, h);
   }
+  if (best > -Infinity) return { height: best, sd: -1 };
   // Outside every triangle: nearest point on any edge (distance + edge param + endpoints).
   let bestD = Infinity;
   let bestI = 0;

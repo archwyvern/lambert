@@ -211,6 +211,27 @@ export function bakeMaskLoop(anchors: BezierAnchor[], perSeg = 12): Vector2[] {
   return out;
 }
 
+/** Per-anchor bake bookkeeping for one closed loop: each anchor's start index in the bakeMaskLoop
+ *  output, whether it is a CRISP CORNER (both resolved tangents zero — a real tangent break), and
+ *  the total baked count. MUST stay in lockstep with bakeMaskLoop's emission rule above (straight
+ *  segment -> 1 vertex, curved -> perSeg). Mesa's corner-to-corner seam runs are derived from it. */
+export function loopBakeInfo(anchors: BezierAnchor[], perSeg = 12): { starts: number[]; corner: boolean[]; total: number } {
+  if (anchors.length < 3) {
+    return { starts: anchors.map((_, i) => i), corner: anchors.map(() => false), total: anchors.length };
+  }
+  const r = resolveHandlesClosed(anchors);
+  const zero = (h: Vector2): boolean => Math.abs(h.x) < 1e-9 && Math.abs(h.y) < 1e-9;
+  const starts: number[] = [];
+  const corner: boolean[] = [];
+  let idx = 0;
+  for (let i = 0; i < r.length; i++) {
+    starts.push(idx);
+    corner.push(zero(r[i]!.hIn) && zero(r[i]!.hOut));
+    idx += zero(r[i]!.hOut) && zero(r[(i + 1) % r.length]!.hIn) ? 1 : perSeg;
+  }
+  return { starts, corner, total: idx };
+}
+
 /** Split a flat anchor list into subpath loops at the given start indices (absent/single = one loop). */
 export function splitSubpaths(anchors: BezierAnchor[], subpathStarts?: number[]): BezierAnchor[][] {
   if (!subpathStarts || subpathStarts.length <= 1) return [anchors];
