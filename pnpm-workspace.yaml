@@ -1,0 +1,4 @@
+# Settings only — lambert is a single-package project, not a monorepo.
+# Supply-chain guard (Shai-Hulud waves): refuse to resolve versions published less than
+# 3 days ago. Only affects relocking; frozen-lockfile installs are untouched.
+minimumReleaseAge: 4320
